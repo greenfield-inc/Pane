@@ -604,10 +604,13 @@ turning Profiles off never lets an update overwrite a plugin edited while it
 was on. An install that never finished (its lock, a
 plugin Pane was installing then, recorded in `pane-installing.json`, or one with
 no receipt) is cleared before the next one, and a failed install is logged and
-never blocks startup. The sidebar's **Profiles** tab lists the top-level
-profiles (Agent Farm's `profiles list --json` marks a profile another one runs as
-a subagent `listed: false`; an Agent Farm without `--json`, or a missing field,
-lists it), pinned ones first. A profile opens on its cover page,
+never blocks startup. With Profiles on (Settings › Advanced › Experimental), the
+sidebar's **Profiles** tab lists the top-level profiles, pinned ones first: a
+profile Agent Farm's `profiles list` marks `| unlisted` (one another profile runs
+as a subagent) shows inside that profile instead, and an Agent Farm that doesn't
+say lists every profile. For now it shows only greenfield's orchestrator,
+business and seo, the same temporary short list as Create New's To. With
+Profiles off there is no tab and its channels refuse. A profile opens on its cover page,
 `covers/<profile>.html` or `.md` in the plugin when there is one (HTML is shown in
 a sandboxed frame with no scripts and no network), otherwise one Pane makes from
 its title, description, identity, subagents, skills and references. Beside it, a

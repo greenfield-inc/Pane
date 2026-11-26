@@ -52,30 +52,26 @@ function fixture() {
     ]),
     settings('orchestrator', 'orchestrator', true),
   ], { cover: 'covers/orchestrator.html' });
+  const business = profile('greenfield', 'business', 'claude', 'Answers BloomText support tickets and escalates refunds to you.', [
+    file('business/identity', 'agents/business.md', 'identity'),
+    folder('business/skills', 'Skills', [skill('business', 'triage')]),
+    folder('business/references', 'References', [file('business/references/tone.md', 'references/business/tone.md')]),
+    settings('business', 'business'),
+  ], { title: 'Support desk' });
   const greenfield = plugin('greenfield', '0.0.46', true, [
     orchestrator,
+    business,
+    profile('greenfield', 'seo', 'claude', 'Draft blog posts in my voice.', []),
     profile('greenfield', 'planner', 'claude', 'Turn a request into a plan.', [], { listed: false }),
     profile('greenfield', 'implementer', 'claude', 'Build an approved plan.', [], { listed: false }),
     profile('greenfield', 'reviewer', 'codex', 'Review a pull request.', [], { listed: false }),
-  ], ['plugin.yaml', 'pane.yaml', 'covers/orchestrator.html', 'profiles/orchestrator.yaml', 'profiles/planner.yaml', 'profiles/implementer.yaml', 'profiles/reviewer.yaml',
-    'agents/orchestrator.md', 'agents/planner.md', 'agents/implementer.md', 'agents/reviewer.md', 'agents/designer.md', 'agents/verifier.md',
-    'instructions/standing-rules.md', 'skills/plan/SKILL.md', 'skills/review/SKILL.md', 'skills/ui-mockup/SKILL.md']);
-  const dcouple = plugin('dcouple', '0.1.27', true, [
-    profile('dcouple', 'business', 'claude', 'Run BloomText business tasks.', []),
-    profile('dcouple', 'implementer', 'codex', 'Take a ticket from start to a reviewed pull request.', []),
-  ], ['plugin.yaml', 'profiles/business.yaml', 'profiles/implementer.yaml', 'agents/business.md', 'agents/implementer.md']);
-  const bloomtext = plugin('bloomtext', '0.1.0', false, [
-    profile('bloomtext', 'support', 'claude', 'Answers BloomText support tickets and escalates refunds to you.', [
-      file('support/identity', 'agents/support.md', 'identity'),
-      folder('support/skills', 'Skills', [skill('support', 'triage')]),
-      folder('support/references', 'References', [file('support/references/tone.md', 'references/support/tone.md')]),
-      settings('support', 'support'),
-    ], { title: 'Support desk' }),
-    profile('bloomtext', 'ops', 'codex', 'Keep BloomText servers healthy.', []),
-  ], ['plugin.yaml', 'profiles/support.yaml', 'profiles/ops.yaml', 'agents/support.md', 'agents/ops.md', 'skills/triage/SKILL.md', 'references/support/tone.md']);
-  const writer = plugin('writer', '0.0.3', false, [profile('writer', 'writer', 'claude', 'Draft blog posts in my voice.', [])], ['plugin.yaml', 'profiles/writer.yaml', 'agents/writer.md']);
+  ], ['plugin.yaml', 'pane.yaml', 'covers/orchestrator.html', 'profiles/orchestrator.yaml', 'profiles/business.yaml', 'profiles/seo.yaml', 'profiles/planner.yaml', 'profiles/implementer.yaml', 'profiles/reviewer.yaml',
+    'agents/orchestrator.md', 'agents/business.md', 'agents/seo.md', 'agents/planner.md', 'agents/implementer.md', 'agents/reviewer.md', 'agents/designer.md', 'agents/verifier.md',
+    'instructions/standing-rules.md', 'skills/plan/SKILL.md', 'skills/review/SKILL.md', 'skills/ui-mockup/SKILL.md', 'skills/triage/SKILL.md', 'references/business/tone.md']);
+  // Installed but not on the TEMPORARY short list: not shown in the list (T-83).
+  const dcouple = plugin('dcouple', '0.1.27', true, [profile('dcouple', 'business', 'claude', 'Run BloomText business tasks.', [])], ['plugin.yaml', 'profiles/business.yaml', 'agents/business.md']);
   const files: Record<string, string> = {};
-  for (const entry of [greenfield, dcouple, bloomtext, writer]) {
+  for (const entry of [greenfield, dcouple]) {
     for (const path of entry.files) files[`${entry.name}/${path}`] = `# ${path}\n`;
     files[`${entry.name}/plugin.yaml`] = `name: ${entry.name}\nversion: ${entry.version}\ncli_major: 0\n`;
     for (const item of entry.profiles) {
@@ -87,9 +83,10 @@ function fixture() {
   files['greenfield/agents/orchestrator.md'] = `${identity('Coordinate planners, implementers and reviewers for one workstream.', '\nskills: [plan, review]')}# Orchestrator\n\nYou run one workstream. Plan before building, and send every pull request to the reviewer.\n`;
   files['greenfield/agents/designer.md'] = `${identity('Draw three UI options on the real product.', '\nskills: [ui-mockup]')}# Designer\n\nCapture the real screen, then draw three options.\n`;
   files['greenfield/covers/orchestrator.html'] = '<html><head><title>Orchestrator</title></head><body><h1>Greenfield orchestrator</h1><p>Runs one workstream from idea to merged pull request.</p><h2>How it works</h2><p>1 Plan with you · 2 Build in a Pane · 3 Review every PR · 4 Ask before merging</p><script>document.body.dataset.ran = "yes"</script></body></html>';
+  // TEMPORARY (T-83): the title lives in pane.yaml for the test build.
   files['greenfield/pane.yaml'] = 'profiles:\n  orchestrator:\n    title: Greenfield orchestrator\n';
-  files['bloomtext/agents/support.md'] = `${identity('Answer BloomText support tickets.', '\nskills: [triage]\nreferences: support')}# Support\n\nAnswer new tickets in the help desk. Escalate refunds to the person through an approval.\n`;
-  const overview: ProfilesOverview = { machine: 'studio-mac', plugins: [greenfield, dcouple, bloomtext, writer] };
+  files['greenfield/agents/business.md'] = `${identity('Answer BloomText support tickets.', '\nskills: [triage]\nreferences: business')}# Support\n\nAnswer new tickets in the help desk. Escalate refunds to the person through an approval.\n`;
+  const overview: ProfilesOverview = { machine: 'studio-mac', plugins: [greenfield, dcouple] };
   return { overview, files };
 }
 
@@ -97,24 +94,28 @@ function fixture() {
 const PALETTE_PROFILES: AgentFarmProfileEntry[] = [
   { ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false },
   { ref: 'greenfield/planner', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false, listed: false },
-  { ref: 'dcouple/business', plugin: 'dcouple', version: '0.1.27', harness: 'claude', hidden: false },
-  { ref: 'bloomtext/support', plugin: 'bloomtext', version: '0.1.0', harness: 'claude', hidden: false },
+  { ref: 'greenfield/business', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false },
+  { ref: 'greenfield/seo', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false },
 ];
 
-async function openProfilesTab(page: Page, options: { theme?: string; saveError?: string; pins?: string[] } = {}): Promise<void> {
+async function installProfiles(page: Page, options: { theme?: string; saveError?: string; pins?: string[]; on?: boolean } = {}): Promise<void> {
   await page.setViewportSize({ width: 1440, height: 900 });
   const data = fixture();
   await installSessionsFixture(page, [
     { ...sessionFixture('s1', 'Session profiles plan', '', '', '2026-11-25T08:00:00.000Z'), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h1' } },
     { ...sessionFixture('s2', 'Weekend blog post', '', '', '2026-11-25T08:01:00.000Z'), agentProfile: { ref: 'pane/claude', hash: 'h' } },
-    { ...sessionFixture('s3', 'Sprint tracker upkeep', '', '', '2026-11-25T08:02:00.000Z'), agentProfile: { ref: 'dcouple/business', hash: 'h2' } },
+    { ...sessionFixture('s3', 'Sprint tracker upkeep', '', '', '2026-11-25T08:02:00.000Z'), agentProfile: { ref: 'greenfield/business', hash: 'h2' } },
   ], [], {
-    initialConfig: { theme: options.theme ?? 'light', chatTabsEnabled: true, pinnedProfiles: options.pins ?? [] },
+    initialConfig: { theme: options.theme ?? 'light', chatTabsEnabled: true, pinnedProfiles: options.pins ?? [], sessionProfilesEnabled: options.on ?? true },
     profileEditor: { ...data, saveError: options.saveError },
     agentFarmProfiles: { profiles: PALETTE_PROFILES },
   });
   await gotoApp(page);
   await dismissStartupDialogs(page);
+}
+
+async function openProfilesTab(page: Page, options: { theme?: string; saveError?: string; pins?: string[] } = {}): Promise<void> {
+  await installProfiles(page, options);
   await page.getByTestId('profiles-nav').click();
   await expect(page.getByTestId('profiles-view')).toBeVisible();
 }
@@ -134,20 +135,23 @@ async function shot(page: Page, name: string): Promise<void> {
 }
 
 test('the list shows only top-level profiles, pinned first, and pins from a row', async ({ page }) => {
-  await openProfilesTab(page, { pins: ['bloomtext/support'] });
+  await openProfilesTab(page, { pins: ['greenfield/business'] });
   const list = page.getByTestId('profiles-list');
   await expect(page.getByTestId('profiles-pinned-heading')).toBeVisible();
-  await expect(list.getByTestId('profile-row-bloomtext-support')).toContainText('Support desk');
-  // The orchestrator's subagent profiles live inside it, not in the list.
+  await expect(list.getByTestId('profile-row-greenfield-business')).toContainText('Support desk');
+  // The orchestrator's subagent profiles live inside it, not in the list; TEMPORARY (T-83): neither
+  // does a profile off the short list (dcouple/business).
   await expect(list.getByTestId('profile-row-greenfield-planner')).toHaveCount(0);
-  await expect(page.getByTestId('profiles-all-heading')).toContainText('· 5 · subagents appear inside the profile that uses them');
+  await expect(list.getByTestId('profile-row-dcouple-business')).toHaveCount(0);
+  await expect(list.locator('[data-profiles-item]')).toHaveCount(3);
+  await expect(page.getByTestId('profiles-all-heading')).toContainText('· 2 · subagents appear inside the profile that uses them');
   await expect(list.getByTestId('profile-row-greenfield-orchestrator')).toContainText('5 subagents · 1 Session · Claude');
   const rows = list.locator('[data-profiles-item]');
-  await expect(rows.first()).toHaveAttribute('data-testid', 'profile-row-bloomtext-support');
+  await expect(rows.first()).toHaveAttribute('data-testid', 'profile-row-greenfield-business');
   await page.getByTestId('profile-pin-greenfield/orchestrator').click();
   await expect(page.getByTestId('profile-pin-greenfield/orchestrator')).toHaveAttribute('aria-pressed', 'true');
   await expect(rows.nth(1)).toHaveAttribute('data-testid', 'profile-row-greenfield-orchestrator');
-  await expect(page.getByTestId('profiles-footer')).toContainText('6 profiles · 2 Sessions use one');
+  await expect(page.getByTestId('profiles-footer')).toContainText('3 profiles · 2 Sessions use one');
   await expect(page.getByTestId('profiles-sync')).toBeDisabled();
   await expectNoAxeViolations(page, { include: '[data-testid="profiles-view"]' });
   // Keyboard: the first profile has focus; ↓ moves, Enter opens on the cover page.
@@ -159,12 +163,14 @@ test('the list shows only top-level profiles, pinned first, and pins from a row'
   await expect(page.getByTestId('profiles-tree-cover')).toHaveAttribute('aria-selected', 'true');
 });
 
-test('pins lead New Session, and a profile Agent Farm doesn\'t list is left out', async ({ page }) => {
-  await openProfilesTab(page, { pins: ['bloomtext/support'] });
+test('pins lead Create New\'s To, and a profile Agent Farm doesn\'t list is left out', async ({ page }) => {
+  await openProfilesTab(page, { pins: ['greenfield/business'] });
   await page.getByTestId('new-orchestration-session').click();
-  const options = page.getByRole('dialog', { name: 'New Session', exact: true }).getByRole('listbox', { name: 'Agents and profiles' }).getByRole('option');
-  await expect(options.first()).toContainText('Bloomtext support');
-  await expect(page.getByTestId('session-choice-profile:greenfield/planner')).toHaveCount(0);
+  const dialog = page.getByTestId('create-new-dialog');
+  await dialog.getByRole('combobox', { name: 'To', exact: true }).focus();
+  await page.keyboard.type('green');
+  const options = dialog.getByRole('listbox', { name: 'Agents and profiles' }).getByRole('option');
+  await expect(options).toHaveText([/Greenfield business/, /Greenfield orchestrator/, /Greenfield seo/]);
 });
 
 test('a profile opens on its cover page: its own HTML in a sandbox, or one Pane makes', async ({ page }) => {
@@ -179,12 +185,12 @@ test('a profile opens on its cover page: its own HTML in a sandbox, or one Pane 
   // SAFETY: the locator is the preview's <iframe>; its sandbox has no same-origin, so contentDocument stays out of reach.
   expect(await frame.evaluate(element => (element as HTMLIFrameElement).contentDocument?.body?.dataset.ran ?? null).catch(() => null)).toBeNull();
   await page.getByTestId('profiles-back').click();
-  await page.getByTestId('profile-row-bloomtext-support').click();
+  await page.getByTestId('profile-row-greenfield-business').click();
   const cover = page.getByTestId('profiles-generated-cover');
   await expect(cover).toContainText('Support desk');
   await expect(cover).toContainText('Answers BloomText support tickets and escalates refunds to you.');
   await expect(cover).toContainText('Escalate refunds to the person through an approval.');
-  await expect(cover).toContainText('Add covers/support.html to replace it.');
+  await expect(cover).toContainText('Add covers/business.html to replace it.');
   await expect(cover.getByText('triage', { exact: true })).toBeVisible();
   await expect(cover.getByText('tone.md', { exact: true })).toBeVisible();
   // The page without a sandboxed frame (axe can't enter one) meets WCAG AA.
@@ -248,7 +254,7 @@ test('files preview first: Markdown under a metadata header, YAML as key/value; 
   await editor.pressSequentially('\nmarker: KUMQUAT');
   await expect(page.getByTestId('profiles-editor-status')).toHaveText('Unsaved changes');
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+s' : 'Control+s');
-  await expect(page.getByTestId('profiles-notice')).toContainText('Saved greenfield/profiles/orchestrator.yaml. 1 Session can reload it.');
+  await expect(page.getByTestId('profiles-notice')).toContainText('Saved greenfield/profiles/orchestrator.yaml. 2 Sessions can reload it.');
   await expect(editor).toHaveCount(0);
   await expect(page.getByTestId('profiles-restore')).toBeVisible();
   // Cancel with edits asks first; Esc in the editor does the same.
@@ -267,7 +273,7 @@ test('files preview first: Markdown under a metadata header, YAML as key/value; 
 
 test('Edit details writes the description into the identity, and the title (for now) beside it', async ({ page }) => {
   await openProfilesTab(page);
-  await page.getByTestId('profile-row-writer-writer').click();
+  await page.getByTestId('profile-row-greenfield-seo').click();
   await page.getByTestId('profiles-edit-details').click();
   const dialog = page.getByTestId('profiles-details-dialog');
   await dialog.getByLabel('Title').fill('Blog writer');
@@ -276,28 +282,28 @@ test('Edit details writes the description into the identity, and the title (for 
   await expect(page.getByTestId('profiles-title')).toHaveText('Blog writer');
   await expect(page.getByTestId('profiles-subtitle')).toContainText('Drafts posts in my voice, then cuts a third.');
   await page.getByTestId('profiles-back').click();
-  await expect(page.getByTestId('profile-row-writer-writer')).toContainText('Blog writer');
+  await expect(page.getByTestId('profile-row-greenfield-seo')).toContainText('Blog writer');
   // The description is written in the agent's own identity file.
-  await page.getByTestId('profile-row-writer-writer').click();
-  await page.getByTestId('profiles-file-agents/writer.md').click();
+  await page.getByTestId('profile-row-greenfield-seo').click();
+  await page.getByTestId('profiles-file-agents/seo.md').click();
   await expect(page.getByTestId('profiles-front-matter')).toContainText('Drafts posts in my voice, then cuts a third.');
 });
 
 test('a save Agent Farm refuses shows why, and keeps the edit', async ({ page }) => {
-  await openProfilesTab(page, { saveError: 'writer wasn\'t saved: Agent Farm says Missing skill writer/nope. Fix the file, then save again. Nothing was changed.' });
-  await page.getByTestId('profile-row-writer-writer').click();
-  await page.getByTestId('profiles-file-agents/writer.md').click();
+  await openProfilesTab(page, { saveError: 'greenfield wasn\'t saved: Agent Farm says Missing skill greenfield/nope. Fix the file, then save again. Nothing was changed.' });
+  await page.getByTestId('profile-row-greenfield-seo').click();
+  await page.getByTestId('profiles-file-agents/seo.md').click();
   await page.getByTestId('profiles-edit').click();
   await page.getByTestId('profiles-editor').fill('---\nskills: [nope]\n---\n');
   await page.getByTestId('profiles-save').click();
-  await expect(page.getByTestId('profiles-save-error')).toContainText('Missing skill writer/nope');
+  await expect(page.getByTestId('profiles-save-error')).toContainText('Missing skill greenfield/nope');
   await expect(page.getByTestId('profiles-editor-status')).toHaveText('Unsaved changes');
 });
 
 test('New subagent, skill and reference add a file to the tree and open it; New profile opens on its cover', async ({ page }) => {
   await openProfilesTab(page);
-  await page.getByTestId('profile-row-writer-writer').click();
-  for (const [kind, name, path] of [['subagent', 'researcher', 'agents/researcher.md'], ['skill', 'weekly-recap', 'skills/weekly-recap/SKILL.md'], ['reference', 'style-guide', 'references/writer/style-guide.md']]) {
+  await page.getByTestId('profile-row-greenfield-seo').click();
+  for (const [kind, name, path] of [['subagent', 'researcher', 'agents/researcher.md'], ['skill', 'weekly-recap', 'skills/weekly-recap/SKILL.md'], ['reference', 'style-guide', 'references/seo/style-guide.md']]) {
     await page.getByTestId('profiles-add').click();
     await page.getByRole('menuitem', { name: new RegExp(`New ${kind}`) }).click();
     await page.getByTestId('profiles-new-file-dialog').getByLabel('Name').fill(name);
@@ -315,7 +321,7 @@ test('New subagent, skill and reference add a file to the tree and open it; New 
 
 test('a sample photo shows in the profile and its Session row; removing it brings the initials back', async ({ page }) => {
   await openProfilesTab(page);
-  await page.getByTestId('profile-row-dcouple-business').click();
+  await page.getByTestId('profile-row-greenfield-business').click();
   await page.getByTestId('profile-photo').click();
   await page.getByTestId('profile-photo-sample-star').click();
   await expect(page.getByTestId('profile-photo').getByTestId('profile-avatar')).toHaveAttribute('data-avatar', 'picture');
@@ -338,39 +344,50 @@ test('Enter on the sidebar\'s Profiles row puts keyboard focus on the first prof
 
 test('a change made outside Pane shows in the open file and the tree', async ({ page }) => {
   await openProfilesTab(page);
-  await page.getByTestId('profile-row-bloomtext-support').click();
-  await page.getByTestId('profiles-file-agents/support.md').click();
+  await page.getByTestId('profile-row-greenfield-business').click();
+  await page.getByTestId('profiles-file-agents/business.md').click();
   const preview = page.getByTestId('profiles-markdown-preview');
   await expect(preview).toContainText('Answer new tickets');
-  await writeOnDisk(page, 'bloomtext', 'agents/support.md', '---\nharness: claude\n---\n\n# Support\n\nMarker: KUMQUAT\n');
+  await writeOnDisk(page, 'greenfield', 'agents/business.md', '---\nharness: claude\n---\n\n# Support\n\nMarker: KUMQUAT\n');
   await expect(preview).toContainText('Marker: KUMQUAT', { timeout: 8000 });
   await expect(page.getByTestId('profiles-disk-changed')).toHaveCount(0);
   // A reference removed on disk leaves the tree.
-  await page.getByTestId('profiles-tree-support/references').click();
-  await expect(page.getByTestId('profiles-file-references/support/tone.md')).toBeVisible();
-  await writeOnDisk(page, 'bloomtext', 'references/support/tone.md', null);
-  await expect(page.getByTestId('profiles-file-references/support/tone.md')).toHaveCount(0, { timeout: 8000 });
+  await page.getByTestId('profiles-tree-business/references').click();
+  await expect(page.getByTestId('profiles-file-references/business/tone.md')).toBeVisible();
+  await writeOnDisk(page, 'greenfield', 'references/business/tone.md', null);
+  await expect(page.getByTestId('profiles-file-references/business/tone.md')).toHaveCount(0, { timeout: 8000 });
 });
 
 test('with unsaved edits, a change on disk keeps them and asks: reload, or keep mine', async ({ page }) => {
   await openProfilesTab(page);
-  await page.getByTestId('profile-row-writer-writer').click();
-  await page.getByTestId('profiles-file-agents/writer.md').click();
+  await page.getByTestId('profile-row-greenfield-seo').click();
+  await page.getByTestId('profiles-file-agents/seo.md').click();
   await page.getByTestId('profiles-edit').click();
   const editor = page.getByTestId('profiles-editor');
   await editor.fill('# Mine\n');
-  await writeOnDisk(page, 'writer', 'agents/writer.md', '# Theirs\n');
+  await writeOnDisk(page, 'greenfield', 'agents/seo.md', '# Theirs\n');
   const notice = page.getByTestId('profiles-disk-changed');
   await expect(notice).toContainText('changed outside Pane', { timeout: 8000 });
   await expect(editor).toHaveValue('# Mine\n');
   await page.getByTestId('profiles-disk-keep').click();
   await expect(notice).toHaveCount(0);
   await expect(editor).toHaveValue('# Mine\n');
-  await writeOnDisk(page, 'writer', 'agents/writer.md', '# Theirs again\n');
+  await writeOnDisk(page, 'greenfield', 'agents/seo.md', '# Theirs again\n');
   await expect(notice).toBeVisible({ timeout: 8000 });
   await page.getByTestId('profiles-disk-reload').click();
   await expect(notice).toHaveCount(0);
   await expect(editor).toHaveValue('# Theirs again\n');
+});
+
+test('with Profiles off, there is no Profiles row or page, and nothing reads profiles', async ({ page }) => {
+  await installProfiles(page, { on: false });
+  await expect(page.getByTestId('sessions-section-header')).toBeVisible();
+  await expect(page.getByTestId('profiles-nav')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
+  await expect(page.getByTestId('compact-profiles')).toHaveCount(0);
+  // SAFETY: installElectronApiMock adds this control before the app loads.
+  const calls = await page.evaluate(() => (window as typeof window & { __paneTestElectronMock: { getProfilesCalls: () => string[] } }).__paneTestElectronMock.getProfilesCalls());
+  expect(calls).toEqual([]);
 });
 
 test('the Profiles row opens Profiles and, clicked again, returns to where you were', async ({ page }) => {
@@ -383,7 +400,7 @@ test('the Profiles row opens Profiles and, clicked again, returns to where you w
 for (const theme of ['light', 'dark']) {
   test(`screens (${theme})`, async ({ page }) => {
     test.skip(!shotsDir, 'Set PANE_PROFILES_SHOTS to save the review screenshots.');
-    await openProfilesTab(page, { theme, pins: ['greenfield/orchestrator', 'bloomtext/support', 'writer/writer'] });
+    await openProfilesTab(page, { theme, pins: ['greenfield/orchestrator', 'greenfield/business'] });
     await shot(page, `page-list-${theme}`);
     await page.getByTestId('profile-row-greenfield-orchestrator').click();
     await expect(page.getByTestId('profiles-html-preview')).toBeVisible();
@@ -401,16 +418,16 @@ for (const theme of ['light', 'dark']) {
     await shot(page, `page-edit-${theme}`);
     await page.getByTestId('profiles-cancel').click();
     await page.getByTestId('profiles-back').click();
-    await page.getByTestId('profile-row-bloomtext-support').click();
+    await page.getByTestId('profile-row-greenfield-business').click();
     await expect(page.getByTestId('profiles-generated-cover')).toBeVisible();
     await shot(page, `page-cover-generated-${theme}`);
     await page.getByTestId('profiles-edit-details').click();
     await shot(page, `page-details-${theme}`);
     await page.keyboard.press('Escape');
-    await page.getByTestId('profiles-file-agents/support.md').click();
+    await page.getByTestId('profiles-file-agents/business.md').click();
     await page.getByTestId('profiles-edit').click();
     await page.getByTestId('profiles-editor').fill('# Support\n\nMy edit, not saved yet.\n');
-    await writeOnDisk(page, 'bloomtext', 'agents/support.md', '# Support\n\nAn agent changed this.\n');
+    await writeOnDisk(page, 'greenfield', 'agents/business.md', '# Support\n\nAn agent changed this.\n');
     await expect(page.getByTestId('profiles-disk-changed')).toBeVisible({ timeout: 8000 });
     await shot(page, `page-disk-changed-${theme}`);
   });

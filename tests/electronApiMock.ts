@@ -1588,9 +1588,30 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         removePhoto: (ref: string) => { delete photos.profiles[ref]; return ok(null); },
       };
     })() : undefined;
+    /** Every call the renderer made to the Profiles API, by method; a spec checks none happen with Profiles off. */
+    const profilesCalls: string[] = [];
+    const record = <Args extends unknown[], Result>(name: string, method: (...args: Args) => Result) => (...args: Args): Result => {
+      profilesCalls.push(name);
+      return method(...args);
+    };
+    // writeOnDisk is the spec's own control, not something the renderer calls.
+    const recordedProfilesApi = profilesApi && {
+      ...profilesApi,
+      list: record('list', profilesApi.list),
+      read: record('read', profilesApi.read),
+      save: record('save', profilesApi.save),
+      newProfile: record('newProfile', profilesApi.newProfile),
+      newFile: record('newFile', profilesApi.newFile),
+      restore: record('restore', profilesApi.restore),
+      photos: record('photos', profilesApi.photos),
+      setPhoto: record('setPhoto', profilesApi.setPhoto),
+      removePhoto: record('removePhoto', profilesApi.removePhoto),
+      setDetails: record('setDetails', profilesApi.setDetails),
+      parseYaml: record('parseYaml', profilesApi.parseYaml),
+    };
     const electronAPI = {
       // Absent without the option, so the Profiles row stays hidden in other specs.
-      profiles: profilesApi,
+      profiles: recordedProfilesApi,
       autopilot: autopilotApi,
       todos: todosApi,
       chatTab: chatTabWithProfiles,
@@ -2551,6 +2572,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getInvokeCalls(channel: string) {
           return clone(invokeCalls.get(channel) ?? []);
+        },
+        getProfilesCalls() {
+          return clone(profilesCalls);
         },
         writeProfileFile(plugin: string, path: string, content: string | null) {
           profilesApi?.writeOnDisk(plugin, path, content);

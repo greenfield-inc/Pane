@@ -333,13 +333,18 @@ describe('ProfileEditor: the profile page', () => {
     expect(described.plugin.edited).toBe(true);
   }, 240_000);
 
-  it('hides a profile Agent Farm reports as not listed, and lists everything with an Agent Farm that has no --json', async () => {
+  it('hides a profile Agent Farm marks `| unlisted`, asking again only when a profile file changes; an older Agent Farm lists everything', async () => {
     const paneDir = tempDir();
     await installTeam(paneDir);
     const calls: string[][] = [];
     const run: AgentFarmRunner = async (process) => {
       calls.push(process.args);
-      if (process.args.includes('--json')) return JSON.stringify([{ qualified: 'team/lead', listed: true }, { qualified: 'team/planner', listed: false }]);
+      if (process.args[1] === 'profiles' && process.args[2] === 'list') {
+        return [
+          'team/lead -> lead | plugin team 0.1.0 | claude | claude-opus-5-5 | native default',
+          'team/planner -> planner | plugin team 0.1.0 | claude | claude-opus-5-5 | native default | unlisted',
+        ].join('\n');
+      }
       return runAgentFarm(process);
     };
     const withListed = new ProfileEditor({ paneDir, machine: () => 'studio-mac', bundle, run });
@@ -347,11 +352,12 @@ describe('ProfileEditor: the profile page', () => {
     expect(team?.profiles.map(profile => [profile.name, profile.listed])).toEqual([['lead', true], ['planner', false]]);
     // Asked once; the next list reuses it until a profile file changes.
     await withListed.list();
-    expect(calls.filter(args => args.includes('--json'))).toHaveLength(1);
+    const lists = () => calls.filter(args => args[1] === 'profiles' && args[2] === 'list').length;
+    expect(lists()).toBe(1);
     writeFileSync(path.join(agentFarmConfigRoot(paneDir), 'plugins', 'team', 'profiles', 'extra.yaml'), 'agent: lead\n');
     await withListed.list();
-    expect(calls.filter(args => args.includes('--json'))).toHaveLength(2);
-    // Agent Farm 0.2.34 refuses --json: every profile is listed.
+    expect(lists()).toBe(2);
+    // The bundled Agent Farm doesn't print `unlisted` yet: every profile is listed.
     const old = (await editor(paneDir).list()).plugins.find(plugin => plugin.name === 'team');
     expect(old?.profiles.every(profile => profile.listed)).toBe(true);
   }, 60_000);

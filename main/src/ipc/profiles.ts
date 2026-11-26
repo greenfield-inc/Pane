@@ -4,6 +4,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { profileDetailsSchema, profileFileChangesSchema } from '../../../shared/types/profileEditor';
 import { ProfileEditor, parseYaml } from '../services/agentFarm/profileEditor';
 import { getAppDirectory } from '../utils/appDirectory';
+import { profilesOn } from '../services/agentFarm/profilesFeature';
 import { computerName } from '../utils/computerName';
 import type { AppServices } from './types';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
@@ -12,6 +13,8 @@ type ProfilesResponse<Data> = { success: true; data: Data } | { success: false; 
 
 async function respond<Data>(work: () => Promise<Data> | Data): Promise<ProfilesResponse<Data>> {
   try {
+    // Behind the Profiles switch (D-474): off, the tab doesn't exist and nothing here reads or writes.
+    if (!profilesOn()) throw new PaneError('PROFILES_OFF', 'Profiles is off on this computer.', 'Turn it on in Settings > Advanced > Experimental > Profiles.');
     return { success: true, data: await work() };
   } catch (error) {
     return { success: false, error: error instanceof PaneError ? paneErrorText(error) : `Pane couldn't change its profiles: ${reasonOf(error)}.` };
@@ -25,19 +28,12 @@ const kindSchema = boundary.enumeration('subagent', 'skill', 'reference');
  * The Profiles tab (T-63 PR 5): renderer-only channels on this computer's own Agent Farm folder.
  * Every file Pane writes stays inside `<PANE_DIR>/agent-farm/{plugins,drafts,avatars}` (ProfileEditor's
  * path checks). After a change, Sessions using the plugin are re-checked so they show the changed dot.
- * `runpane profiles` (PR 7) reuses ProfileEditor, and sync (PR 6) hooks into `onChanged`.
+ * `runpane profiles` (PR 7) reuses ProfileEditor, and sync (PR 6) hooks into `onChanged`. Every
+ * channel refuses while the Profiles switch is off (D-474), as main has no such channels.
  */
-/** The Profiles tab's editor, once registered; New Session's list asks it which profiles are listed. */
-let shared: ProfileEditor | undefined;
-
-/** Which profiles Agent Farm lists (`listed: false` hides a subagent profile from New Session); empty before Profiles is set up. */
-export async function listedProfileRefs(): Promise<Map<string, boolean>> {
-  return shared ? shared.listedRefs().catch(() => new Map<string, boolean>()) : new Map<string, boolean>();
-}
-
-export function registerProfileHandlers(ipcMain: IpcMain, services: AppServices): void {
+export function registerProfileHandlers(ipcMain: Pick<IpcMain, 'handle'>, services: AppServices, paneDir: string = getAppDirectory()): void {
   const editor = new ProfileEditor({
-    paneDir: getAppDirectory(),
+    paneDir,
     // The name the sidebar and the relay give this computer.
     machine: () => computerName() || 'this computer',
     onChanged: () => {
@@ -45,7 +41,6 @@ export function registerProfileHandlers(ipcMain: IpcMain, services: AppServices)
         .catch(error => console.warn(`[Profiles] Could not re-check Sessions' profiles after a save: ${reasonOf(error)}`));
     },
   });
-  shared = editor;
   ipcMain.handle('profiles:list', () => respond(() => editor.list()));
   ipcMain.handle('profiles:read', (_event, plugin: PaneCommandValue, file: PaneCommandValue) => respond(() => editor.read(decodeBoundary(plugin, text), decodeBoundary(file, text))));
   ipcMain.handle('profiles:save', (_event, plugin: PaneCommandValue, changes: PaneCommandValue) => respond(() => editor.save(decodeBoundary(plugin, text), decodeBoundary(changes, profileFileChangesSchema))));

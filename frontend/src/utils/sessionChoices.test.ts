@@ -45,8 +45,8 @@ describe('sessionChoices', () => {
 
   it('puts pinned profiles first, in pin order, and leaves out profiles Agent Farm doesn\'t list', () => {
     const profiles = [...PROFILES, profile('greenfield/planner', 'claude', { listed: false })];
-    const choices = sessionChoices({ agents: ['claude', 'codex'], profiles, pins: ['dcouple/business', 'greenfield/orchestrator'] });
-    expect(choices.map(choice => choice.label)).toEqual(['Dcouple business', 'Greenfield orchestrator', 'Claude', 'Codex', 'Greenfield reviewer']);
+    const choices = sessionChoices({ agents: ['claude', 'codex'], profiles, pins: ['greenfield/business', 'greenfield/orchestrator'] });
+    expect(choices.map(choice => choice.label)).toEqual(['Greenfield business', 'Greenfield orchestrator', 'Claude', 'Codex', 'Greenfield seo']);
   });
 
   it('keeps profiles listed but unavailable, with the reason, when they cannot start', () => {

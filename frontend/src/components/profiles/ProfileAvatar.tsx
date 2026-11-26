@@ -5,6 +5,7 @@ import { agentIdIcon } from '../ui/brandIconRegistry';
 import { cn } from '../../utils/cn';
 import { profileAvatar, profileDisplayName } from '../../utils/profileAvatar';
 import { ensureProfilePhotos, profilePicture, useProfilesStore } from '../../stores/profilesStore';
+import { isProfilesEnabled, useConfigStore } from '../../stores/configStore';
 
 interface ProfileAvatarProps {
   /** The Agent Farm profile (`plugin/profile[:variant]`); `pane/<agent>` is the agent on its own. */
@@ -30,7 +31,9 @@ export function ProfileAvatar({ profileRef, agent, picture, generated, size, cla
   const named = profileRef && !plain;
   // Your photo here, else the plugin's own picture (T-63 PR 5); loaded once, the first time an avatar shows.
   const stored = useProfilesStore(state => (named && !generated ? profilePicture(state.photos, profileRef) : undefined));
-  useEffect(() => { if (named) ensureProfilePhotos(); }, [named]);
+  // Photos come from the Profiles tab: with the Profiles switch off (D-474) none are read.
+  const profilesOn = useConfigStore(state => isProfilesEnabled(state.config));
+  useEffect(() => { if (named && profilesOn) ensureProfilePhotos(); }, [named, profilesOn]);
   const face = profileAvatar({ profileRef, agent, picture: generated ? undefined : picture ?? stored });
   const label = named ? `Profile ${profileDisplayName(profileRef)}` : `${agentLabel(plain ?? agent ?? '')}, no profile`;
   const box: CSSProperties = { width: size, height: size, fontSize: Math.round(size * 0.42), ...style };
