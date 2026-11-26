@@ -27,6 +27,7 @@ import type {
   NotifyVersion,
 } from '../../../../shared/types/notify';
 import { NOTIFY_VERSIONS_MAX } from '../../../../shared/types/notify';
+import type { CardFields } from './cardCheck';
 import type { MachineState } from '../../../../shared/types/machineConnections';
 import type { AppConfig } from '../../types/config';
 import { PaneError } from '../../../../shared/paneError';
@@ -800,8 +801,8 @@ export class NotifyQueue extends EventEmitter {
 
   /** `runpane notify --relays <item>`: the orchestrator improves the worker's card and waits on it as on any notify (J8). */
   private relay(id: string, question: NotifyQuestion, returnAfterMs: number | undefined, signal?: AbortSignal, by?: NotifySource): Promise<NotifyResult> {
-    const entry = this.entries.get(id) ?? [...this.entries.values()].find(candidate => candidate.item.rewrittenFrom?.id === id && isOpen(candidate.item));
-    if (!entry || entry.item.originKind !== 'worker' || entry.item.state !== 'waiting') {
+    const entry = this.relayEntry(id);
+    if (!entry) {
       return Promise.resolve({ unavailable: `There's no waiting worker question ${id}: it was answered or closed, or its worker moved on. Nothing was shown.`, next: 'Check runpane inbox for the answer.' });
     }
     const { title, ...improved } = question;
@@ -817,6 +818,34 @@ export class NotifyQueue extends EventEmitter {
     const result = this.wait(entry, returnAfterMs, signal);
     this.changed();
     return result;
+  }
+
+  /** The waiting worker card `--relays <id>` improves, if there still is one. */
+  private relayEntry(id: string): Entry | undefined {
+    const entry = this.entries.get(id) ?? [...this.entries.values()].find(candidate => candidate.item.rewrittenFrom?.id === id && isOpen(candidate.item));
+    return entry && entry.item.originKind === 'worker' && entry.item.state === 'waiting' ? entry : undefined;
+  }
+
+  /**
+   * The card an --update or --relays call is about to change, as it stands, so Pane can check the
+   * new version's files against it before anything changes. Undefined when there is none, or the
+   * caller may not change it: the call itself then says why.
+   */
+  storedCard(target: { update: string; reader: NotifyReaderCaller } | { relays: string }): CardFields | undefined {
+    let entry: Entry | undefined;
+    try {
+      entry = 'update' in target ? this.forReader(target.reader, target.update, 'update') : this.relayEntry(target.relays);
+    } catch {
+      return undefined;
+    }
+    if (!entry) return undefined;
+    const { title, context, choices, questions, links } = entry.item;
+    const card: CardFields = { title };
+    if (context !== undefined) card.context = context;
+    if (choices) card.choices = choices;
+    if (questions) card.questions = questions;
+    if (links) card.links = links;
+    return card;
   }
 
   private isRewrittenFrom(id: string): boolean {

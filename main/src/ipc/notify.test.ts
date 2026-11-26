@@ -735,6 +735,66 @@ describe('Approvals items, through the registered handlers', () => {
     }
   });
 
+  it('checks the files an --update adds, against the card as it stands: attached beside its links, or refused with nothing changed', async () => {
+    const pane = await startWithSessions();
+    const folder = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'pane-update-files-'));
+    try {
+      const plan = path.join(folder, 'plan.md');
+      await fsPromises.writeFile(plan, '# Plan');
+      const caller = { paneId: 'loose', panelId: 'loose-panel' };
+      const pr = { label: 'PR #1', url: 'https://github.com/org/repo/pull/1' };
+      // The person asks a question back; the asker takes it as one, and updates the card by the reply's id.
+      const asked = pane.registry.invoke<NotifyResult>('runpane:notify', [{ ui: 'ask', title: 'Ship it?', context: 'CI is green.', links: [pr], caller }]);
+      await flush();
+      const { id } = pane.notify.snapshot().items[0];
+      pane.notify.queue.run({ type: 'answer', id, answer: { picks: [], text: 'Where is the plan?' } });
+      const reply = await asked;
+      if (!('replyId' in reply)) throw new Error(`expected a reply, got ${JSON.stringify(reply)}`);
+      await pane.registry.invoke('runpane:notify', [{ took: reply.replyId, tookAs: 'question', caller }]);
+      const update = (context: string, check = false) => pane.registry.invoke(check ? 'runpane:notify:check' : 'runpane:notify', [{ update: reply.replyId, asked: 'Where is the plan?', whatChanged: 'Named the plan', context, caller, returnAfterMs: 1 }]);
+
+      // A missing file refuses the update, in the check and for real, before the card changes.
+      const missing = path.join(folder, 'gone.md');
+      await expect(update(`The plan is ${missing}.`, true)).rejects.toMatchObject({ code: 'ERR_NOTIFY_UNLINKED_PATH' });
+      await expect(update(`The plan is ${missing}.`)).rejects.toMatchObject({ code: 'ERR_NOTIFY_UNLINKED_PATH' });
+      expect(pane.notify.snapshot().items[0]).toMatchObject({ context: 'CI is green.', links: [pr] });
+      expect(pane.notify.snapshot().items[0].version ?? 1).toBe(1);
+
+      // A context-only update keeps the card's links and adds the file it names, in the check and for real.
+      await expect(update(`The plan is ${plan}.`, true)).resolves.toMatchObject({ card: { links: [pr, { label: 'plan.md', path: plan }] } });
+      await update(`The plan is ${plan}.`);
+      expect(pane.notify.snapshot().items[0]).toMatchObject({ version: 2, context: `The plan is ${plan}.`, links: [pr, { label: 'plan.md', path: plan }] });
+      pane.notify.dispose();
+    } finally {
+      await fsPromises.rm(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a worker's links when a relay names another file, and takes the relay's own --links when it gives them", async () => {
+    const folder = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'pane-relay-files-'));
+    try {
+      const plan = path.join(folder, 'plan.md');
+      await fsPromises.writeFile(plan, '# Plan');
+      const orchestrator = { paneId: 'session-pane', panelId: 'orchestrator-panel' };
+      const status = { label: 'api-fix status', path: '/work/api-fix/status.json' };
+
+      const inherited = await startWithSessions(inboxOf([blocked(Date.now())]));
+      void inherited.registry.invoke('runpane:notify', [{ relays: 'in-1', ui: 'ask', title: 'Use the invoice id?', context: `The plan is ${plan}.`, caller: orchestrator }]);
+      await flush();
+      expect(inherited.notify.snapshot().items[0].links).toEqual([status, { label: 'plan.md', path: plan }]);
+      inherited.notify.dispose();
+
+      const replaced = await startWithSessions(inboxOf([blocked(Date.now())]));
+      const pr = { label: 'PR #1', url: 'https://github.com/org/repo/pull/1' };
+      void replaced.registry.invoke('runpane:notify', [{ relays: 'in-1', ui: 'ask', title: 'Use the invoice id?', context: `The plan is ${plan}.`, links: [pr], caller: orchestrator }]);
+      await flush();
+      expect(replaced.notify.snapshot().items[0].links).toEqual([pr, { label: 'plan.md', path: plan }]);
+      replaced.notify.dispose();
+    } finally {
+      await fsPromises.rm(folder, { recursive: true, force: true });
+    }
+  });
+
   it('takes a local file given as a url (file:// or a bare path) as the path it names', async () => {
     const pane = await startWithSessions();
     const fileUrl = pathToFileURL(path.resolve('/tmp/mock ups/index.html')).href;
