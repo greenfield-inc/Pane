@@ -461,7 +461,7 @@ export class ProfileEditor {
     return plugin;
   }
 
-  /** Every plugin and profile in this computer's Pane, greenfield and dcouple first. */
+  /** Every plugin and profile in this computer's Pane, greenfield first. */
   async list(): Promise<ProfilesOverview> {
     const machine = (this.options.machine ?? (() => os.hostname().replace(/\.local$/i, '')))();
     const names = await this.pluginNames();
@@ -652,7 +652,7 @@ export class ProfileEditor {
     return { plugin: await this.readPlugin(plugin), path: summary.entry };
   }
 
-  /** Restore Pane's version (A-3): the bundled copy replaces your edits to greenfield or dcouple. */
+  /** Restore Pane's version (A-3): the bundled copy replaces your edits to greenfield. */
   restore(plugin: string): Promise<ProfileSaveResult> {
     return this.guard(plugin, () => this.restoreNow(plugin));
   }
@@ -732,7 +732,7 @@ export class ProfileEditor {
 }
 
 /**
- * A plugin installed from a pack (greenfield, dcouple) lists its files' checksums in plugin.yaml,
+ * A plugin installed from a pack (greenfield) lists its files' checksums in plugin.yaml,
  * which `plugin validate` checks but launches don't. Any edit changes a file, so the staged copy
  * Pane validates leaves them out; the installed plugin.yaml keeps them.
  */

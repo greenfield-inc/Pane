@@ -16,8 +16,13 @@ const execFileAsync = promisify(execFile);
 
 /** The npm package Pane ships (pinned in package.json and main/package.json). */
 const AGENT_FARM_PACKAGE = '@greenfieldco/agent-farm';
-/** Plugins the bundled package carries that Pane installs into its own config root; greenfield first. */
-export const BUNDLED_AGENT_FARM_PLUGINS = ['greenfield', 'dcouple'] as const;
+/** Plugins Pane installs from the bundled package into its own config root. */
+export const BUNDLED_AGENT_FARM_PLUGINS = ['greenfield'] as const;
+/**
+ * Plugins older Pane builds installed into its config root (dcouple was bundled; bigbrain is
+ * older still). Each start uninstalls whichever of them is still there.
+ */
+export const RETIRED_AGENT_FARM_PLUGINS = ['dcouple', 'bigbrain'] as const;
 const MANIFEST_FILE = 'pane-manifest.json';
 /** The telemetry `enabled` Pane last wrote into settings.json while Profiles was on, so turning Profiles off takes back only Pane's own. */
 const TELEMETRY_MARKER_FILE = 'pane-telemetry.json';
@@ -157,6 +162,10 @@ const manifestSchema = boundary.object({
 const receiptSchema = boundary.object({ version: boundary.string, checksums: boundary.record(boundary.string) });
 
 const installOutput = boundary.object({ version: boundary.string });
+const uninstallOutput = boundary.object({
+  removed: boundary.array(boundary.string),
+  stayed: boundary.array(boundary.object({ file: boundary.string, reason: boundary.string })),
+});
 
 /** Runs one Agent Farm command and returns its stdout. */
 export type AgentFarmRunner = (process: AgentFarmProcess) => Promise<string>;
@@ -172,6 +181,45 @@ function installedVersion(stdout: string): string | undefined {
   const json = start >= 0 ? stdout.slice(start + 1) : stdout.trim();
   try { return decodeBoundary(JSON.parse(json), installOutput).version; }
   catch { return undefined; }
+}
+
+/**
+ * Uninstalls each retired plugin that Agent Farm's receipt says is installed in Pane's config
+ * root, with Agent Farm's own `plugin uninstall`: it deletes only files unchanged since the
+ * install and leaves changed ones in place. Never throws; each outcome is logged.
+ */
+async function uninstallRetiredPlugins(bundle: BundledAgentFarm, configRoot: string, run: AgentFarmRunner, log: (message: string) => void): Promise<void> {
+  const present = RETIRED_AGENT_FARM_PLUGINS.filter((name) => existsSync(path.join(configRoot, '.plugins', `${name}.json`)));
+  if (present.length === 0) return;
+  // A lock left by a killed install would refuse the uninstall; the config root is Pane's alone.
+  await fs.rm(path.join(configRoot, '.plugins', 'install.lock'), { recursive: true, force: true }).catch(() => undefined);
+  for (const name of present) {
+    const receipt = path.join(configRoot, '.plugins', `${name}.json`);
+    // Agent Farm reads every receipt when it installs, so one it can't parse would fail greenfield's
+    // install on every start too. Keep its bytes under a name Agent Farm doesn't read, and its files.
+    const text = await fs.readFile(receipt, 'utf8').catch(() => undefined);
+    let malformed = false;
+    try { if (text !== undefined) JSON.parse(text); } catch { malformed = true; }
+    if (malformed) {
+      const aside = `${receipt}.unreadable-${Date.now()}`;
+      await fs.rename(receipt, aside).then(
+        () => log(`[AgentFarm] The receipt for the retired Agent Farm plugin ${name} isn't valid JSON, so Agent Farm can't uninstall it; Pane moved it aside to ${aside} and left the plugin's files in ${path.join(configRoot, 'plugins', name)}. Delete both if you don't need them.`),
+        (error: NodeJS.ErrnoException) => log(`[AgentFarm] The receipt for the retired Agent Farm plugin ${name} isn't valid JSON, and Pane couldn't move it aside (${error.message}). Agent Farm's installs in ${configRoot} fail until ${receipt} is moved or deleted.`),
+      );
+      continue;
+    }
+    try {
+      const stdout = await run(bundledAgentFarmProcess(bundle, ['plugin', 'uninstall', name], configRoot));
+      const start = stdout.indexOf('{');
+      const result = decodeOptionalBoundary(JSON.parse(start >= 0 ? stdout.slice(start) : '{}'), uninstallOutput);
+      const changed = result?.stayed.filter((entry) => entry.reason === 'modified').map((entry) => entry.file) ?? [];
+      const kept = changed.length ? `, left ${changed.length} changed file${changed.length === 1 ? '' : 's'} in place (${changed.join(', ')})` : '';
+      log(`[AgentFarm] Uninstalled retired plugin ${name}: removed ${result?.removed.length ?? 0} files${kept}.`);
+    } catch (error) {
+      const reason = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1) || reasonOf(error);
+      log(`[AgentFarm] Pane couldn't uninstall the retired Agent Farm plugin ${name} from ${configRoot}: ${reason}. Pane will try again on its next start.`);
+    }
+  }
 }
 
 /**
@@ -328,7 +376,7 @@ export interface InstallBundledAgentFarmOptions {
 }
 
 /**
- * Installs greenfield and the other bundled plugins into `<PANE_DIR>/agent-farm` with the
+ * Uninstalls retired plugins, then installs greenfield into `<PANE_DIR>/agent-farm` with the
  * bundled Agent Farm, when the bundle (its version and plugin files) differs from what the
  * manifest there records; an unchanged bundle installs nothing. A bundled plugin someone changed
  * since Pane installed it (its files no longer match Agent Farm's install receipt) is kept as it
@@ -362,16 +410,31 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
     log(`[AgentFarm] ${status.error}`);
     return status;
   }
+  const run = options.run ?? runAgentFarm;
+  await uninstallRetiredPlugins(bundle, configRoot, run, log);
   const previous = await fs.readFile(manifestPath, 'utf8').then((text) => decodeOptionalBoundary(JSON.parse(text), manifestSchema)).catch(() => undefined);
   // Pane's own plugin must also still be exactly what Pane writes: an edit there is replaced.
   const installed = previous && BUNDLED_AGENT_FARM_PLUGINS.every((name) => existsSync(path.join(configRoot, 'plugins', name))) && await panePluginInstalled(configRoot);
-  if (previous && installed && previous.hash === hash) {
-    status = { state: 'ready', configRoot, version: bundle.version, plugins: previous.plugins, edited: previous.edited ?? [] };
+  if (previous && installed && previous.hash === hash && BUNDLED_AGENT_FARM_PLUGINS.every((name) => name in previous.plugins)) {
+    const retired: readonly string[] = RETIRED_AGENT_FARM_PLUGINS;
+    const dropped = Object.keys(previous.plugins).filter((name) => retired.includes(name));
+    const plugins = Object.fromEntries(Object.entries(previous.plugins).filter(([name]) => !dropped.includes(name)));
+    const edited = (previous.edited ?? []).filter((name) => !dropped.includes(name));
+    if (dropped.length) {
+      // An older Pane bundled more plugins; drop them from the manifest and leave greenfield's files alone.
+      try {
+        await fs.writeFile(`${manifestPath}.tmp`, `${JSON.stringify({ ...previous, plugins, edited }, null, 2)}\n`);
+        await fs.rename(`${manifestPath}.tmp`, manifestPath);
+        log(`[AgentFarm] Bundle unchanged; dropped ${dropped.join(', ')} from the manifest in ${configRoot}.`);
+      } catch (error) {
+        log(`[AgentFarm] Pane couldn't drop ${dropped.join(', ')} from ${manifestPath}: ${reasonOf(error)}. It tries again on the next start.`);
+      }
+    }
+    status = { state: 'ready', configRoot, version: bundle.version, plugins, edited };
     log(`[AgentFarm] Bundled Agent Farm ${bundle.version} is already set up in ${configRoot} (manifest hash unchanged); nothing reinstalled.`);
     return status;
   }
   log(`[AgentFarm] Setting up bundled Agent Farm ${bundle.version} in ${configRoot} (${!previous ? 'first start' : previous.hash !== hash ? `bundle changed from ${previous.agentFarmVersion}` : 'a plugin changed or is missing here'}).`);
-  const run = options.run ?? runAgentFarm;
   const plugins: Record<string, string> = {};
   const edited: string[] = [];
   const installingPath = path.join(configRoot, INSTALLING_FILE);

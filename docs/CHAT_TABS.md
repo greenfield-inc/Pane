@@ -548,9 +548,17 @@ and says why. Turning Profiles off removes that shim.
 
 At each start, whatever the switch (`installBundledAgentFarm`, called from
 `main/src/daemon/bootstrap.ts` without waiting), Pane installs the plugins the
-bundled package carries (greenfield and dcouple) into `<PANE_DIR>/agent-farm`, when the package's
+bundled package carries (greenfield only) into `<PANE_DIR>/agent-farm`, when the package's
 version or plugin files differ from what `<PANE_DIR>/agent-farm/pane-manifest.json`
-records; an unchanged bundle installs nothing and the log says so. A bundled
+records; an unchanged bundle installs nothing and the log says so. Plugins older Pane builds
+installed there (dcouple and bigbrain) are removed at each start with Agent
+Farm's `plugin uninstall`, which deletes only files unchanged since the install
+and leaves (and logs) any the person edited; a failed removal is logged and
+tried again on the next start. A retired plugin's receipt that isn't valid JSON
+would make every Agent Farm install there fail, so Pane renames it to
+`<name>.json.unreadable-<time>` (keeping its bytes and the plugin's files) and
+logs where it went. When an unchanged bundle's manifest still lists a retired
+plugin, Pane rewrites only the manifest and leaves greenfield's files alone. A bundled
 plugin whose files no longer match Agent Farm's install receipt
 (`.plugins/<name>.json`), because someone edited, added or removed a file, is
 kept as it is: Pane updates no longer replace it, the log names it, and the
@@ -580,7 +588,7 @@ Farm's profile format has fields for them. The tab edits the plugins in
 place: a save is first checked with `agent-farm plugin validate` on a staged copy
 (without a pack's stale `checksums`, which launches don't read), so nothing changes
 unless Agent Farm accepts it, and Sessions using the plugin then show the changed
-dot. Saving greenfield or dcouple makes it **Edited** this way, and **Restore
+dot. Saving greenfield makes it **Edited** this way, and **Restore
 Pane's version** reinstalls the bundled copy and takes it off `edited`. A new
 profile is a plugin installed with `agent-farm plugin install`, since Agent Farm
 finds plugins by their receipts. `run` writes its launch bundle to
@@ -652,7 +660,7 @@ leaves out (`pane.yaml` titles and `covers/` pages), travel in the pack and are
 written after the install. The plugin, its receipt and its photos there are set
 aside first and put back if anything before the record is written fails; a
 deletion is recorded only when a plugin's receipt is certainly gone, never on a
-read that failed. greenfield and dcouple sync only once you change them: a photo
+read that failed. greenfield syncs only once you change it: a photo
 alone keeps each computer's own Pane version (`pane` records), an edit travels as
 your copy and stays **Edited** there (Pane updates keep it), and Restore restores
 Pane's version everywhere. The calls answer only your own machines, never a

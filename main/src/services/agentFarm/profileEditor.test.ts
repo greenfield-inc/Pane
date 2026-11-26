@@ -182,25 +182,25 @@ describe('ProfileEditor: Pane\'s own plugins (A-3)', () => {
     const status = await installBundledAgentFarm({ paneDir, bundle, log: () => undefined });
     expect(status.state).toBe('ready');
     const profiles = editor(paneDir);
-    const before = (await profiles.list()).plugins.find(plugin => plugin.name === 'dcouple');
+    const before = (await profiles.list()).plugins.find(plugin => plugin.name === 'greenfield');
     expect(before).toMatchObject({ bundled: true, edited: false });
     expect((await profiles.list()).plugins.map(plugin => plugin.name)).not.toContain('pane');
     const ref = before!.profiles[0].ref;
     await profiles.setPhoto(ref, Buffer.from('89504e470d0a1a0a', 'hex').toString('base64') + 'AAAA');
-    expect((await profiles.list()).plugins.find(plugin => plugin.name === 'dcouple')?.edited).toBe(false);
+    expect((await profiles.list()).plugins.find(plugin => plugin.name === 'greenfield')?.edited).toBe(false);
     const entry = before!.profiles[0].entry;
-    const original = await profiles.read('dcouple', entry);
-    await profiles.save('dcouple', [{ path: entry, content: `${original}\nMarker: LYCHEE\n` }]);
-    expect((await profiles.list()).plugins.find(plugin => plugin.name === 'dcouple')?.edited).toBe(true);
+    const original = await profiles.read('greenfield', entry);
+    await profiles.save('greenfield', [{ path: entry, content: `${original}\nMarker: LYCHEE\n` }]);
+    expect((await profiles.list()).plugins.find(plugin => plugin.name === 'greenfield')?.edited).toBe(true);
     // Launches still find it: Agent Farm lists it with its pack checksums now stale.
     const listed = await listPaneAgentFarmProfiles(paneDir);
     expect(listed.error).toBeUndefined();
     expect(listed.profiles.map(profile => profile.ref)).toContain(ref);
-    const restored = await profiles.restore('dcouple');
+    const restored = await profiles.restore('greenfield');
     expect(restored.plugin.edited).toBe(false);
-    expect(await profiles.read('dcouple', entry)).toBe(original);
+    expect(await profiles.read('greenfield', entry)).toBe(original);
     const manifest = JSON.parse(readFileSync(path.join(agentFarmConfigRoot(paneDir), 'pane-manifest.json'), 'utf8'));
-    expect(manifest.edited ?? []).not.toContain('dcouple');
+    expect(manifest.edited ?? []).not.toContain('greenfield');
     await expect(profiles.restore('labtest')).rejects.toMatchObject({ code: 'PROFILE_NOT_BUNDLED' });
   }, 240_000);
 });
@@ -325,11 +325,11 @@ describe('ProfileEditor: the profile page', () => {
     const paneDir = tempDir();
     await installBundledAgentFarm({ paneDir, bundle, log: () => undefined });
     const profiles = editor(paneDir);
-    const first = (await profiles.list()).plugins.find(plugin => plugin.name === 'dcouple')!.profiles[0];
+    const first = (await profiles.list()).plugins.find(plugin => plugin.name === 'greenfield')!.profiles[0];
     // A title alone (pane.yaml) leaves it un-Edited; a new description is an edit of the agent's own file.
-    const result = await profiles.setDetails('dcouple', first.name, { title: 'My business', description: first.description ?? '' });
+    const result = await profiles.setDetails('greenfield', first.name, { title: 'My business', description: first.description ?? '' });
     expect(result.plugin.edited).toBe(false);
-    const described = await profiles.setDetails('dcouple', first.name, { title: 'My business', description: 'Keeps the tracker current.' });
+    const described = await profiles.setDetails('greenfield', first.name, { title: 'My business', description: 'Keeps the tracker current.' });
     expect(described.plugin.edited).toBe(true);
   }, 240_000);
 
