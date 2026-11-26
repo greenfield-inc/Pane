@@ -203,19 +203,19 @@ const kb = (bytes: number) => `${(bytes / 1024).toFixed(0)} KB`;
 
 function markdown(): string {
   const lines = [`### Another machine's Sessions over a ${report.meta?.latencyMs ?? LATENCY_MS} ms link (reported only)`, ''];
-  lines.push('| Enter on a row | n | machine shown p50 / p95 (ms) | landed on that Session | its chat visible p50 / p95 (ms) | bytes over the link, p50 |', '|---|---|---|---|---|---|');
+  lines.push('| Enter on a row | n | machine shown p50 / p95 (ms) | landed on that Session | its chat visible p50 / p95 (ms), n | bytes over the link, p50 |', '|---|---|---|---|---|---|');
   for (const direction of ['there', 'back'] as const) {
     const rows = report.opens.filter(sample => sample.direction === direction);
     const column = (pick: (sample: OpenSample) => number | null) => rows.map(pick).filter((value): value is number => value !== null);
     const bytes = rows.map(sample => sample.bytesToHost + sample.bytesToDesktop);
     const label = direction === 'there' ? 'the host\'s Session (the window switches to the host)' : 'this computer\'s Session (the window switches back)';
-    lines.push(`| ${label} | ${rows.length} | **${ms(percentile(column(s => s.shown), 50))} / ${ms(percentile(column(s => s.shown), 95))}** | ${rows.filter(s => s.rightSession).length}/${rows.length} | **${ms(percentile(column(s => s.visible), 50))} / ${ms(percentile(column(s => s.visible), 95))}** | ${bytes.length ? kb(percentile(bytes, 50) ?? 0) : '–'} |`);
+    lines.push(`| ${label} | ${rows.length} | **${ms(percentile(column(s => s.shown), 50))} / ${ms(percentile(column(s => s.shown), 95))}** | ${rows.filter(s => s.rightSession).length}/${rows.length} | **${ms(percentile(column(s => s.visible), 50))} / ${ms(percentile(column(s => s.visible), 95))}**, ${column(s => s.visible).length} | ${bytes.length ? kb(percentile(bytes, 50) ?? 0) : '–'} |`);
   }
   const wrong = report.opens.filter(sample => !sample.rightSession);
   if (wrong.length) lines.push('', `Landed elsewhere: ${wrong.map(sample => `${sample.session} → ${sample.landedOn ?? 'no Session'}`).join('; ')}.`);
   if (report.cursor) {
     const cursor = report.cursor;
-    lines.push('', `Arrow keys, ${cursor.presses} presses at 30 a second: the cursor moved on **${cursor.moved}**, press → moved p50 **${ms(cursor.p50)} ms**, p95 **${ms(cursor.p95)} ms**, max ${ms(cursor.max)} ms; ${cursor.longTasks} long tasks (longest ${ms(cursor.longestTask)} ms).`);
+    lines.push('', `Arrow keys, ${cursor.presses} presses at 30 a second: the cursor moved on **${cursor.moved}**, press → moved p50 **${ms(cursor.p50)} ms**, p95 **${ms(cursor.p95)} ms**, max ${ms(cursor.max)} ms; ${cursor.longTasks ? `${cursor.longTasks} long tasks (longest ${ms(cursor.longestTask)} ms)` : 'no long tasks'}.`);
   }
   if (report.idle) lines.push('', `Idle link, window on this computer: **${kb(report.idle.perMinute)} per minute** (${kb(report.idle.toHost)} to the host, ${kb(report.idle.toDesktop)} back, over ${Math.round(report.idle.ms / 1000)} s).`);
   if (report.offline) lines.push('', `Link cut: the sidebar said the host went offline after **${ms(report.offline.noticedAfterMs)} ms**.`);
