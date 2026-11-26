@@ -150,6 +150,10 @@ function createFixture(
       Object.assign(session, update);
     }),
     getProjectContext: vi.fn(() => null),
+    markSessionAsViewed: vi.fn((id: string) => {
+      const session = sessions.get(id);
+      if (session) session.lastViewedAt = '2026-11-25 09:30:00';
+    }),
   });
 
   const configState = { defaultOrchestratorAgent: configuredAgent };
@@ -2194,6 +2198,17 @@ describe('OrchestrationSessionManager', () => {
 
     chat.paused = undefined;
     expect(find(await fixture.manager.select({ sessionId: created.session.id }))?.paused).toBeUndefined();
+  });
+
+  it('reports when a Session was last opened: selecting it views its chat Pane', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Opened work' });
+    const find = (result: { sessions: OrchestrationSessionRecord[] }) => result.sessions.find(session => session.id === created.session.id);
+    expect(find(await fixture.manager.list())?.openedAt).toBeUndefined();
+
+    // The host stores the view as SQLite's UTC CURRENT_TIMESTAMP.
+    expect(find(await fixture.manager.select({ sessionId: created.session.id }))?.openedAt).toBe('2026-11-25T09:30:00.000Z');
+    expect(find(await fixture.manager.list())?.openedAt).toBe('2026-11-25T09:30:00.000Z');
   });
 
   it('supports exact-name selectors and rejects lost updates with an optimistic revision guard', async () => {

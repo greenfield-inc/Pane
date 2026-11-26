@@ -123,6 +123,8 @@ export interface OrchestrationSessionRecord {
   todoNumber?: number;
   /** Set while the Session's chat and every Pane in it are paused. Computed when read, never stored. */
   paused?: TerminalPausedMark;
+  /** When someone last opened the Session, on the desktop or a phone (its chat Pane's last view). Computed when read, never stored. */
+  openedAt?: string;
   agent: PaneChatAgent;
   /** Empty uses the selected built-in agent command. */
   launchCommand?: string;
