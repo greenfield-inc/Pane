@@ -347,6 +347,8 @@ export class NotifyQueue extends EventEmitter {
   private readonly tabsTyping = new Set<string>();
   /** Replies whose line is being typed into their reader's tab right now: not replaceable until it's known whether it went. */
   private readonly repliesTyping = new Set<string>();
+  /** The lines being typed right now: one that already left can't be taken back. */
+  private readonly messagesTyping = new Set<TabMessage>();
   /** In use and "Show cards on" as last polled; a change redraws the strip and Settings. */
   private lastAlertState: string | undefined;
 
@@ -1202,6 +1204,12 @@ export class NotifyQueue extends EventEmitter {
     if (entry.item.state === 'sent') {
       throw new PaneError('ERR_NOTIFY_ANSWERED', `${refOf(entry.item)} was just answered; the answer reaches you in a moment. Nothing was changed.`, 'Act on the answer when it comes.');
     }
+    // A reply being typed into the tab right now can't be taken back: it becomes the answer once it lands.
+    if ([...this.messagesTyping].some(message => message.itemId === entry.item.id && (message.reply || message.answer))) {
+      throw new PaneError('ERR_NOTIFY_ANSWERED', `The person's reply to ${refOf(entry.item)} is being typed into your tab right now. Nothing was changed.`, 'Read the reply when it lands and act on it.');
+    }
+    // A reply still waiting for this busy tab never goes: the card it answers is gone.
+    this.tabMessages = this.tabMessages.filter(message => message.itemId !== entry.item.id || !message.reply);
     this.closeOpen(entry, { by: 'pane', reason: ASKER_WITHDREW }, closedResult('You withdrew this question.'));
     return { closed: true, id: entry.item.id };
   }
@@ -1328,19 +1336,45 @@ export class NotifyQueue extends EventEmitter {
     this.changed();
   }
 
-  /** The answer goes to an open call; a worker's goes to its tab, since the call open on it is its orchestrator's relay. */
+  /**
+   * The one handoff for every answer, the person's or Autopilot's. A call waiting on it gets it. With
+   * none waiting it is kept for a later `--resume`, and a card asked from a Pane tab is also typed into
+   * that tab, since its asker may never call again (between resume rounds, or its call ended). A
+   * worker's goes to its tab, since the call open on it is its orchestrator's relay. Delivery by call
+   * is recorded only when a call takes the answer (here, or in `resume`).
+   */
   private handOverAnswer(entry: Entry, result: NotifyResult): void {
     const { item } = entry;
     if (item.summaryOf) {
       this.applySummary(item, result);
     }
-    const overCall = entry.waiter !== undefined || entry.resumeLoop;
+    const waiting = entry.waiter !== undefined;
     if (entry.waiter) entry.waiter.resolve(result);
     else entry.pending = result;
-    if (item.source.panelId && !item.agentPrompt && (item.originKind === 'worker' || !overCall)) this.enqueueTabMessage(item, answerLine(item), true);
-    else if (overCall) item.delivered = { via: 'call', at: Date.now() };
+    if (outlivesCall(item) && (item.originKind === 'worker' || !waiting)) this.enqueueTabMessage(item, answerLine(item), true);
+    else if (waiting) item.delivered = { via: 'call', at: Date.now() };
     this.correctRelay(item);
     this.save(entry);
+  }
+
+  /**
+   * A `--resume` took the kept answer: the call has it. Its line, if still waiting for a busy tab, is
+   * dropped so the answer arrives once; a line already being typed still lands, and the tab records it.
+   */
+  private collectedByCall(entry: Entry): void {
+    const { item } = entry;
+    if (item.state !== 'answered' || item.delivered) return;
+    this.tabMessages = this.tabMessages.filter(message => message.itemId !== item.id || !message.answer || this.messagesTyping.has(message));
+    if ([...this.messagesTyping].some(message => message.itemId === item.id && message.answer)) return;
+    item.delivered = { via: 'call', at: Date.now() };
+    this.save(entry);
+    this.changed();
+  }
+
+  /** A reply's line goes only while it is still the card's current reply and the card still waits. */
+  private replyStillOwed(message: TabMessage): boolean {
+    const item = this.entries.get(message.itemId)?.item;
+    return item !== undefined && item.state === 'waiting' && item.reply?.id === message.reply;
   }
 
   /**
@@ -1382,7 +1416,13 @@ export class NotifyQueue extends EventEmitter {
     if (!type) return;
     for (const message of [...this.tabMessages]) {
       if (this.tabsTyping.has(message.panelId)) continue;
+      // Checked again before every try: the card may have been withdrawn or closed, or the reply replaced, since it was queued.
+      if (message.reply && !this.replyStillOwed(message)) {
+        this.tabMessages = this.tabMessages.filter(other => other !== message);
+        continue;
+      }
       this.tabsTyping.add(message.panelId);
+      this.messagesTyping.add(message);
       if (message.reply) this.repliesTyping.add(message.reply);
       // Archive all on one asker's cards: their closes reach its tab as one line, so one turn.
       const batch = message.closed ? this.tabMessages.filter(other => other.panelId === message.panelId && other.closed?.tail === message.closed?.tail) : [message];
@@ -1405,6 +1445,7 @@ export class NotifyQueue extends EventEmitter {
         console.warn(`[Notify] Couldn't type into tab ${message.panelId}; the next sweep tries again:`, error);
       }).finally(() => {
         this.tabsTyping.delete(message.panelId);
+        this.messagesTyping.delete(message);
         if (message.reply) this.repliesTyping.delete(message.reply);
         // Only after a message went: a busy tab waits for its next idle or the next sweep.
         if (again && this.tabMessages.some(other => other.panelId === message.panelId)) this.flushTabMessages();
@@ -1961,6 +2002,7 @@ export class NotifyQueue extends EventEmitter {
       const result = entry.pending;
       entry.pending = undefined;
       clearTimeout(entry.graceTimer);
+      this.collectedByCall(entry);
       return Promise.resolve(result);
     }
     if (!entry || !isOpen(entry.item)) {
@@ -2189,8 +2231,9 @@ export class NotifyQueue extends EventEmitter {
     entry.resumeLoop = false;
     // A call still holding on (an idle Codex tab's) returns now; a dropped one is let go.
     entry.waiter?.resolve(waitingResult(item));
-    // Answered between resume rounds and never collected: the tab gets it after all (a later --resume still does).
-    if (entry.pending && item.state === 'answered' && item.delivered?.via !== 'tab' && !this.env.askerGone?.(item)) {
+    // Answered between resume rounds and never collected, with no line already on its way: the tab gets it (a later --resume still does).
+    const lineOwed = this.tabMessages.some(message => message.itemId === item.id && message.answer);
+    if (entry.pending && item.state === 'answered' && !item.delivered && !lineOwed && !this.env.askerGone?.(item)) {
       this.enqueueTabMessage(item, answerLine(item), true);
     }
   }

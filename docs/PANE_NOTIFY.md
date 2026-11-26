@@ -230,16 +230,29 @@ client:
 A question asked from a Pane tab doesn't depend on the call waiting on it. If
 that call ends (you interrupt the agent, a background command hits its time
 limit or is stopped, the agent restarts, or it doesn't resume within 30
-seconds), the card stays open, and your answer is typed into the asking tab as
+seconds), the card stays open. Whenever no call is waiting at the moment it is
+answered (that call ended, or the agent is between `--resume` rounds), the
+answer, yours or Autopilot's, is typed into the asking tab as
 `answer: Q-n → <answer> (by you)`, the way a worker's answer reaches it; a typed
 reply arrives as a `reply:` line, and a close as `closed: Q-n (by you)`. A later
-`runpane notify --resume <id>` still gets the answer. The card closes only when
-you answer or close it, its asker withdraws it with
+`runpane notify --resume <id>` still gets the answer; if that resume comes
+while the line is still waiting for a busy tab, the line isn't typed. The card
+closes only when you answer or close it, its asker withdraws it with
 `runpane notify --close <id|Q-n>` ("closed: its asker withdrew it"), or its
 tab, Pane or Session is gone (see
 [When an approval goes away](#when-an-approval-goes-away)). Codex 0.164 doesn't
 tell Pane when you press Esc, so Pane lets go of the call when a Codex panel
 sits idle at its prompt for 10 seconds; the card waits on the same way.
+
+`--close` withdraws only a card that is still waiting. A reply still waiting
+for the asking tab to be free is dropped with the card. While your reply is
+being typed into that tab, `--close` is refused (`ERR_NOTIFY_ANSWERED`): the
+reply becomes the answer once it lands. Only the tab that asked a card can
+withdraw it, and Pane decides which tab that is from the tab identity the
+caller sends (`PANE_SESSION_ID` and `PANE_PANEL_ID`), as it does for every
+`runpane` call. This stops ordinary tabs closing each other's cards. It isn't
+a security boundary: a program that can already call Pane's daemon can name
+any tab.
 
 A question asked from outside Pane has no tab to take a late answer, so it
 closes when its call ends and isn't resumed within 30 seconds ("closed: the
