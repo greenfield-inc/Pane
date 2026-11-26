@@ -919,6 +919,9 @@ function admitNotifyCard(request: NotifyRequest): string[] {
   // Only a card asked in words (or with options it hasn't got) is tidied into buttons.
   const tidy = request.ui === 'ask' || request.ui === 'options';
   const admitted = admitCard({ title: request.title, context: request.context, choices: request.choices, questions: request.questions, links: request.links }, { tidy });
+  // Files the card's text names are attached as links; any past the card's room are named in its context.
+  if (admitted.card.links) request.links = admitted.card.links;
+  if (admitted.card.context !== undefined) request.context = admitted.card.context;
   if (admitted.asSent) {
     const { card } = admitted;
     request.ui = 'options';

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcMain } from 'electron';
+import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
@@ -712,6 +713,25 @@ describe('Approvals items, through the registered handlers', () => {
       .rejects.toMatchObject({ code: 'ERR_NOTIFY_TITLE' });
     expect(pane.notify.snapshot().items).toEqual([]);
     pane.notify.dispose();
+  });
+
+  it('posts the card with a file its text names attached as a link, and refuses one naming a missing file', async () => {
+    const pane = await startWithSessions();
+    const folder = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'pane-card-files-'));
+    try {
+      const mock = path.join(folder, 'index.html');
+      await fsPromises.writeFile(mock, '<h1>Mock-ups</h1>');
+      const asked = pane.registry.invoke('runpane:notify', [{ ui: 'approve', title: 'Ship the mock-ups?', context: `Three options are in ${mock}.`, caller: { cwd: '/repo' } }]);
+      await flush();
+      expect(pane.notify.snapshot().items[0].links).toEqual([{ label: 'index.html', path: mock }]);
+      await expect(pane.registry.invoke('runpane:notify', [{ ui: 'approve', title: 'Ship it?', context: `See ${path.join(folder, 'old.html')}.`, caller: { cwd: '/repo' } }]))
+        .rejects.toMatchObject({ code: 'ERR_NOTIFY_UNLINKED_PATH' });
+      expect(pane.notify.snapshot().items).toHaveLength(1);
+      pane.notify.dispose();
+      await asked.catch(() => undefined);
+    } finally {
+      await fsPromises.rm(folder, { recursive: true, force: true });
+    }
   });
 
   it('takes a local file given as a url (file:// or a bare path) as the path it names', async () => {
