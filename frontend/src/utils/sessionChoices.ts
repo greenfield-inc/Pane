@@ -60,7 +60,8 @@ export function sessionChoices({ agents, profiles, profilesUnavailable, pins = [
   // except Pane's own plain ones, which are the agents above.
   const named = profiles.filter(entry => !entry.hidden && agents.includes(entry.harness) && runsThroughAgentFarm(entry.harness)).map((entry): SessionChoice => {
     const choice: SessionChoice = {
-      key: `profile:${entry.ref}`, group: 'profiles', label: profileEntryName(entry), detail: `${entry.ref} · ${agentLabel(entry.harness)}`,
+      // Agent Farm's description says what the profile is for (T-83, J1); the ref stands in without one.
+      key: `profile:${entry.ref}`, group: 'profiles', label: profileEntryName(entry), detail: `${entry.description ?? entry.ref} · ${agentLabel(entry.harness)}`,
       agent: entry.harness, profileRef: entry.ref,
     };
     if (profilesUnavailable) choice.disabledReason = profilesUnavailable;
