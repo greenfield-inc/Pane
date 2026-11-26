@@ -29,6 +29,8 @@ export interface SessionViewEntry {
   chat?: ChatTabView;
   /** Read by `open` (the agent was started) rather than only peeked. */
   opened: boolean;
+  /** When the host answered (performance.now()): a chat window read just now needs no second read. */
+  readAt: number;
 }
 
 interface SessionViewCacheState {
@@ -148,7 +150,7 @@ function entryFrom(result: OrchestrationSessionOpenResult<Session>, remembered: 
   if (!result.view) return null;
   const panels = applyChanges(result.panels, changes);
   const panel = panels.find(candidate => candidate.id === result.view?.panel.id) ?? result.view.panel;
-  return { view: panel === result.view.panel ? result.view : { ...result.view, panel }, panels, layout: result.layout, remembered, chat: result.chat, opened };
+  return { view: panel === result.view.panel ? result.view : { ...result.view, panel }, panels, layout: result.layout, remembered, chat: result.chat, opened, readAt: performance.now() };
 }
 
 /**

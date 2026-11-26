@@ -15,7 +15,7 @@ const records = ['a', 'b', 'c'].map(id => {
 function heldView(sessionId: string, type: 'chat' | 'terminal') {
   // SAFETY: the cursor reads only the agent tab's type of a held view.
   const view = { session: { id: sessionId }, internalSession: { id: `internal-${sessionId}` }, panel: { id: `panel-${sessionId}`, type } } as OrchestrationSessionView<Session>;
-  return { view, panels: [], layout: null, remembered: null, opened: true };
+  return { view, panels: [], layout: null, remembered: null, opened: true, readAt: 0 };
 }
 
 async function setup(config: Partial<AppConfig> = {}) {

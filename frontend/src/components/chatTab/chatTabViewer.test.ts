@@ -271,3 +271,36 @@ describe('chat tab viewer reopen', () => {
     expect(ids(scrolled)).toEqual([]);
   });
 });
+
+describe('a Session shown by the sidebar cursor (T-87)', () => {
+  it('reads without starting the agent while the cursor only shows it', async () => {
+    const fake = host(3);
+    const viewer = new ChatTabViewer(fake.client, 'p');
+    viewer.setStartOnRead(false);
+    const off = viewer.subscribe(() => undefined);
+    await settle();
+    expect(fake.get).toHaveBeenLastCalledWith('p', 200, { start: false });
+    off();
+  });
+
+  it('paints a window read just now without reading it again, and reads an older one', async () => {
+    const fake = host(3);
+    const viewer = new ChatTabViewer(fake.client, 'p');
+    viewer.prime(fake.view(), performance.now());
+    expect(ids(viewer)).toEqual(['m0', 'm1', 'm2']);
+    const off = viewer.subscribe(() => undefined);
+    await settle();
+    expect(fake.get).not.toHaveBeenCalled();
+    // An event past the primed window still arrives.
+    fake.append();
+    expect(ids(viewer)).toEqual(['m0', 'm1', 'm2', 'm3']);
+    off();
+
+    const stale = new ChatTabViewer(fake.client, 'p');
+    stale.prime(fake.view(), performance.now() - 60_000);
+    const offStale = stale.subscribe(() => undefined);
+    await settle();
+    expect(fake.get).toHaveBeenCalledTimes(1);
+    offStale();
+  });
+});

@@ -29,6 +29,8 @@ const HISTORY_PAGE = 500;
 /** Closed chats that keep their newest messages, so reopening one paints them at once. */
 const KEPT_CLOSED = 5;
 const KEPT_MESSAGES = 200;
+/** How long a window prime() painted counts as just read (T-87): the Session's call and this mount are one switch. */
+const PRIMED_FRESH_MS = 1000;
 /** Viewers with no screen open that still hold messages, the most recently closed last. */
 const closedWithMessages: ChatTabViewer[] = [];
 
@@ -53,6 +55,8 @@ export class ChatTabViewer {
   private notifiedAt = 0;
   /** Off while the sidebar cursor only shows the chat's Session (T-87): reads then never start its agent. */
   private startOnRead = true;
+  /** When the window prime() last painted was read (performance.now()); a fresh one spares the attach its read. */
+  private primedAt = 0;
 
   constructor(private chatClient: ChatTabClient, readonly panelId: string) {}
 
@@ -94,9 +98,12 @@ export class ChatTabViewer {
    * viewer holds none, so the chat shows before its own read returns. That read still runs
    * and replaces it, with any events that arrived meanwhile.
    */
-  prime(view: ChatTabView): void {
+  prime(view: ChatTabView, readAt: number): void {
     if (view.panelId !== this.panelId || this.state.transcript || !view.transcript) return;
     this.state = { ...this.state, view: this.state.view ?? { ...view, transcript: undefined }, transcript: view.transcript, hasNewer: false };
+    // Read this instant by the Session's call: the attach that follows needs no read of its own.
+    // A starting tab still reads, and an event past this window's revision reads again (resync).
+    if (view.status !== 'starting') this.primedAt = readAt;
   }
 
   setDraft(draft: string): void { this.publish({ draft }); }
@@ -177,7 +184,9 @@ export class ChatTabViewer {
     });
     const reconnect = client.onReconnect?.(() => { void this.refresh(); });
     this.detach = () => { events(); states(); reconnect?.(); };
-    void this.refresh();
+    const primed = this.primedAt !== 0 && performance.now() - this.primedAt < PRIMED_FRESH_MS;
+    this.primedAt = 0;
+    if (!primed) void this.refresh();
   }
 
   /** A fresh snapshot of the newest window, then any events that arrived while it loaded. */
