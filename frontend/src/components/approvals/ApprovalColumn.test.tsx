@@ -5,7 +5,7 @@ import { DEFAULT_NOTIFY_SETTINGS } from '../../../../shared/types/notify';
 import { useNotifyStore } from '../../stores/notifyStore';
 import { useApprovalColumnStore } from '../../stores/approvalColumnStore';
 import { useConfigStore } from '../../stores/configStore';
-import { ApprovalColumn, LinkTab } from './ApprovalColumn';
+import { ApprovalCaughtUp, ApprovalColumn, ApprovalSentBefore, LinkTab } from './ApprovalColumn';
 
 const q20: NotifyItem = {
   id: 'q20',
@@ -43,7 +43,7 @@ function text(markup: string): string {
 }
 
 describe('ApprovalColumn', () => {
-  beforeEach(() => useApprovalColumnStore.setState({ open: {} }));
+  beforeEach(() => useApprovalColumnStore.setState({ open: {}, advanced: {} }));
 
   it('waiting: the pager, tabs in order, both questions and one reply box', () => {
     const visible = text(show(q20, ['a', 'q20', 'b'], 'Back to doozy-overhaul'));
@@ -54,6 +54,29 @@ describe('ApprovalColumn', () => {
     expect(visible).toContain('Question 2 of 2');
     expect(visible).toContain('Recommended');
     expect(visible).toContain('Pick an option, or reply in your own words');
+  });
+
+  it('T-88: the card it moved on to says what was sent, with Undo while held, and how many are left', () => {
+    const sent: NotifyItem = { ...q20, id: 'q19', title: 'Q-19: Ship it?', state: 'sent', answerSummary: 'Ship it' };
+    expect(text(renderToStaticMarkup(<ApprovalSentBefore item={sent} left={2} onUndo={() => undefined} />))).toBe('Sent “Ship it” to doozy-overhaul Undo 2 left');
+    // Once the hold ends there is nothing to undo.
+    expect(text(renderToStaticMarkup(<ApprovalSentBefore item={{ ...sent, state: 'answered' }} left={2} onUndo={() => undefined} />))).toBe('Sent “Ship it” to doozy-overhaul 2 left');
+  });
+
+  it('T-88: each option shows the number key that picks it', () => {
+    const markup = show(q20);
+    expect(markup).toContain('aria-keyshortcuts="1"');
+    expect(markup).toContain('aria-keyshortcuts="2"');
+  });
+
+  it('T-88: says all caught up when nothing else waits, with Undo and the way back', () => {
+    const sent: NotifyItem = { ...q20, state: 'sent', answerSummary: 'One train' };
+    const visible = text(renderToStaticMarkup(
+      <ApprovalCaughtUp surface="session:s1" sent={sent} groupLabel="Doozy approvals" closeLabel="Back to chat" onClose={() => undefined} onUndo={() => undefined} />,
+    ));
+    expect(visible).toBe('All caught up Nothing else in Doozy approvals is waiting on you. Sent “One train” to doozy-overhaul · Undo Back to chat');
+    // After a Dismiss there was nothing sent to name.
+    expect(text(renderToStaticMarkup(<ApprovalCaughtUp surface="approvals" groupLabel="Approvals" onUndo={() => undefined} />))).toBe('All caught up Nothing else in Approvals is waiting on you.');
   });
 
   it('opens with nothing picked, recommended or not, and Send off (D-385)', () => {

@@ -1,6 +1,7 @@
 import { useReadOnlyHost } from '../../../stores/readOnlyHostStore';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { BarChart3, ExternalLink, Image as ImageIcon, ListTodo, MessageSquareMore, MoreHorizontal, Plus, X, type LucideIcon } from 'lucide-react';
+import { newestFirst } from '../../../../../shared/approvalOrder';
 import { leadingQn } from '../../../../../shared/autopilotDecision';
 import type { TodoAttachment, TodoDetail } from '../../../../../shared/types/todos';
 import { LOCAL_MACHINE_ID } from '../../../../../shared/types/machineConnections';
@@ -400,7 +401,7 @@ function ApprovalOverSplit({ baseRef, detail, approval, onOpenApproval, onClose,
   const waiting = item ? countsAsWaiting(item) : false;
   const order = useMemo(() => {
     const linked = new Set(detail.approvalIds);
-    return items.filter((candidate) => linked.has(candidate.id) && countsAsWaiting(candidate)).sort((a, b) => a.createdAt - b.createdAt).map((candidate) => candidate.id);
+    return items.filter((candidate) => linked.has(candidate.id) && countsAsWaiting(candidate)).sort(newestFirst).map((candidate) => candidate.id);
   }, [items, detail.approvalIds]);
   // Each approval opens on its Q&A tab; the column keeps its own tab within it after that.
   useEffect(() => {

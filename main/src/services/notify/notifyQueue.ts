@@ -32,6 +32,7 @@ import type { AppConfig } from '../../types/config';
 import { PaneError } from '../../../../shared/paneError';
 import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 import { leadingQn } from '../../../../shared/autopilotDecision';
+import { newestFirst } from '../../../../shared/approvalOrder';
 import { connectedOf, originOf, type ApprovalStore } from '../approvals/approvalStore';
 
 /** Pane holds an answer this long so Undo can take it back. */
@@ -313,6 +314,8 @@ export class NotifyQueue extends EventEmitter {
   private readonly entries = new Map<string, Entry>();
   /** Waiting question ids, oldest first. */
   private queue: string[] = [];
+  /** Questions Skip sent to the back: newer ones go in front of them, whatever their time (T-88). */
+  private readonly skipped = new Set<string>();
   private readonly hidden = new Set<string>();
   /** The tabs each moving Session is stopping, by move id: their cards are held for the move (T-44). */
   private readonly moveHoldPanels = new Map<string, Set<string>>();
@@ -386,6 +389,8 @@ export class NotifyQueue extends EventEmitter {
       if (item.dismissedAt !== undefined) this.hidden.add(item.id);
       if (item.quiet) this.armRing(entry);
     }
+    // Newest first, as it was before the restart (T-88).
+    this.queue = this.byNewest(this.queue);
     for (const entry of this.entries.values()) {
       const { item } = entry;
       if (item.state === 'answered' && !item.delivered && !item.undelivered && item.source.panelId && !item.agentPrompt) this.enqueueTabMessage(item, answerLine(item), true);
@@ -468,7 +473,8 @@ export class NotifyQueue extends EventEmitter {
       return Promise.resolve({ delivered });
     }
 
-    this.queue.push(item.id);
+    // Newest on top, like a stack (T-88).
+    this.enqueue(item);
     // A question never waits behind an update; the update stays under For your information.
     if (this.transient?.view.kind === 'info') this.clearTransient();
     this.chime(item.id);
@@ -598,7 +604,7 @@ export class NotifyQueue extends EventEmitter {
     const entry: Entry = { item, resumeLoop: false };
     this.entries.set(item.id, entry);
     this.save(entry);
-    this.queue.push(item.id);
+    this.enqueue(item);
     if (item.quiet) this.armRing(entry);
     this.changed();
   }
@@ -1121,6 +1127,9 @@ export class NotifyQueue extends EventEmitter {
     item.staleSince = undefined;
     item.dismissedAt = undefined;
     this.hidden.delete(item.id);
+    // Its new version is the newest card: back on top (T-88).
+    this.queue = this.queue.filter(other => other !== item.id);
+    this.enqueue(item);
     this.save(entry);
     // Ready again is quiet: a notice where the person is, and no chime (D-244).
     const current = this.strip();
@@ -1175,6 +1184,7 @@ export class NotifyQueue extends EventEmitter {
     // An answer still waiting for the next --resume is no longer the answer.
     entry.pending = undefined;
     this.queue = [item.id, ...this.queue.filter(other => other !== item.id)];
+    this.skipped.delete(item.id);
     // The relay that returned the reply as the answer hears it doesn't stand; the new answer follows as a correction.
     const relay = item.relayedBy;
     if (item.originKind === 'worker' && relay && item.reply && item.reply.reader?.kind !== 'orchestrator') {
@@ -1319,6 +1329,7 @@ export class NotifyQueue extends EventEmitter {
     if (device) entry.item.reopened.device = device;
     entry.restored = true;
     this.queue = [id, ...this.queue];
+    this.skipped.delete(id);
     this.save(entry);
     this.changed();
   }
@@ -2210,6 +2221,7 @@ export class NotifyQueue extends EventEmitter {
     entry.item.dismissedAt = undefined;
     this.save(entry);
     this.queue = [id, ...this.queue];
+    this.skipped.delete(id);
     if (this.transient?.view.itemId === id) this.clearTransient();
   }
 
@@ -2303,6 +2315,7 @@ export class NotifyQueue extends EventEmitter {
   private skip(id: string): void {
     if (!this.queue.includes(id)) return;
     this.queue = [...this.queue.filter(other => other !== id), id];
+    this.skipped.add(id);
     this.changed();
   }
 
@@ -2353,7 +2366,7 @@ export class NotifyQueue extends EventEmitter {
     this.transient = null;
   }
 
-  /** What the strip shows: a confirmation, expiry or update first, else the oldest visible question. */
+  /** What the strip shows: a confirmation, expiry or update first, else the newest visible question (T-88). */
   private strip(): NotifyStripView | null {
     if (this.transient) return this.transient.view;
     const hidden = this.allHidden();
@@ -2380,7 +2393,28 @@ export class NotifyQueue extends EventEmitter {
     return undefined;
   }
 
-  /** Every machine's waiting questions, oldest first; each machine keeps its own order (skip moves one back). */
+  /**
+   * Puts a card in the queue where the shared comparator lists it (T-88): ahead of the first card
+   * it sorts before, so cards of the same millisecond agree with every list. Cards skipped to the
+   * back stay behind it.
+   */
+  private enqueue(item: NotifyItem): void {
+    this.skipped.delete(item.id);
+    const at = this.queue.findIndex(other => {
+      const queued = this.find(other);
+      return queued === undefined || this.skipped.has(other) || newestFirst(item, queued) < 0;
+    });
+    if (at === -1) this.queue.push(item.id);
+    else this.queue.splice(at, 0, item.id);
+  }
+
+  /** These ids, newest first by `approvalListedAt` (T-88). */
+  private byNewest(ids: readonly string[]): string[] {
+    const items = ids.flatMap(id => this.find(id) ?? []);
+    return items.sort(newestFirst).map(item => item.id);
+  }
+
+  /** Every machine's waiting questions, newest first (T-88); each machine keeps its own order (skip moves one back). */
   private allQueued(): string[] {
     const queues = [this.localQueue(), ...[...this.remotes.values()].map(remote => remote.queue.filter(id => !this.sendingHere.has(id)))].filter(queue => queue.length > 0);
     if (queues.length <= 1) return [...queues[0] ?? []];
@@ -2388,11 +2422,12 @@ export class NotifyQueue extends EventEmitter {
     const merged: string[] = [];
     for (;;) {
       let pick = -1;
-      let pickAt = Infinity;
+      let pickHead: NotifyItem | undefined;
       queues.forEach((queue, index) => {
         if (heads[index] >= queue.length) return;
-        const at = this.find(queue[heads[index]])?.createdAt ?? Infinity;
-        if (pick === -1 || at < pickAt) { pick = index; pickAt = at; }
+        const head = this.find(queue[heads[index]]);
+        // The shared comparator, so a tie goes the way the Approvals list shows it; unknown last.
+        if (pick === -1 || (head && (!pickHead || newestFirst(head, pickHead) < 0))) { pick = index; pickHead = head; }
       });
       if (pick === -1) return merged;
       merged.push(queues[pick][heads[pick]++]);

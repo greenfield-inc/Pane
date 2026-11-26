@@ -75,23 +75,24 @@ test('T-24: a Session\'s to-dos\' approvals dock above its chat with its own, ea
   await openChat(page, [review, prompt, own]);
   await expect(card(page)).toHaveCount(1);
   await expect(card(page).getByTestId('session-approval-card-pager')).toHaveText('1 of 3');
-  // Oldest first: the review names T-3 once; the prompt from T-3's hidden Session names T-3 and its orchestrator.
-  await expect(card(page).getByTestId('session-approval-card-title')).toHaveText('Review T-3: Pane Selection');
-  await expect(meta(page)).toContainText('T-3');
-  await expect(meta(page)).not.toContainText('T-3 · T-3');
+  // Newest first (T-88): Q-45, then the prompt from T-3's hidden Session (it names T-3 and its
+  // orchestrator), then the review (it names T-3 once).
+  await expect(card(page).getByTestId('session-approval-card-title')).toHaveText('Q-45: Show the version badge in the web footer too?');
+  await expect(meta(page)).not.toContainText('T-3');
   await card(page).getByTestId('session-approval-card-next').click();
   await expect(card(page).getByTestId('session-approval-card-title')).toHaveText('Allow pkill -f vite?');
   await expect(meta(page)).toContainText('T-3 · orchestrator');
   await expect(meta(page)).not.toContainText('Pane Selection orchestrator');
   await card(page).getByTestId('session-approval-card-next').click();
-  await expect(card(page).getByTestId('session-approval-card-title')).toHaveText('Q-45: Show the version badge in the web footer too?');
-  await expect(meta(page)).not.toContainText('T-3');
+  await expect(card(page).getByTestId('session-approval-card-title')).toHaveText('Review T-3: Pane Selection');
+  await expect(meta(page)).toContainText('T-3');
+  await expect(meta(page)).not.toContainText('T-3 · T-3');
   // Dismiss leaves it waiting in Approvals; the pager drops it.
   await card(page).getByRole('button', { name: 'Dismiss' }).click();
   await expect(card(page).getByTestId('session-approval-card-pager')).toHaveText(/of 2$/);
   // Answered anywhere: it leaves the dock.
   // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
-  await page.evaluate((next) => (window as MockWindow).__paneTestElectronMock.emitNotifySnapshot(next), snapshot([{ ...review, state: 'answered' }, prompt, own]));
+  await page.evaluate((next) => (window as MockWindow).__paneTestElectronMock.emitNotifySnapshot(next), snapshot([review, prompt, { ...own, state: 'answered' }]));
   await expect(card(page).getByTestId('session-approval-card-pager')).toHaveText('1 of 1');
   await expect(card(page).getByTestId('session-approval-card-title')).toHaveText('Allow pkill -f vite?');
 });

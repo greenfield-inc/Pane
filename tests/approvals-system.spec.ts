@@ -73,18 +73,18 @@ test('J6, P5: the chat shows one compact card with a pager and no options, leavi
   await openChat(page, [q42, q44, q45, ownQuestion]);
   const cards = page.getByTestId('session-approval-card');
   await expect(cards).toHaveCount(1);
-  // Oldest first, as the column's pager walks them; the chat's own AskUserQuestion isn't one of them.
+  // Newest first, as the column's pager walks them (T-88); the chat's own AskUserQuestion isn't one of them.
   await expect(page.getByTestId('session-approval-card-pager')).toHaveText('1 of 3');
-  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q45.title);
-  await expect(page.getByTestId('session-approval-card-subtitle')).toHaveText(q45.context ?? '');
-  await expect(page.getByTestId('session-approval-card-choice')).toHaveCount(0);
-  await page.getByTestId('session-approval-card-next').click();
-  await page.getByTestId('session-approval-card-next').click();
-  await expect(page.getByTestId('session-approval-card-pager')).toHaveText('3 of 3');
   await expect(page.getByTestId('session-approval-card-title')).toHaveText(q42.title);
   await expect(cards).toContainText('2 questions');
   await expect(cards).toContainText('3 references');
+  await expect(page.getByTestId('session-approval-card-choice')).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('08-compact-card.png') });
+  await page.getByTestId('session-approval-card-next').click();
+  await page.getByTestId('session-approval-card-next').click();
+  await expect(page.getByTestId('session-approval-card-pager')).toHaveText('3 of 3');
+  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q45.title);
+  await expect(page.getByTestId('session-approval-card-subtitle')).toHaveText(q45.context ?? '');
 });
 
 test('J8: after a send, a status line names the agent reading the reply, and the next approval takes the card', async ({ page }, testInfo) => {
@@ -100,20 +100,20 @@ test('J8: after a send, a status line names the agent reading the reply, and the
 test('Q-389: Dismiss on the chat\'s card closes it without answering; it stays in Approvals and comes back only when it changes', async ({ page }, testInfo) => {
   await openChat(page, [q44, q45]);
   await expect(page.getByTestId('session-approval-card-pager')).toHaveText('1 of 2');
-  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q45.title);
+  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q44.title);
   await page.screenshot({ path: testInfo.outputPath('q389-chat-card-with-dismiss.png') });
 
   await page.getByTestId('session-approval-card-dismiss').click();
   // No answer: only the strip's dismiss, which keeps the item waiting in Approvals.
-  await expect.poll(() => notifyCommands(page)).toEqual([{ type: 'dismiss', id: 'q45' }]);
+  await expect.poll(() => notifyCommands(page)).toEqual([{ type: 'dismiss', id: 'q44' }]);
   await expect(page.getByTestId('session-approval-card-pager')).toHaveText('1 of 1');
-  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q44.title);
+  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q45.title);
   await page.screenshot({ path: testInfo.outputPath('q389-after-dismiss.png') });
 
-  // A new version of the dismissed item brings it back to this chat.
-  await emitSnapshot(page, snapshot([q44, { ...q45, version: 2 }]));
+  // A new version of the dismissed item brings it back to this chat, on top as the newest (T-88).
+  await emitSnapshot(page, snapshot([{ ...q44, version: 2, revision: { asked: '', whatChanged: ['Reworded'], by: 'p2-review', at: Date.now() } }, q45]));
   await expect(page.getByTestId('session-approval-card-pager')).toHaveText('1 of 2');
-  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q45.title);
+  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q44.title);
 });
 
 test("T-11: Dismiss with the keyboard moves focus to the chat's next card, the one before when it was last, then the message box", async ({ page }) => {
@@ -127,14 +127,14 @@ test("T-11: Dismiss with the keyboard moves focus to the chat's next card, the o
   // The middle card: the next one takes its place, and the focus.
   await page.getByTestId('session-approval-card-dismiss').focus();
   await page.keyboard.press('Enter');
-  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q42.title);
+  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q45.title);
   await expect(pager).toHaveText('2 of 2');
   await expect(card).toBeFocused();
 
   // The last card: the one before it.
   await page.getByTestId('session-approval-card-dismiss').focus();
   await page.keyboard.press('Enter');
-  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q45.title);
+  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q42.title);
   await expect(card).toBeFocused();
 
   // None left: the chat's message box.
@@ -142,5 +142,5 @@ test("T-11: Dismiss with the keyboard moves focus to the chat's next card, the o
   await page.keyboard.press('Enter');
   await expect(card).toHaveCount(0);
   await expect(page.getByRole('textbox', { name: 'Message Claude' })).toBeFocused();
-  await expect.poll(() => notifyCommands(page)).toEqual([{ type: 'dismiss', id: 'q44' }, { type: 'dismiss', id: 'q42' }, { type: 'dismiss', id: 'q45' }]);
+  await expect.poll(() => notifyCommands(page)).toEqual([{ type: 'dismiss', id: 'q44' }, { type: 'dismiss', id: 'q45' }, { type: 'dismiss', id: 'q42' }]);
 });

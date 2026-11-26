@@ -15,6 +15,8 @@ interface OpenApproval {
   tab: string;
   /** Another approval opened in place from a link: Back returns to `itemId`. */
   nested?: string;
+  /** `itemId` was answered (or dismissed) and nothing else waits here: the column says so (T-88). */
+  caughtUp?: true;
 }
 
 /** One approval's unsent reply: one pick per question ('' for none) and the words typed. */
@@ -37,6 +39,14 @@ interface ApprovalColumnState {
   setTab(surface: ApprovalSurface, itemId: string, tab: string): void;
   openNested(surface: ApprovalSurface, itemId: string, nested: string | undefined): void;
   close(surface: ApprovalSurface): void;
+  /**
+   * The approval just answered on each surface, when the column moved on to the next one by itself
+   * (T-88): the next card says it was sent, with Undo while it can be. Paging or picking clears it.
+   */
+  advanced: Partial<Record<ApprovalSurface, string>>;
+  noteAdvanced(surface: ApprovalSurface, itemId: string | null): void;
+  /** Nothing else waits on this surface: the column shows "All caught up" in place of `itemId`. */
+  showCaughtUp(surface: ApprovalSurface, itemId: string): void;
   /** Cards dismissed from a chat's dock (Q-389): chat → item id → the `dockKey` it was dismissed at. */
   docked: Record<string, Record<string, string>>;
   dismissDocked(chat: string, itemId: string, key: string): void;
@@ -57,7 +67,12 @@ export const useApprovalColumnStore = create<ApprovalColumnState>((set, get) => 
     get().setDraft(key, null);
     return true;
   },
-  openApproval: (surface, itemId, tab = 'qa') => set((state) => ({ open: { ...state.open, [surface]: { itemId, tab } } })),
+  // Opening an approval by hand ends the "Sent" line the column moved on with (T-88).
+  openApproval: (surface, itemId, tab = 'qa') => set((state) => {
+    const advanced = { ...state.advanced };
+    delete advanced[surface];
+    return { open: { ...state.open, [surface]: { itemId, tab } }, advanced };
+  }),
   // Approvals opens its column from the list's selection, so a tab can be the first thing set.
   setTab: (surface, itemId, tab) => set((state) => ({ open: { ...state.open, [surface]: { itemId, tab } } })),
   openNested: (surface, itemId, nested) => set((state) => {
@@ -70,6 +85,14 @@ export const useApprovalColumnStore = create<ApprovalColumnState>((set, get) => 
     delete open[surface];
     return { open };
   }),
+  advanced: {},
+  noteAdvanced: (surface, itemId) => set((state) => {
+    const advanced = { ...state.advanced };
+    if (itemId) advanced[surface] = itemId;
+    else delete advanced[surface];
+    return { advanced };
+  }),
+  showCaughtUp: (surface, itemId) => set((state) => ({ open: { ...state.open, [surface]: { itemId, tab: 'qa', caughtUp: true } } })),
   docked: {},
   dismissDocked: (chat, itemId, key) => set((state) => ({ docked: { ...state.docked, [chat]: { ...state.docked[chat], [itemId]: key } } })),
 }));

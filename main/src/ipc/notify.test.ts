@@ -237,7 +237,8 @@ describe('Notify across machines, through the registered handlers', () => {
     const saved = savedMachines({ studio: stateOf('mac-studio', question('q-1', 'Ship it?', 1_000)), devbox: stateOf('parsa-devbox', question('q-1', 'Ship it?', 2_000)) });
     followSavedMachines(saved.machines);
     await flush();
-    expect(pane.notify.snapshot().queue).toEqual(['studio:q-1', 'devbox:q-1']);
+    // Newest first across machines (T-88): devbox's was asked later.
+    expect(pane.notify.snapshot().queue).toEqual(['devbox:q-1', 'studio:q-1']);
 
     await pane.notify.run({ type: 'answer', id: 'devbox:q-1', answer: { approved: true } });
     await pane.notify.run({ type: 'skip', id: 'studio:q-1' });
