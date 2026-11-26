@@ -1,5 +1,5 @@
 import {
-  client, methods, RequestError, type ClientConnection, type ContentBlock, type CreateElicitationRequest, type CreateElicitationResponse,
+  client, methods, RequestError, type AvailableCommand, type ClientConnection, type ContentBlock, type CreateElicitationRequest, type CreateElicitationResponse,
   type ClientCapabilities, type InitializeResponse, type LoadSessionRequest, type LoadSessionResponse, type NewSessionRequest, type NewSessionResponse,
   type PromptResponse, type AnyMessage, type Stream, type RequestPermissionRequest, type SessionInfo, type SessionNotification, type RequestPermissionResponse, type SessionConfigOption, type SessionUpdate,
 } from '@agentclientprotocol/sdk';
@@ -32,6 +32,8 @@ export interface ChatTabRuntimeOptions {
   approveOnce?: () => boolean;
   /** Tell the agent Pane can run its terminal sign-in (ACP `auth.terminal`); only for agents launched as their own CLI. */
   terminalAuth?: boolean;
+  /** How the agent's command list marks a skill (the agents config's `chat.skills`). */
+  skills?: 'meta' | 'dollar';
   onApprovedOnce?: (request: RequestPermissionRequest) => void;
 }
 
@@ -64,6 +66,8 @@ const asyncTaskUpdate = boundary.object({
   asyncTaskId: boundary.string, taskType: boundary.optional(boundary.string), state: boundary.optional(boundary.string),
   name: boundary.optional(boundary.string), description: boundary.optional(boundary.string), canStop: boundary.optional(boundary.boolean),
 });
+/** claude-agent-acp's mark on a skill, for a client that announced the air extension. Its SKILL.md path stays here. */
+const skillMeta = boundary.object({ jetbrains: boundary.object({ air: boundary.object({ kind: boundary.literal('skill') }) }) });
 const stopResult = boundary.object({ stopped: boundary.optional(boundary.boolean) });
 /**
  * ACP's steering extension (claude-agent-acp, codex-acp): delivers a message into the running turn,
@@ -387,10 +391,19 @@ export class ChatTabRuntime {
     if (update.sessionUpdate === 'config_option_update') { this.configOptions = update.configOptions; this.options.onState(); }
     if (update.sessionUpdate === 'usage_update') { this.contextUsage = { used: update.used, size: update.size }; this.options.onState(); }
     if (update.sessionUpdate === 'available_commands_update') {
-      this.availableCommands = update.availableCommands.map(command => ({ name: command.name, description: command.description, hint: command.input && 'hint' in command.input ? command.input.hint : undefined }));
+      this.availableCommands = update.availableCommands.map(command => {
+        const entry: ChatTabCommand = { name: command.name, description: command.description, hint: command.input && 'hint' in command.input ? command.input.hint : undefined };
+        if (this.marksSkill(command)) entry.skill = true;
+        return entry;
+      });
       this.options.onState();
     }
     this.options.onUpdate(update);
+  }
+
+  private marksSkill(command: AvailableCommand): boolean {
+    if (this.options.skills === 'dollar') return command.name.startsWith('$');
+    return this.options.skills === 'meta' && decodeOptionalBoundary(command._meta, skillMeta) !== undefined;
   }
 
   /**

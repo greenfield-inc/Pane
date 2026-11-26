@@ -884,6 +884,10 @@
             "minLength": 1
           }
         },
+        "skills": {
+          "description": "How the agent's command list marks a skill, and how a message runs one. meta: an _meta kind; Pane sends the skill as a `/name` message part of its own. dollar: a `$name` command name; the agent reads `$name` in the text. Absent: skills are not marked.",
+          "enum": ["meta", "dollar"]
+        },
         "legacyClients": {
           "description": "Pane apps from before the agent catalog can show this agent's chat tabs. The host hides every other agent's chat tabs from them.",
           "type": "boolean"

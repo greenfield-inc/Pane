@@ -8,6 +8,8 @@ const terminalMeta = boundary.object({ terminal_output_delta: boundary.optional(
 import type { AgentChatMessage, AgentChatPart } from '../../../../shared/types/agentChat';
 import { chatMessageSchema } from '../../../../shared/types/chatTabDecoders';
 import { steeredMessageId } from '../../../../shared/chatTabPresentation';
+import { contentTexts } from './skillDispatch';
+import type { SentMessage } from './sentMessages';
 import { patchTool, type ChatTabChange, type ChatTabEvent, type ChatTabTranscript, type ChatToolPatch, type ChatTurnTime } from '../../../../shared/types/chatTab';
 
 export interface ChatTranscriptOptions {
@@ -17,6 +19,8 @@ export interface ChatTranscriptOptions {
   windowBytes?: number;
   /** Time rows saved by earlier generations; history replay puts each back after the message it followed. */
   turnTimes?: readonly ChatTurnTime[];
+  /** Messages of the loaded conversation the agent was sent in another form; history replay shows them as typed. */
+  sentMessages?: readonly SentMessage[];
 }
 
 /** Marks the end of a live turn, for the folded turn line (duration and how it ended). */
@@ -53,10 +57,13 @@ export class ChatTranscript {
   private anchor?: string;
   /** A saved time row whose message just replayed; it goes in before the next new message. */
   private restore?: ChatTurnTime;
+  private readonly awaited: SentMessage[];
+  private readonly replayedUser = new Set<string>();
 
   constructor(readonly panelId: string, readonly generation: number, private readonly options: ChatTranscriptOptions) {
     this.windowMessages = options.windowMessages ?? 1000;
     this.windowBytes = options.windowBytes ?? 24 * 1024 * 1024;
+    this.awaited = [...options.sentMessages ?? []];
     this.turnTimes = new Map((options.turnTimes ?? []).map(turn => [turn.after, turn]));
     mkdirSync(path.dirname(options.spoolFile), { recursive: true, mode: 0o700 });
     rmSync(options.spoolFile, { force: true });
@@ -116,12 +123,13 @@ export class ChatTranscript {
 
   /** History replay finished: the last replayed turn's time row goes in now. */
   replayed(): void {
+    this.showAsTyped();
     this.anchor = undefined;
     this.insertRestored();
   }
 
-  /** The prompt as Pane sent it; `steered` when Send now delivered it into the running turn. An echo of the same text from the agent is folded into it. */
-  userMessage(operationId: string, content: ContentBlock[], steered = false): ChatTabEvent[] {
+  /** The prompt as typed; `steered` when Send now delivered it into the running turn. An echo from the agent of the text it was `sent` is folded into it. */
+  userMessage(operationId: string, content: ContentBlock[], steered = false, sent: ContentBlock[] = content): ChatTabEvent[] {
     this.chunk = undefined;
     this.anchor = undefined;
     this.sequence++; // The next to-do list is this prompt's own.
@@ -132,7 +140,7 @@ export class ChatTranscript {
       const event = this.commit({ type: 'append', id, role: 'user', part });
       if (event) events.push(event);
     }
-    this.echo = { text: content.flatMap(block => block.type === 'text' ? [block.text] : []).join(''), received: '' };
+    this.echo = { text: contentTexts(sent).join(''), received: '' };
     return events;
   }
 
@@ -148,6 +156,7 @@ export class ChatTranscript {
         }
         if (role === 'assistant') this.echo = undefined;
         const id = this.chunkId(role, update.messageId ?? undefined);
+        if (role === 'user' && this.awaited.length && update.content.type === 'text') this.replayedUser.add(id);
         const part: AgentChatPart = update.content.type === 'text'
           ? { type: update.sessionUpdate === 'agent_thought_chunk' ? 'thought' : 'text', text: update.content.text }
           : { type: 'content', content: decodeBoundary(update.content, boundary.json) };
@@ -260,6 +269,28 @@ export class ChatTranscript {
     const event: ChatTabEvent = { panelId: this.panelId, generation: this.generation, revision: this.revision, index, change: structuredClone(change) };
     this.evict();
     return event;
+  }
+
+  /**
+   * Puts back what was typed where the agent replayed only the parts it was sent. The agent may keep the
+   * newest messages alone, so both lists are matched from their ends.
+   */
+  private showAsTyped(): void {
+    const ids = [...this.replayedUser];
+    this.replayedUser.clear();
+    for (const sent of this.awaited.splice(0).reverse()) {
+      const forms = [sent.parts.join(''), sent.parts.at(-1) ?? ''].map(form => form.trim());
+      for (let at = ids.length - 1; at >= 0; at -= 1) {
+        const index = this.indexes.get(ids[at]);
+        // Paged out of memory: its replayed form stays.
+        const message = index === undefined || index < this.base ? undefined : this.residentMessages[index - this.base];
+        const text = message?.parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('').trim();
+        if (!message || text === undefined || !forms.includes(text)) continue;
+        this.commit({ type: 'replace', message: { ...message, parts: [{ type: 'text', text: sent.text }, ...message.parts.filter(part => part.type !== 'text')] } });
+        ids.splice(at);
+        break;
+      }
+    }
   }
 
   private insertRestored(): void {

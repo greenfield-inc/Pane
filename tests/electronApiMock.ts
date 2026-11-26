@@ -1390,6 +1390,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         unqueue: done, sendNow: done, editQueued: done, clear: done, stopTask: done, configure: done, cancel: done,
         permission: done, answer: done, restart: done, resume: done, dismissBanner: done,
         conversations: () => Promise.resolve([]),
+        files: () => Promise.resolve([]),
         signIn: (panelId: string) => Promise.resolve({ panelId }),
         onEvent: () => () => undefined,
         onState: () => () => undefined,

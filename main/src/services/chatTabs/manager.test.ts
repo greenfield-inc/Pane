@@ -589,6 +589,31 @@ describe('chat tab manager', () => {
     expect(turnEnds(manager.view('p1'))).toEqual(['end_turn', 'end_turn']);
   });
 
+  it('sends a skill as its own part, and shows the message as typed, also after a restart', { timeout: 60_000 }, async () => {
+    const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_SKILLS: '1' });
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    await expect.poll(() => manager.view('p1').commands).toContainEqual({ name: 'simplify', description: 'The simplify skill', skill: true });
+    expect(manager.view('p1').mentions).toEqual({ files: true, skills: true });
+    const texts = ['/simplify two', 'First this, then $simplify two', 'Then that: $simplify\ntwo'];
+    for (const [index, text] of texts.entries()) {
+      manager.send('p1', { operationId: `op-${index}`, text });
+      await expect.poll(() => manager.receipt('p1', `op-${index}`)?.state, { timeout: 10_000 }).toBe('completed');
+    }
+    expect(replyText(manager.view('p1'))).toBe([
+      'Parts: ["/simplify two"]', 'Parts: ["First this, then /simplify two","/simplify two"]', 'Parts: ["Then that: /simplify\\ntwo","/simplify two"]',
+    ].join('|'));
+    expect(userTexts(manager.view('p1'))).toEqual(texts);
+    await manager.restart('p1');
+    expect(userTexts(manager.view('p1'))).toEqual(texts);
+    // Another tab that opens the same conversation shows it as typed too.
+    const sessionId = store.state('p1')!.acpSessionId!;
+    await manager.close('p1');
+    store.add('p2', { ...newTab(directory), acpSessionId: sessionId });
+    await manager.ensure('p2');
+    expect(userTexts(manager.view('p2'))).toEqual(texts);
+  });
+
   it('Send now keeps the message queued, with a notice, when the agent refuses the steer', { timeout: 30_000 }, async () => {
     const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_STEER_FAILS: '1' });
     store.add('p1', newTab(directory));

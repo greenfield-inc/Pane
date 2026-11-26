@@ -5,9 +5,10 @@ import { Keyboard, StyleSheet, View } from 'react-native';
 
 import { chatAgentLabel } from '@shared/chatAgentMenu';
 import { arrangeComposerControls, choiceName, isRiskyMode, paneFullAccessOn, triggerLabels } from '@shared/chatComposerControls';
+import { applyPick, commandText, composerPlaceholder, fileReference, messageReferences, moveMarks, skillNames, type ComposerMark } from '@shared/composerMentions';
 import { chatTurns, waitingToolIds, type ChatWorkerLine } from '@shared/chatTabPresentation';
 import { rejectOption } from '@shared/chatTabPermissions';
-import type { ChatTabCommand, ChatTabSend } from '@shared/types/chatTab';
+import type { ChatTabSend } from '@shared/types/chatTab';
 
 import { useDaemon, useReadOnlyHost } from '@/daemon';
 import { useJourneyMark, useLiveMarks, useScreenJourney } from '@/features/perf/usePerfMarks';
@@ -17,10 +18,10 @@ import { EmptyState, SkeletonSwap, Text } from '@/ui';
 import { ComposerSheet } from '../composer/ComposerSheet';
 import { Dimmed } from '../hosts/ConnectionStatus';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
-import { ChatCommandList } from './ChatCommandList';
+import { ChatCommandList, type ChatMenuPick } from './ChatCommandList';
 import { ChatTabComposer } from './ChatTabComposer';
 import { ChatTabSettings } from './ChatTabSettings';
-import { matchingCommands } from './chatComposer';
+import { CLOSED_MENU, menuAfterCaret, menuAfterEdit, type ComposerMenuState } from './composerMenu';
 import { ApprovalCard, DockButton, ProblemBanner, QuestionCard, QueueList } from './ChatTabDock';
 import { ChatRowsSkeleton, ChatRowView, type ChatRowActions } from './ChatTabRows';
 import { chatRows } from './chatRows';
@@ -44,7 +45,12 @@ export interface ChatTabScreenProps {
   onOpenWorker?: (paneId: string) => void;
   onOpenDevice?: (panelId: string) => void;
   onViewDiff?: (path: string) => void;
+  /** The Session orchestrator's chat, for its placeholder. */
+  session?: boolean;
+  /** A fixed placeholder (Autopilot's); without one, the box names what @, $ and / do. */
   placeholder?: string;
+  /** Opens a file a sent message names, under the tab's folder; the reason it could not, for the chat to show. */
+  onOpenFile?: (path: string) => Promise<string | undefined>;
   /** Fenced blocks this screen draws itself, by language (Autopilot's `autopilot-items` cards). */
   blocks?: Readonly<Record<string, (content: string) => ReactNode>>;
   /** A person's message shown as a short notice instead, '' to hide it, or undefined to keep it (Autopilot's control lines). */
@@ -61,7 +67,7 @@ export interface ChatTabScreenProps {
  * owns the composer; Pane draws the rows (Legend List over chatRows), the dock
  * and the composer's parts.
  */
-export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, onViewDiff, placeholder, blocks, userNotice, queuedLabel, settings: showSettings = true }: ChatTabScreenProps) {
+export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, onViewDiff, onOpenFile, session, placeholder, blocks, userNotice, queuedLabel, settings: showSettings = true }: ChatTabScreenProps) {
   const theme = useTheme();
   useScreenJourney('chat');
   const { chat, viewer, snapshot, whenConnected } = useChatTab(panelId);
@@ -75,16 +81,25 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
   /** A message tapped while the connection comes back waits for it; nothing else goes out meanwhile. */
   const [awaitingConnection, setAwaitingConnection] = useState(false);
   const [settings, setSettings] = useState(false);
+  const [menu, setMenu] = useState<ComposerMenuState>(CLOSED_MENU);
+  /** The picked references tinted in the box, for exactly this text; undefined until the draft is first edited or restored. */
+  const [marked, setMarked] = useState<{ text: string; marks: readonly ComposerMark[] }>();
+  const [caret, setCaret] = useState<number>();
   const working = view?.status === 'working' || view?.status === 'blocked';
   const messages = snapshot.transcript?.messages ?? [];
   const waiting = waitingToolIds(view?.permissions, view?.questions);
   const rows = chatRows(chatTurns(messages, { running: working }), { open, workers, waiting, blocks: new Set(Object.keys(blocks ?? {})), notice: userNotice });
+  const commands = useMemo(() => view?.commands ?? [], [view?.commands]);
+  // A view carries its whole command list each time; rows re-render only when a skill's name changes.
+  const skillKey = [...skillNames(commands)].sort().join('\n');
+  const skills = useMemo(() => new Set(skillKey ? skillKey.split('\n') : []), [skillKey]);
+  const openFile = useMemo(() => onOpenFile && ((path: string) => { void onOpenFile(path).then(problem => viewer.setError(problem)); }), [onOpenFile, viewer]);
   // Stable across streamed events, so rows that kept their identity skip rendering.
   const rowActions = useMemo<ChatRowActions>(() => ({
     onToggleTurn: turnId => setOpen(current => { const next = new Set(current); if (next.has(turnId)) next.delete(turnId); else next.add(turnId); return next; }),
-    onViewDiff, onOpenWorker, onOpenDevice,
+    onViewDiff, onOpenWorker, onOpenDevice, skills, onOpenFile: openFile,
     renderBlock: (language, content) => blocks?.[language]?.(content),
-  }), [onViewDiff, onOpenWorker, onOpenDevice, blocks]);
+  }), [onViewDiff, onOpenWorker, onOpenDevice, skills, openFile, blocks]);
   const agent = view ? chatAgentLabel(catalog, view.agent) : 'the agent';
   const starting = view?.status === 'starting';
   // The computer starts no agent for a phone that only watches, so a chat nobody opened there has nothing to show.
@@ -94,7 +109,8 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
   useJourneyMark('chat', 'messages', messages.length > 0);
   useJourneyMark('chat', 'live', !disabled);
   useLiveMarks('chat', !disabled);
-  const commands = matchingCommands(snapshot.draft, view?.commands ?? []);
+  /** A restored draft has no picks of its own: its references are found as a sent message's are. */
+  const marksOf = (text: string): readonly ComposerMark[] => marked ? (marked.text === text ? marked.marks : []) : messageReferences(text, skills);
   const pending = !!snapshot.pendingDelivery;
 
   const act = async (operation: () => Promise<unknown>) => {
@@ -134,6 +150,8 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
   };
   /** The composer's send. It detached the draft; put it back until the host confirms the message. */
   const send = async (composed: AppendMessage) => {
+    // The box empties from code once the host has the message, which no edit reports: close the menu now.
+    setMenu(CLOSED_MENU);
     const text = composedText(composed);
     viewer.setDraft(text);
     runtime.thread.composer.setText(text);
@@ -173,10 +191,31 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
     return onChatImageAdded(take);
   }, [runtime, panelId]);
 
-  const pickCommand = (command: ChatTabCommand) => {
-    const text = `/${command.name} `;
+  const draftChanged = (text: string) => {
+    const previous = snapshot.draft;
+    if (text === previous) return;
+    setCaret(undefined);
+    setMenu(state => menuAfterEdit(state, previous, text));
+    setMarked({ text, marks: moveMarks(marksOf(previous), previous, text) });
     viewer.setDraft(text);
-    runtime.thread.composer.setText(text);
+  };
+  const caretMoved = (start: number, end: number) => {
+    // Any selection event hands the caret back to the input: iOS reports none for the one a pick set,
+    // so waiting for the pick's own position would pin the caret there.
+    setCaret(undefined);
+    setMenu(state => start === end ? menuAfterCaret(state, viewer.snapshot().draft, end) : CLOSED_MENU);
+  };
+  const pick = (picked: ChatMenuPick) => {
+    if (!menu.open) return;
+    const draft = snapshot.draft;
+    const result = applyPick(draft, menu.open, 'file' in picked ? fileReference(picked.file) : commandText(picked.command));
+    setMenu(CLOSED_MENU);
+    // A plain command is the agent's own word; files and skills are marked.
+    const added = 'file' in picked || picked.command.skill ? [result.mark] : [];
+    setMarked({ text: result.text, marks: [...moveMarks(marksOf(draft), draft, result.text), ...added].sort((a, b) => a.start - b.start) });
+    setCaret(result.cursor);
+    viewer.setDraft(result.text);
+    runtime.thread.composer.setText(result.text);
   };
   const attach = async () => {
     try {
@@ -228,12 +267,13 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
         {view?.questions.map(question => <QuestionCard key={question.id} question={question} disabled={disabled || busy} onAnswer={answer => void act(() => chat.answer(panelId, question.id, answer))} />)}
         {view?.permissions.map(permission => <ApprovalCard key={permission.id} permission={permission} agent={agent} disabled={disabled || busy} onAnswer={optionId => void act(() => chat.permission(panelId, permission.id, optionId))} />)}
         {!!view?.queue.length && <QueueList queue={view.queue} label={queuedLabel} onRemove={operationId => void act(() => chat.unqueue(panelId, operationId))} />}
-        <ChatCommandList commands={commands} onPick={pickCommand} />
-        <ChatTabComposer agent={agent} placeholder={placeholder ?? 'Ask anything'}
+        <ChatCommandList chat={chat} panelId={panelId} trigger={pending ? null : menu.open} view={view} onPick={pick} />
+        <ChatTabComposer agent={agent} placeholder={placeholder ?? composerPlaceholder(view?.mentions, { session, phone: true })}
           disabled={disabled} pending={pending} working={working} canStop={!busy && live} canAttach={!!view?.canAttachImages}
           model={labels.model} effort={labels.effort}
           riskyMode={riskyMode} canConfigure={!!view?.controls.length} settings={showSettings}
-          onDraft={text => viewer.setDraft(text)} onAttach={() => void attach()} onSettings={() => setSettings(true)} onStop={() => void act(() => chat.cancel(panelId))} />
+          marks={marksOf(snapshot.draft)} caret={caret}
+          onDraft={draftChanged} onCaret={caretMoved} onAttach={() => void attach()} onSettings={() => setSettings(true)} onStop={() => void act(() => chat.cancel(panelId))} />
       </View>}
       <ComposerSheet visible={settings} onClose={() => setSettings(false)} testID="chat-settings-sheet">
         <ChatTabSettings arranged={arranged} disabled={disabled || busy || view?.status !== 'idle'} configure={(id, value) => void act(() => chat.configure(panelId, id, value))} />

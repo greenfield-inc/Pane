@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import ChatTabPanel from '../../frontend/src/components/chatTab/ChatTabPanel';
 import { LinkPopoverHost } from '../../frontend/src/components/links/LinkPopover';
 import type { AgentChatConfigOption } from '../../shared/types/agentChat';
-import type { ChatTabAnswer, ChatTabClient, ChatTabConversation, ChatTabSend, ChatTabSwitchBanner, ChatTabView } from '../../shared/types/chatTab';
+import type { ChatTabAnswer, ChatTabClient, ChatTabConversation, ChatTabFile, ChatTabSend, ChatTabSwitchBanner, ChatTabView } from '../../shared/types/chatTab';
 import '../../frontend/src/index.css';
 
 // A chat tab's composer in a column of a chosen width (?width=360), with Claude's settings.
@@ -103,7 +103,7 @@ const workers = params.has('agents') ? [
   { paneId: 'pw', name: 'approvals-global', state: 'waiting' as const, label: 'Waiting' },
   { paneId: 'pi', name: 'release-notes', state: 'idle' as const, label: 'Idle' },
 ] : undefined;
-const actions = { onOpenWorker: (paneId: string, panelId?: string) => { window.qaCalls.push(`open:${paneId}:${panelId ?? ''}`); } };
+const actions = { onOpenFile: async (path: string) => { window.qaCalls.push(`file:${path}`); return !path.includes('gone'); }, onOpenWorker: (paneId: string, panelId?: string) => { window.qaCalls.push(`open:${paneId}:${panelId ?? ''}`); } };
 const pr = params.has('status') ? { number: 1272, url: 'https://github.com/greenfield-inc/Pane/pull/1272', state: 'OPEN' } : undefined;
 if (params.has('cleared')) view.clearedAt = '2026-11-08T14:04:00.000Z';
 // ?files=1 copies dropped files "to the host" (D-139); what was copied and sent is kept for the test.
@@ -115,18 +115,46 @@ window.qaAnswers = [];
 const holdCopies = params.has('holdCopies');
 let release: Promise<void> = Promise.resolve();
 if (holdCopies) release = new Promise(resolve => { window.qaReleaseCopies = resolve; });
-const saveFile = params.has('files') ? async ({ name }: File) => {
+const saveFile = params.get('files') === '1' ? async ({ name }: File) => {
   await release;
   if (name.startsWith('fail')) throw new Error('the host is offline');
   window.qaCopied.push(name);
   return `/repo/.pane/files/${name}`;
 } : undefined;
+// ?mentions=all|files: what the composer can mention; an older host sends none. ?files=fail|hang: the host's file search.
+const mentions = params.get('mentions');
+if (mentions) view.mentions = mentions === 'all' ? { files: true, skills: true } : { files: true };
+if (params.has('skills')) view.commands = [
+  { name: 'simplify', description: 'Review the changed code for reuse and cleanups', skill: true },
+  { name: 'ui-options', description: 'Build three real design options for a screen', skill: true },
+  { name: 'rewrite-simply', description: 'Rewrite or audit human-facing prose for clarity', skill: true },
+  { name: 'compact', description: 'Summarize the conversation so far' },
+  { name: 'review', description: 'Review a pull request' },
+];
+const file = (path: string): ChatTabFile => ({ path, isDirectory: false });
+const folder = (path: string): ChatTabFile => ({ path, isDirectory: true });
+const changed = (path: string): ChatTabFile => ({ path, isDirectory: false, changed: true });
+const FILES: ChatTabFile[] = [file('frontend/src/components/chatTab/ChatComposerControls.tsx'), file('native/src/features/chatTab/ChatTabComposer.tsx'), file('native/src/features/chatTab/chatComposer.ts'), file('shared/chatComposerControls.ts'), folder('native/src/features/composer'), file('frontend/src/components/chatTab/composerControls.test.ts'), file('tests/chat-composer-layout.spec.ts'), file('docs/my notes.md')];
+const EMPTY_FILES: ChatTabFile[] = params.get('placeholder') === 'session' ? [folder('plans'), folder('reports'), file('decisions.md'), file('AGENTS.md')]
+  : [changed('frontend/src/components/chatTab/ChatTabPanel.tsx'), changed('frontend/src/components/chatTab/chatTab.css'), folder('docs'), folder('frontend'), folder('main'), folder('native'), file('README.md')];
+declare global { interface Window { qaQueries: string[] } }
+window.qaQueries = [];
+// ?sent=<text>: a message already sent.
+const sentText = params.get('sent');
+if (sentText) view.transcript!.messages.push({ id: 'user:sent', role: 'user', parts: [{ type: 'text', text: sentText }] });
 const client: ChatTabClient = {
   get: async () => structuredClone(view), history: async () => [], send: async (_panel, request) => { window.qaSent.push(request); return { operationId: request.operationId, state: 'accepted' }; }, receipt: async () => undefined,
   unqueue: async (_panel, id) => { window.qaCalls.push(`unqueue:${id}`); }, sendNow: async (_panel, id) => { window.qaCalls.push(`sendNow:${id}`); },
   editQueued: async (_panel, id, text) => { window.qaCalls.push(`edit:${id}:${text}`); }, clear: async () => { window.qaCalls.push('clear'); }, stopTask: async (_panel, id) => { window.qaCalls.push(`stopTask:${id}`); }, cancel: async () => {}, permission: async () => {}, answer: async (_panel, _id, response) => { window.qaAnswers.push(response); }, restart: async () => {}, signIn: async () => ({ panelId: 'composer' }),
   configure: async (_panel, id, value) => { window.qaCalls.push(`configure:${id}:${value}`); }, onEvent: () => () => {},
   onState: callback => { stateListeners.add(callback); return () => stateListeners.delete(callback); },
+  files: async (_panel, query) => {
+    window.qaQueries.push(query);
+    if (params.get('files') === 'fail') throw new Error('git failed');
+    if (params.get('files') === 'hang') return new Promise(() => {});
+    if (!query) return structuredClone(EMPTY_FILES);
+    return structuredClone(FILES.filter(file => file.path.toLowerCase().includes(query.toLowerCase())));
+  },
   conversations: async () => structuredClone(conversations),
   resume: async (_panel, sessionId) => {
     if (params.has('busy')) throw new Error("Error invoking remote method 'daemon:invoke': Error [CHAT_RESUME_BUSY]: Claude is in the middle of a turn, so the chat stayed on this conversation. Next: Stop the turn or wait for it to finish, then pick again.");
@@ -153,7 +181,7 @@ const root = createRoot(document.getElementById('root')!);
 const render = (mounted: boolean) => root.render(<StrictMode>
   <div className="bg-bg-secondary" style={{ height: '100vh', display: 'flex' }}>
     <div data-testid="column" className="bg-bg-primary" style={{ width, height: '100%', borderRight: '1px solid var(--color-border-primary)' }}>
-      {mounted && <ChatTabPanel rendering={rendering} panelId="composer" client={client} saveFile={saveFile} placeholder={params.get('placeholder') ?? 'Message Autopilot…'} pr={pr} workers={workers} actions={actions} />}
+      {mounted && <ChatTabPanel rendering={rendering} panelId="composer" client={client} saveFile={saveFile} placeholder={mentions ? undefined : params.get('placeholder') ?? 'Message Autopilot…'} session={params.get('placeholder') === 'session'} pr={pr} workers={workers} actions={actions} />}
     </div>
   </div>
   <LinkPopoverHost />
