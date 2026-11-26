@@ -1400,10 +1400,11 @@ export class NotifyQueue extends EventEmitter {
   /**
    * A `--resume` took the kept answer: the call has it. Its line, if still waiting for a busy tab, is
    * dropped so the answer arrives once; a line already being typed still lands, and the tab records it.
+   * A worker's card is resumed only by its orchestrator's relay, so its worker's line still goes.
    */
   private collectedByCall(entry: Entry): void {
     const { item } = entry;
-    if (item.state !== 'answered' || item.delivered) return;
+    if (item.state !== 'answered' || item.delivered || item.originKind === 'worker') return;
     this.tabMessages = this.tabMessages.filter(message => message.itemId !== item.id || !message.answer || this.messagesTyping.has(message));
     if ([...this.messagesTyping].some(message => message.itemId === item.id && message.answer)) return;
     item.delivered = { via: 'call', at: Date.now() };
