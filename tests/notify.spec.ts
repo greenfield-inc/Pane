@@ -464,7 +464,7 @@ test.describe('Approvals newest first, one after another (T-88)', () => {
     const snapshot = await bootWaiting(page);
     const column = page.getByTestId('approval-column');
     await expect(column.getByTestId('approval-title')).toHaveText('Which session store should the refactor use?');
-    await expect(column.getByTestId('approval-recommended')).toHaveText('Recommended · ⇧↩ sends');
+    await expect(column.getByTestId('approval-recommended')).toHaveText(/^Recommended · (⇧↩|Shift\+Enter) sends$/);
     await page.screenshot({ path: testInfo.outputPath('t88-shift-01-page-chip.png') });
     await column.getByRole('radio', { name: /Keep Redis/ }).focus();
     await page.keyboard.press('Shift+Enter');

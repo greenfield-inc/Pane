@@ -3763,7 +3763,7 @@ test('T-88: ⇧↩ in a Session\'s column sends the recommended option and moves
   await page.getByTestId('session-approvals-button').click();
   const split = page.getByTestId('session-approval-split');
   await expect(split.getByTestId('approval-title')).toHaveText(q21.title);
-  await expect(split.getByTestId('approval-recommended')).toHaveText('Recommended · ⇧↩ sends');
+  await expect(split.getByTestId('approval-recommended')).toHaveText(/^Recommended · (⇧↩|Shift\+Enter) sends$/);
   await split.getByRole('radio', { name: /Rename it/ }).focus();
   await page.keyboard.press('Shift+Enter');
   await expect.poll(answers).toEqual([{ type: 'answer', id: 'q21', answer: { picks: ['Rename it'] } }]);

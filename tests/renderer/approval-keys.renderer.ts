@@ -4,6 +4,8 @@ declare global {
   interface Window { approvalKeysTest: { commands: () => Array<{ type: string; id?: string; answer?: { picks?: string[]; text?: string } }>; run: (id: string) => void; view: () => string } }
 }
 
+// The chip names the key as the platform writes it: ⇧↩ on macOS, Shift+Enter elsewhere.
+const RECOMMENDED_SENDS = /^Recommended · (⇧↩|Shift\+Enter) sends$/;
 const commands = (page: Page) => page.evaluate(() => window.approvalKeysTest.commands());
 const question = (page: Page, at: number) => page.getByTestId('approval-question').nth(at);
 const option = (page: Page, at: number, label: string) => question(page, at).getByRole('radio', { name: label });
@@ -93,7 +95,7 @@ test.describe('the approval column (D-381)', () => {
   });
 
   test('⇧↩ sends the recommended option of each question when nothing is picked, and the chip names it (T-88)', async ({ page }) => {
-    await expect(question(page, 0).getByTestId('approval-recommended')).toHaveText('Recommended · ⇧↩ sends');
+    await expect(question(page, 0).getByTestId('approval-recommended')).toHaveText(RECOMMENDED_SENDS);
     // Nothing is preselected (D-385): the key is the person's choice.
     await expect(page.getByRole('radio', { checked: true })).toHaveCount(0);
     await option(page, 1, 'No marker').focus();
