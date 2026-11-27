@@ -76,7 +76,8 @@ const KEEPS_FOCUS = [
  * that re-rendered away), and when the restore, a re-render or the old tile's fallback focused a
  * button or page in the main area (review F-5). A dialog, menu or field keeps focus even then, so
  * the hold never takes input from where a dialog put it and never fights a focus trap (review F-1);
- * if anything else takes focus straight back, the hold lets go rather than loop.
+ * if anything else takes focus straight back, or takes it back a third time, the hold lets go
+ * rather than take turns with it.
  */
 export function holdCursorThroughSwitch(options: SwitchCursorHoldOptions): void {
   releaseCurrent?.();
@@ -104,6 +105,9 @@ export function holdCursorThroughSwitch(options: SwitchCursorHoldOptions): void 
     frame = requestAnimationFrame(watch);
   };
   let restoring = false;
+  // Restores per element: one that takes focus back again and again (on a later frame, say)
+  // would take turns with the hold, so after two the hold lets go (review F-8).
+  const restores = new Map<Element, number>();
   // A focus move with no key or click from the person since the hold began is the switch's.
   // focusin fires once the new element is active.
   const onFocusIn = () => {
@@ -117,6 +121,12 @@ export function holdCursorThroughSwitch(options: SwitchCursorHoldOptions): void 
     }
     const row = cursorRow();
     if (!row) return;
+    const count = restores.get(target) ?? 0;
+    if (count >= 2) {
+      release();
+      return;
+    }
+    restores.set(target, count + 1);
     restoring = true;
     try { row.focus({ preventScroll: true }); } finally { restoring = false; }
   };

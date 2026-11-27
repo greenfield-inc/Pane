@@ -273,6 +273,24 @@ describe('the cursor through a switch to another machine (T-128, D-6)', () => {
     expect(doc.activeElement).toBe(grabby);
   });
 
+  // Review F-8 (reviewF5 › async refocus): an element that takes focus back every frame would
+  // take turns with the hold; after two restores from the same element the hold lets go.
+  it('lets go of an element that takes focus back on every frame, after restoring it twice', async () => {
+    const { doc, element, nextFrame } = page();
+    const pressed = element('machine-session-build:release', true);
+    const button = element('retry', false);
+    const switching = deferred();
+    pressed.focus();
+    holdCursorThroughSwitch({ switching: switching.promise, cursor: () => pressed, findByKey: () => pressed, onLanded: vi.fn() });
+
+    const after: string[] = [];
+    for (let i = 0; i < 10; i += 1) { button.focus(); after.push(doc.activeElement.name); nextFrame(); }
+    expect(after.slice(0, 2)).toEqual(['machine-session-build:release', 'machine-session-build:release']);
+    expect(after.slice(2).every(name => name === 'retry')).toBe(true);
+    switching.resolve();
+    await settled();
+  });
+
   it('moves into the work when the switch ends with the cursor still on the pressed row', async () => {
     const { element } = page();
     const pressed = element('machine-session-build:release', true);
