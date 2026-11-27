@@ -216,6 +216,14 @@ describe('merging computers', () => {
     expect(kinds(taken, devbox.id)).toEqual(['tailscale', 'relay']);
     expect(kinds(taken, 'mallory')).toEqual(['relay']);
 
+    // Only a route a host reported (`found`) is a claim: a hand-saved one stays, and no record is deleted (review S-10).
+    const handSaved: RemoteComputer = { id: 'by-hand', label: 'devbox (by hand)', routes: [{ ...claimedRoute, id: 'tailscale:https://devbox.tail1.ts.net:9443', source: 'manual' }] };
+    const onlyClaim: RemoteComputer = { id: 'only-claim', label: 'only-claim', routes: [{ ...claimedRoute, id: 'tailscale:https://devbox.tail1.ts.net:7443' }] };
+    const kept = applyRoutesReport([mallory, handSaved, onlyClaim, proved], devbox.id, relayRoute, report).computers;
+    expect(kinds(kept, 'mallory')).toEqual(['relay']);
+    expect(kept.find((computer) => computer.id === 'by-hand')).toEqual(handSaved);
+    expect(kept.find((computer) => computer.id === 'only-claim')).toEqual(onlyClaim);
+
     // A mark proved for another key, or a report naming another key, takes nothing.
     const otherKey: RemoteComputer = { ...proved, mineRelay: { computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'other' } };
     expect(kinds(applyRoutesReport([mallory, otherKey], devbox.id, relayRoute, report).computers, 'mallory')).toEqual(['tailscale', 'relay']);

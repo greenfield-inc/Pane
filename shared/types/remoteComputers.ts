@@ -523,15 +523,16 @@ export function applyRoutesReport(
   const twin = confirmed ? holder : undefined;
   if (twin) updated.routes = withRoutes(updated.routes, twin.routes);
   const ownNames = new Set(provedYours ? found.flatMap((route) => (route.tailnetMachine && route.tailnetDomain ? [tailnetKey(route.tailnetMachine, route.tailnetDomain)] : [])) : []);
-  // Another record's route under one of those names was a claim: it goes, and a record left with no route goes with it.
-  const withoutClaims = (candidate: RemoteComputer): RemoteComputer => (ownNames.size === 0 ? candidate : {
-    ...candidate,
-    routes: candidate.routes.filter((route) => !(route.tailnetMachine && route.tailnetDomain && ownNames.has(tailnetKey(route.tailnetMachine, route.tailnetDomain)))),
-  });
+  // Another record's route under one of those names that a host reported (`found`) was a claim, and goes. A route
+  // the person or this computer saved stays, and a record is never deleted: one left with no other route keeps it (review S-10).
+  const withoutClaims = (candidate: RemoteComputer): RemoteComputer => {
+    if (ownNames.size === 0) return candidate;
+    const routes = candidate.routes.filter((route) => !(route.source === 'found' && route.tailnetMachine && route.tailnetDomain
+      && ownNames.has(tailnetKey(route.tailnetMachine, route.tailnetDomain))));
+    return routes.length === candidate.routes.length || routes.length === 0 ? candidate : { ...candidate, routes };
+  };
   return {
-    computers: computers.filter((candidate) => candidate !== twin)
-      .map((candidate) => (candidate.id === computerId ? updated : withoutClaims(candidate)))
-      .filter((candidate) => candidate.routes.length > 0),
+    computers: computers.filter((candidate) => candidate !== twin).map((candidate) => (candidate.id === computerId ? updated : withoutClaims(candidate))),
     id: computerId,
   };
 }
