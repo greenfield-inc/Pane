@@ -1344,6 +1344,46 @@ describe('RemotePaneClientController switches fast (T-128)', () => {
     await controller.switchToLocalMode();
   });
 
+  // #1767 Bug 1 in the rig: a config write while the switch dialed (config still said this
+  // computer) disconnected the switch's connection, and the one dialed after it told the
+  // renderer the host had not changed, so the landing never armed.
+  it('keeps the switch\'s own connection through a config write that lands while it dials', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const config = createDefaultRemoteDaemonConfig();
+    const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [{ id: `public:${server.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: server.baseUrl, token: 'test-token' }] };
+    config.client.computers = [studio];
+    const configManager = createConfigManagerStub(config);
+    const controller = createController();
+    const restores: boolean[] = [];
+    let wrote = false;
+    controller.initialize({
+      configManager,
+      rendererIds: () => [10],
+      rendererEventSink: { send(channel, payload) {
+        if (!wrote && controller.getConnectionState().status === 'connecting') {
+          wrote = true;
+          // Something unrelated saves config while the switch dials; it still says this computer.
+          queueMicrotask(() => configManager.setRemoteConfig(configManager.getConfig().remoteDaemon));
+        }
+        if (channel === 'remote-daemon:resync-required') {
+          restores.push(decodeBoundary(payload, boundary.object({ hostChanged: boundary.boolean })).hostChanged);
+        }
+      } },
+    });
+    controller.setRecentAnswers(() => ({ routeId: studio.routes[0].id, baseUrl: server.baseUrl }));
+
+    await controller.activateProfile(primaryProfile(studio));
+    expect(wrote).toBe(true);
+    // The switch's IPC handler commits the host to config, then lets the restore go.
+    configManager.setRemoteConfig({ ...config, client: { ...config.client, mode: 'remote', activeProfileId: studio.id } });
+    controller.commitActivation();
+
+    await waitFor(() => restores.length > 0);
+    expect(restores[0]).toBe(true);
+    await controller.switchToLocalMode();
+  });
+
   it('a switch cancelled part-way leaves the window on its old machine, with no checklist left open', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);

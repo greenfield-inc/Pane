@@ -1403,7 +1403,11 @@ export class RemotePaneClientController extends EventEmitter {
   /** When this app last heard from each host, and its version; kept in memory only. */
   private readonly sightings = new Map<string, { at: string | null; version: string | null }>();
 
+  /** Switches between starting to dial and connecting (or failing); config syncs wait for them. */
+  private activationsDialing = 0;
+
   private readonly configUpdatedListener = () => {
+    if (this.activationsDialing > 0) return;
     void this.syncToConfig().catch((error) => {
       this.setConnectionState({
         ...this.state,
@@ -1603,6 +1607,10 @@ export class RemotePaneClientController extends EventEmitter {
       await this.activeClient?.retryNow();
       return this.getConnectionState();
     }
+    // While the switch dials, config still names the old machine; a config write then must not
+    // close or redial the switch's connection (#1767's rig: the landing never armed). The switch
+    // commits config itself once it connects, or syncs to config when it fails.
+    this.activationsDialing += 1;
     try {
       try {
         await this.connectProfile(profile, { retryOnInitialFailure: false, resolveOnReady: true, firstRoute: recent, quietInitialFailure: Boolean(recent) });
@@ -1611,8 +1619,10 @@ export class RemotePaneClientController extends EventEmitter {
         if (!recent || generation !== this.activationGeneration) throw error;
         await this.connectProfile(profile, { retryOnInitialFailure: false, resolveOnReady: true });
       }
+      this.activationsDialing -= 1;
       return this.getConnectionState();
     } catch (error) {
+      this.activationsDialing -= 1;
       await this.syncToConfig().catch((syncError) => {
         console.error('[Pane remote daemon] Failed to restore saved client state after activation error', syncError);
       });
