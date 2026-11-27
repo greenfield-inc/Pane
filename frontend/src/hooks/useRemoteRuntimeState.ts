@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { API } from '../utils/api';
+import { connectionReadOutcome } from './connectionRead';
 import {
   createDefaultRemoteDaemonHostRuntimeState,
   createDefaultRemotePaneConnectionState,
@@ -32,8 +33,11 @@ export function useRemoteRuntimeState() {
     const fetchConnectionState = async () => {
       try {
         const response = await API.remoteDaemon.getConnectionState();
-        if (!cancelled && !connectionUpdated && response.success && response.data) applyConnectionState(response.data);
-        else if (!cancelled && !connectionUpdated && !response.success) setConnectionReadFailed(true);
+        if (cancelled || connectionUpdated) return;
+        const outcome = connectionReadOutcome(response);
+        if (outcome === 'state' && response.data) applyConnectionState(response.data);
+        else if (outcome === 'local') setConnectionKnown(true);
+        else setConnectionReadFailed(true);
       } catch (error) {
         console.error('Failed to fetch remote connection state:', error);
         if (!cancelled && !connectionUpdated) setConnectionReadFailed(true);

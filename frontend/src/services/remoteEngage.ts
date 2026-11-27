@@ -129,7 +129,7 @@ function onStrayKey(event: KeyPress): void {
   const engaging = state.engaging ?? (kept ? { machineId: kept.machineId, sessionId: kept.sessionId } : undefined);
   if (!engaging || event.key.length !== 1 || event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
   // A key something else already took, or one meant for a dialog that opened, stays theirs (R6-SF-1).
-  if (kept && (event.defaultPrevented || document.querySelector(DIALOGS))) return;
+  if (kept && (event.defaultPrevented || modalShown())) return;
   const active = document.activeElement;
   if (active && active !== document.body && active.isConnected) return;
   event.preventDefault();
@@ -142,6 +142,16 @@ function onStrayKey(event: KeyPress): void {
 }
 
 const DIALOGS = '[role="dialog"], [role="alertdialog"], [aria-modal="true"], [role="menu"], [role="listbox"]';
+
+/**
+ * A modal the person sees: an open dialog takes the keys. Menus and listboxes don't count here, and
+ * neither does anything hidden (the Review tab's Changes list stays mounted behind display:none),
+ * or keys after a failed switch would be skipped and lost (review 1781 round 7).
+ */
+function modalShown(): boolean {
+  return Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [role="alertdialog"], [aria-modal="true"]'))
+    .some(element => element.checkVisibility?.() ?? element.getClientRects().length > 0);
+}
 
 /** The person moved focus themselves (a click, Tab, a shortcut) since the held box last had it. */
 let personMovedFocus = false;

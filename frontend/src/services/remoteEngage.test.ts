@@ -250,7 +250,7 @@ describe('typing, Enter or a click engages, and what was typed arrives once (T-1
     const switched = deferred<MachineSelectOutcome>();
     const { engage, state } = await setup(() => switched.promise);
     const body = {};
-    vi.stubGlobal('document', { body, activeElement: body, querySelector: () => null });
+    vi.stubGlobal('document', { body, activeElement: body, querySelector: () => null, querySelectorAll: () => [] });
     engage.holdRemoteText(target, 'ab');
     engage.engageRemoteSession(target, 'type');
     const preventDefault = vi.fn();
@@ -650,7 +650,7 @@ describe('a switch that fails while the person types keeps every key (QA 1781, M
     const switchMachine = vi.fn(async (): Promise<MachineSelectOutcome> => ({ ok: false, error: 'Build box answered 503.' }));
     const { engage, state } = await setup(switchMachine);
     const body = {};
-    vi.stubGlobal('document', { body, activeElement: body, querySelector: () => null });
+    vi.stubGlobal('document', { body, activeElement: body, querySelector: () => null, querySelectorAll: () => [] });
     engage.holdRemoteText(target, 'qa-');
     engage.engageRemoteSession(target, 'type');
     await vi.waitFor(() => expect(state().failure).toBeDefined());
@@ -670,7 +670,7 @@ describe('a switch that fails while the person types keeps every key (QA 1781, M
     const switchMachine = vi.fn(async (): Promise<MachineSelectOutcome> => ({ ok: false, error: 'Build box answered 503.' }));
     const { engage, state } = await setup(switchMachine);
     const body = {};
-    vi.stubGlobal('document', { body, activeElement: body, querySelector: () => null });
+    vi.stubGlobal('document', { body, activeElement: body, querySelector: () => null, querySelectorAll: () => [] });
     engage.holdRemoteText(target, 'qa-');
     engage.engageRemoteSession(target, 'click');
     await vi.waitFor(() => expect(state().failure).toBeDefined());
@@ -687,7 +687,7 @@ describe('the kept bar takes keys only until the person moves on (review 1781 R6
     const switchMachine = vi.fn(async (): Promise<MachineSelectOutcome> => ({ ok: false, error: 'Build box answered 503.' }));
     const { engage, state } = await setup(switchMachine);
     const body = {};
-    vi.stubGlobal('document', { body, activeElement: body, querySelector: () => null });
+    vi.stubGlobal('document', { body, activeElement: body, querySelector: () => null, querySelectorAll: () => [] });
     engage.holdRemoteText(target, 'qa-');
     engage.engageRemoteSession(target, 'type');
     await vi.waitFor(() => expect(state().failure).toBeDefined());
@@ -700,5 +700,41 @@ describe('the kept bar takes keys only until the person moves on (review 1781 R6
     await vi.advanceTimersByTimeAsync(50);
     expect({ cardTook, kept: state().held[engage.engageKey(target)]?.text, switches: switchMachine.mock.calls.length }).toEqual({ cardTook: ['1', 'Enter'], kept: 'qa-', switches: 1 });
     expect(preventDefault).not.toHaveBeenCalled();
+  });
+});
+
+describe('only a modal that is shown stops the kept bar taking keys (review 1781 round 7)', () => {
+  /** What the kept-key path reads of an element in the page: whether it takes up any room. */
+  interface PageElement { role: string; getClientRects: () => Array<{ width: number; height: number }> }
+  async function failed(page: { querySelector: (selector: string) => PageElement | null; querySelectorAll: (selector: string) => PageElement[] }) {
+    const switchMachine = vi.fn(async (): Promise<MachineSelectOutcome> => ({ ok: false, error: 'Build box answered 503.' }));
+    const ctx = await setup(switchMachine);
+    const body = {};
+    vi.stubGlobal('document', { body, activeElement: body, ...page });
+    ctx.engage.holdRemoteText(target, 'qa-');
+    ctx.engage.engageRemoteSession(target, 'type');
+    await vi.waitFor(() => expect(ctx.state().failure).toBeDefined());
+    const preventDefault = vi.fn();
+    for (const key of 'check') for (const listener of keyListeners) listener({ key, metaKey: false, ctrlKey: false, altKey: false, isComposing: false, preventDefault });
+    return ctx.state().held[ctx.engage.engageKey(target)]?.text;
+  }
+
+  it('a hidden Review tab\'s listbox mounted in the page does not', async () => {
+    // The Changes list stays mounted behind display:none (PanelGroupView keeps diff panels alive).
+    const changesList = { role: 'listbox', getClientRects: () => [] };
+    const matches = (selector: string) => (selector.includes('listbox') ? [changesList] : []);
+    expect(await failed({ querySelector: selector => matches(selector)[0] ?? null, querySelectorAll: matches })).toBe('qa-check');
+  });
+
+  it('a hidden dialog does not either', async () => {
+    const dialog = { role: 'dialog', getClientRects: () => [] };
+    const matches = (selector: string) => (selector.includes('dialog') ? [dialog] : []);
+    expect(await failed({ querySelector: selector => matches(selector)[0] ?? null, querySelectorAll: matches })).toBe('qa-check');
+  });
+
+  it('a dialog that is shown does: its keys stay its own', async () => {
+    const dialog = { role: 'dialog', getClientRects: () => [{ width: 400, height: 300 }] };
+    const matches = (selector: string) => (selector.includes('dialog') ? [dialog] : []);
+    expect(await failed({ querySelector: selector => matches(selector)[0] ?? null, querySelectorAll: matches })).toBe('qa-');
   });
 });

@@ -14,7 +14,8 @@ export function switchFailureReason(raw: string, machineName: string): string {
   // One line: a body, a page or a stack after the first line is not the reason.
   reason = (reason.split('\n')[0] ?? '').trim();
   // Text before a JSON body or a page ("Host answered 502: {...}") is the reason; the body is not.
-  const body = reason.search(/[{[<]/);
+  // Only a real JSON or HTML tail ('{"', '[{', '<html'), never a readable bracket ("[studio]", "<2.4.200>").
+  const body = reason.search(/\{\s*["}]|\[\s*[{"\]]|<[a-z!?/][a-z]*[\s>/]/i);
   if (body >= 0) reason = reason.slice(0, body).trim().replace(/[:\s]+$/, '');
   if (reason && !/[.!?]$/.test(reason) && body > 0) reason = `${reason}.`;
   if (!reason || /^(null|undefined|\[object \w+\])$/i.test(reason)) return generic;

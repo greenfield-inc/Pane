@@ -36,3 +36,15 @@ describe('every shape of reason becomes one plain line (review 1781 round 6)', (
     expect(switchFailureReason(raw, 'Build box')).toBe(shown);
   });
 });
+
+describe('a bracket inside a readable reason is part of it (review 1781 round 7)', () => {
+  it.each([
+    ['Build box [studio] is offline', 'Build box [studio] is offline'],
+    ['Pane on Build box <2.4.200> is too old', 'Pane on Build box <2.4.200> is too old'],
+    ['Host answered 502: {"error":"bad gateway"}', 'Host answered 502.'],
+    ['Host answered 502: [{"code":1}]', 'Host answered 502.'],
+    ['Gateway said <html><body>502</body></html>', 'Gateway said.'],
+  ])('%j', (raw, shown) => {
+    expect(switchFailureReason(raw, 'Build box')).toBe(shown);
+  });
+});
