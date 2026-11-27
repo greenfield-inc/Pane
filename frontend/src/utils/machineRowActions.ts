@@ -151,3 +151,12 @@ export async function openOnMachine(machineId: string, target: MachineTarget, op
 
 /** Presses of rows on any machine so far; the newest one owns the landing. */
 let openPresses = 0;
+
+/**
+ * An engage the person moved off before its switch started (T-132, review 1781 SF-2): the open in
+ * flight starts no switch, and nothing lands.
+ */
+export function cancelMachineOpen(): void {
+  openPresses += 1;
+  useOrchestrationSessionStore.getState().landOn(undefined);
+}

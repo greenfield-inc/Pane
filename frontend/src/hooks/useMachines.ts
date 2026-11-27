@@ -37,6 +37,11 @@ const machineSwitches = createLatestSwitch(
   },
 );
 
+/** An engage the person moved off (T-132): its switch still waiting behind another one never runs. */
+export function withdrawMachineSwitch(machineId: string): boolean {
+  return machineSwitches.withdraw(press => press.machineId === machineId);
+}
+
 function errorText(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message ? cause.message : fallback;
 }

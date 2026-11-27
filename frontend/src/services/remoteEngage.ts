@@ -17,7 +17,9 @@
  */
 import { create } from 'zustand';
 import { API } from '../utils/api';
-import { openOnMachine } from '../utils/machineRowActions';
+import { cancelMachineOpen, openOnMachine } from '../utils/machineRowActions';
+import { withdrawMachineSwitch } from '../hooks/useMachines';
+import { showActionError } from '../stores/errorStore';
 import { handOverChatDraft, onChatTabShown } from '../utils/chatDraftHandover';
 import { useAllMachinesStore, isMachineDimmed } from '../stores/allMachinesStore';
 import { cachedRemoteSession, heldRemoteChat, remoteSessionKey } from '../stores/remoteSessionView';
@@ -178,6 +180,40 @@ function keepUnsent(target: EngageTarget): void {
   });
 }
 
+/** The Session's chat tab as the mirror holds it now: the live one there that takes what was typed. */
+function mirroredChatPanel(target: EngageTarget): string | undefined {
+  return heldRemoteChat(cachedRemoteSession(target.machineId, target.sessionId))?.panelId;
+}
+
+/**
+ * Whether typing on the Session's sidebar row goes into its message box (T-132): only when the
+ * mirror holds its chat, so there is a box to show it in and a chat there to take it. Otherwise
+ * the row keeps Enter, and no key is taken that nothing would show (review 1781 SF-3).
+ */
+export function takesTyping(target: EngageTarget): boolean {
+  return mirroredChatPanel(target) !== undefined;
+}
+
+/** What `clickEngages` reads of a press in the read-only view. */
+export interface ClickPress {
+  button: number;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+  /** It landed on a control of the view (Earlier messages, a link, a tab). */
+  inControl: boolean;
+}
+
+/**
+ * Whether a press into the read-only chat engages it (T-132): a plain left click, not one that
+ * ends a text selection (`selected`), carries a modifier, or lands on a control (review 1781).
+ */
+export function clickEngages(press: ClickPress, selected: string): boolean {
+  if (press.button !== 0 || press.metaKey || press.ctrlKey || press.shiftKey || press.altKey) return false;
+  return selected.length === 0 && !press.inControl;
+}
+
 /** The cursor stays on another machine's Session: it engages after REST_ENGAGE_MS unless the cursor moves on. */
 export function armRestEngage(target: EngageTarget): void {
   clearTimeout(restTimer);
@@ -225,7 +261,7 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
   const ticket = ++engageTicket;
   clearTimeout(liveWait);
   shownMeanwhile.clear();
-  const panelId = heldRemoteChat(cachedRemoteSession(target.machineId, target.sessionId))?.panelId;
+  const panelId = mirroredChatPanel(target);
   personMovedFocus = false;
   boxRestores = 0;
   useRemoteEngage.setState({ engaging: { ...target, cause, panelId, switched: false }, failure: undefined });
@@ -248,14 +284,16 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
 }
 
 /** The window is on the Session's machine: the chat there paints from what the mirror held, and takes over once it does. */
-function switched(target: EngageTarget, panelId: string | undefined): void {
+function switched(target: EngageTarget, engagedPanelId: string | undefined): void {
+  // The mirror may have learned the chat during the switch (its peek landed meanwhile).
+  const panelId = engagedPanelId ?? mirroredChatPanel(target);
   const chat = heldRemoteChat(cachedRemoteSession(target.machineId, target.sessionId));
   // SAFETY: the window's own chat client is what the live chat tab reads through (ChatTabRoute).
   const liveClient = window.electronAPI?.chatTab as ChatTabClient | undefined;
   // The newest few only: the chat mounts there with its whole Session's workspace under the held
   // view, and drawing more is a long task while the switch finishes (D-6); its own read brings the rest.
   if (chat && liveClient) chatTabViewer(liveClient, chat.panelId).prime(firstPaintWindow(chat, LIVE_FIRST_PAINT_MESSAGES), performance.now());
-  useRemoteEngage.setState(state => (state.engaging ? { engaging: { ...state.engaging, switched: true } } : {}));
+  useRemoteEngage.setState(state => (state.engaging ? { engaging: { ...state.engaging, panelId, switched: true } } : {}));
   switchMark('engage:switched', { machineId: target.machineId, sessionId: target.sessionId });
   if (panelId && shownMeanwhile.has(panelId)) {
     land();
@@ -273,6 +311,15 @@ let settleCap: ReturnType<typeof setTimeout> | undefined;
 /** At most this long after landing does the main area stay live while the connection still says restoring. */
 const SETTLE_CAP_MS = 5000;
 
+/**
+ * Whether an engage that landed has settled (App ends `settling`): the window's connection says
+ * connected, or the window is on this computer, which has no connection to wait for (review 1781).
+ */
+export function engageSettled(connection: { mode: string; status: string }, presence: string): boolean {
+  if (connection.mode !== 'remote') return true;
+  return presence === 'connected' && connection.status === 'connected';
+}
+
 /** The connection says connected (or the cap passed): the main area dims again when it drops. */
 export function endEngageSettling(): void {
   clearTimeout(settleCap);
@@ -284,28 +331,48 @@ export function endEngageSettling(): void {
 function land(): void {
   clearTimeout(liveWait);
   liveWait = undefined;
-  const { engaging, held } = useRemoteEngage.getState();
+  const { engaging } = useRemoteEngage.getState();
   if (!engaging) return;
-  const key = engageKey(engaging);
-  const text = held[key];
-  const rest = { ...held };
-  delete rest[key];
   // Ended first, so focus moving into the chat there is not taken back to the held box.
-  useRemoteEngage.setState({ engaging: undefined, held: rest, settling: true });
+  useRemoteEngage.setState({ engaging: undefined, settling: true });
   clearTimeout(settleCap);
   settleCap = setTimeout(endEngageSettling, SETTLE_CAP_MS);
-  if (text && engaging.panelId) {
-    handOverChatDraft(engaging.panelId, {
-      text: text.text,
-      selectionStart: text.text.length,
-      selectionEnd: text.text.length,
-      focused: true,
-      send: text.send && !!text.text.trim(),
-      // The link may still be catching up after the switch: the Enter waits for the chat to be able to send.
-      sendWithinMs: ENTER_WAITS_MS,
-    });
-  }
+  deliverHeld(engaging, { focused: true, sends: true });
   switchMark('engage:end', { machineId: engaging.machineId, sessionId: engaging.sessionId, status: 'landed' });
+}
+
+/**
+ * What was typed into the Session goes into its chat there, once: focused when the person is
+ * still on it, and sending a pending Enter only when `sends`. With no chat to take it (a Session
+ * the mirror holds no chat for) it stays held, unsent, and the person is told where it is: typed
+ * text is never dropped (review 1781 SF-3).
+ */
+function deliverHeld(engaging: Engaging, { focused, sends }: { focused: boolean; sends: boolean }): void {
+  const key = engageKey(engaging);
+  const text = useRemoteEngage.getState().held[key];
+  if (!text) return;
+  const panelId = engaging.panelId ?? mirroredChatPanel(engaging);
+  if (!panelId) {
+    keepUnsent(engaging);
+    const message = `Not sent: ${sessionName(engaging)} on ${machineName(engaging.machineId)} has no chat to take what you typed. It is kept with this Session's row: "${text.text}".`;
+    useRemoteEngage.setState({ failure: { ...engaging, message } });
+    showActionError('What you typed was not sent', message);
+    return;
+  }
+  useRemoteEngage.setState(state => {
+    const rest = { ...state.held };
+    delete rest[key];
+    return { held: rest };
+  });
+  handOverChatDraft(panelId, {
+    text: text.text,
+    selectionStart: text.text.length,
+    selectionEnd: text.text.length,
+    focused,
+    send: sends && text.send && !!text.text.trim(),
+    // The link may still be catching up after the switch: the Enter waits for the chat to be able to send.
+    sendBy: Date.now() + ENTER_WAITS_MS,
+  });
 }
 
 /**
@@ -323,8 +390,18 @@ export function cancelRemoteEngage(): void {
   keepUnsent(engaging);
   useRemoteEngage.setState({ engaging: undefined });
   switchMark('engage:cancel', { machineId: engaging.machineId, sessionId: engaging.sessionId, status: engaging.switched ? 'after-switch' : 'switching' });
-  // Too late once the window is on that machine: the Session there stays open.
-  if (!engaging.switched) void API.remoteDaemon.cancelSwitch(engaging.machineId).catch(() => undefined);
+  if (engaging.switched) {
+    // Too late once the window is on that machine: the Session there stays open, and its chat
+    // takes what was typed, unsent, since the window's rows there are its own now (review 1781 SF-3).
+    deliverHeld(engaging, { focused: false, sends: false });
+    return;
+  }
+  // The open may not have reached the switch yet (an arrow within an IPC round trip): it starts
+  // none, and a switch queued behind another is withdrawn (review 1781 SF-2). One already running
+  // is stopped in main.
+  cancelMachineOpen();
+  withdrawMachineSwitch(engaging.machineId);
+  void API.remoteDaemon.cancelSwitch(engaging.machineId).catch(() => undefined);
 }
 
 const switchListeners = new Set<(cause: EngageCause) => void>();

@@ -154,7 +154,7 @@ describe('typing, Enter or a click engages, and what was typed arrives once (T-1
     handover.chatTabShown('panel-b');
     handover.chatTabShown('panel-b');
 
-    expect(taken).toEqual([{ text: 'hello there', selectionStart: 11, selectionEnd: 11, focused: true, send: false, sendWithinMs: 60_000 }]);
+    expect(taken).toEqual([{ text: 'hello there', selectionStart: 11, selectionEnd: 11, focused: true, send: false, sendBy: Date.now() + 60_000 }]);
     expect(state().engaging).toBeUndefined();
     expect(state().held[engage.engageKey(target)]).toBeUndefined();
     // The main area stays live while the restore under it finishes, at most 5 s.
@@ -250,5 +250,104 @@ describe('typing, Enter or a click engages, and what was typed arrives once (T-1
     for (const listener of keyListeners) listener({ key: 'c', metaKey: false, ctrlKey: false, altKey: false, isComposing: false, preventDefault });
     expect(state().held[engage.engageKey(target)]?.text).toBe('abc');
     expect(preventDefault).toHaveBeenCalled();
+  });
+});
+
+describe('an arrow just after an engage starts still cancels it (review 1781 SF-2)', () => {
+  it('cancelled before main has a switch to stop: the window does not switch, and nothing lands', async () => {
+    const switchMachine = vi.fn(async (): Promise<MachineSelectOutcome> => ({ ok: true }));
+    const { engage, landOn } = await setup(switchMachine);
+    const saving = deferred<{ success: boolean }>();
+    saveNavigationMemory.mockImplementationOnce(() => saving.promise);
+    // Main has no switch yet, so it has nothing to cancel.
+    cancelSwitch.mockImplementationOnce(async () => ({ success: true, data: { cancelled: false } }));
+
+    engage.engageRemoteSession(target, 'enter');
+    await Promise.resolve();
+    engage.cancelRemoteEngage();
+    saving.resolve({ success: true });
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(engage.useRemoteEngage.getState().engaging).toBeUndefined();
+    expect(switchMachine).not.toHaveBeenCalled();
+    expect(landOn).toHaveBeenLastCalledWith(undefined);
+  });
+});
+
+describe('typed text is never lost (review 1781 SF-3)', () => {
+  it('an arrow after the switch, before the chat there paints, hands the text to that chat unsent', async () => {
+    const { engage, taken, state } = await setup(async () => ({ ok: true }));
+    engage.holdRemoteText(target, 'ship it');
+    engage.engageRemoteSession(target, 'enter', { send: true });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(state().engaging?.switched).toBe(true);
+
+    engage.cancelRemoteEngage();
+    await vi.advanceTimersByTimeAsync(5000);
+    // The chat is opening there anyway: the text goes into its box, and the arrow means it is not sent.
+    expect(taken).toEqual([expect.objectContaining({ text: 'ship it', send: false, focused: false })]);
+    expect(state().held[engage.engageKey(target)]).toBeUndefined();
+  });
+
+  it('a Session the mirror holds no chat for does not take typing on its row (it keeps Enter)', async () => {
+    const { engage } = await setup(async () => ({ ok: true }));
+    expect(engage.takesTyping(target)).toBe(true);
+    const remote = await import('../stores/remoteSessionView');
+    // SAFETY: engaging reads only the record name and chat tab id; this Session has no chat in the mirror.
+    remote.useRemoteSessionView.setState({ entries: { [remote.remoteSessionKey('build', 'b')]: { readAt: 0, snapshot: { session: { id: 'b', name: 'Release' } } as never } } });
+    expect(engage.takesTyping(target)).toBe(false);
+  });
+
+  it('text that lands with no chat to take it stays held, with a note saying where it is', async () => {
+    const { engage, taken, state } = await setup(async () => ({ ok: true }));
+    const remote = await import('../stores/remoteSessionView');
+    // SAFETY: engaging reads only the record name and chat tab id; this Session has no chat in the mirror.
+    remote.useRemoteSessionView.setState({ entries: { [remote.remoteSessionKey('build', 'b')]: { readAt: 0, snapshot: { session: { id: 'b', name: 'Release' } } as never } } });
+    engage.holdRemoteText(target, 'hello');
+    engage.engageRemoteSession(target, 'type');
+    await vi.advanceTimersByTimeAsync(10);
+    await vi.advanceTimersByTimeAsync(engage.LIVE_VIEW_WAIT_MS + 10);
+    expect(state().engaging).toBeUndefined();
+    expect(taken).toEqual([]);
+    expect(state().held[engage.engageKey(target)]).toEqual({ text: 'hello', send: false });
+    expect(state().failure).toMatchObject({ ...target, message: expect.stringMatching(/not sent/i) });
+  });
+
+  it('text that lands after the mirror learned the chat goes to that chat', async () => {
+    const { engage, taken, state } = await setup(async () => ({ ok: true }));
+    const remote = await import('../stores/remoteSessionView');
+    const withChat = remote.useRemoteSessionView.getState().entries;
+    // SAFETY: engaging reads only the record name and chat tab id; this Session has no chat in the mirror yet.
+    remote.useRemoteSessionView.setState({ entries: { [remote.remoteSessionKey('build', 'b')]: { readAt: 0, snapshot: { session: { id: 'b', name: 'Release' } } as never } } });
+    engage.holdRemoteText(target, 'hello');
+    engage.engageRemoteSession(target, 'type');
+    // The peek landed during the switch.
+    remote.useRemoteSessionView.setState({ entries: withChat });
+    await vi.advanceTimersByTimeAsync(engage.LIVE_VIEW_WAIT_MS + 20);
+    expect(state().engaging).toBeUndefined();
+    expect(taken).toEqual([expect.objectContaining({ text: 'hello' })]);
+  });
+});
+
+describe('an engage settles once the window\'s connection is ready (review 1781 suggestion)', () => {
+  it('a switch back to this computer settles at once; another machine once it says connected', async () => {
+    const { engage } = await setup(async () => ({ ok: true }));
+    expect(engage.engageSettled({ mode: 'local', status: 'local' }, 'connected')).toBe(true);
+    expect(engage.engageSettled({ mode: 'remote', status: 'restoring' }, 'connected')).toBe(false);
+    expect(engage.engageSettled({ mode: 'remote', status: 'connected' }, 'reconnecting')).toBe(false);
+    expect(engage.engageSettled({ mode: 'remote', status: 'connected' }, 'connected')).toBe(true);
+  });
+});
+
+describe('only a plain click into the chat engages it (review 1781 suggestion)', () => {
+  const press = (extra: Partial<import('./remoteEngage').ClickPress> = {}) => ({ button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, inControl: false, ...extra });
+  it('a plain left click with nothing selected engages; a selection, a right-click, a modifier or a control does not', async () => {
+    const { clickEngages } = await import('./remoteEngage');
+    expect(clickEngages(press(), '')).toBe(true);
+    expect(clickEngages(press(), 'a line to copy')).toBe(false);
+    expect(clickEngages(press({ button: 2 }), '')).toBe(false);
+    expect(clickEngages(press({ metaKey: true }), '')).toBe(false);
+    expect(clickEngages(press({ shiftKey: true }), '')).toBe(false);
+    expect(clickEngages(press({ inControl: true }), '')).toBe(false);
   });
 });

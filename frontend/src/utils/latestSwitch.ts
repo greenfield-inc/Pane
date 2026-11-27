@@ -11,6 +11,8 @@ export interface LatestSwitch<Target, Value> {
   isSuperseded(ticket: number): boolean;
   /** The number the next request gets, minus one: the newest request's ticket. */
   latestTicket(): number;
+  /** Drops the request waiting to run when `matches` it, settling it as superseded; returns whether one was. */
+  withdraw(matches: (target: Target) => boolean): boolean;
 }
 
 /**
@@ -55,6 +57,13 @@ export function createLatestSwitch<Target, Value>(
       });
       options.cancel?.(running.target, target);
       return queued;
+    },
+    withdraw(matches) {
+      const queued = waiting;
+      if (!queued || !matches(queued.target)) return false;
+      waiting = null;
+      queued.settle(Promise.resolve({ superseded: true }));
+      return true;
     },
     isSuperseded: ticket => ticket !== ticketCount,
     latestTicket: () => ticketCount,

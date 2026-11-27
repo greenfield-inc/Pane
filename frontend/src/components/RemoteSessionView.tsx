@@ -8,10 +8,17 @@ import { switchMark } from '../../../shared/switchMarks';
 import { useAllMachinesStore } from '../stores/allMachinesStore';
 import { machineMirrorApi, useMachineMirrorStore } from '../stores/machineMirrorStore';
 import { heldRemoteChat, remoteChatClient, showFullRemoteChat, remoteSessionKey, useRemoteSessionView, type RemoteSessionEntry, type RemoteSessionTarget } from '../stores/remoteSessionView';
-import { engageKey, engageRemoteSession, holdRemoteText, useRemoteEngage, type EngageCause, type HeldText } from '../services/remoteEngage';
+import { clickEngages, engageKey, engageRemoteSession, holdRemoteText, useRemoteEngage, type EngageCause, type HeldText } from '../services/remoteEngage';
 import type { MachineMirrorListing, MachineMirrorSync } from '../../../shared/types/machineMirror';
 import type { MachineState } from '../../../shared/types/machineConnections';
 import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
+
+/** Controls of the read-only view a click on doesn't engage (Earlier messages, a link). */
+const VIEW_CONTROLS = 'button, a, [role="tab"], [role="button"], summary';
+
+function pick({ button, metaKey, ctrlKey, shiftKey, altKey }: React.MouseEvent) {
+  return { button, metaKey, ctrlKey, shiftKey, altKey };
+}
 
 /** How long the cursor stays on a remote chat before all the messages held are drawn. */
 const REMOTE_FULL_WINDOW_REST_MS = 150;
@@ -146,9 +153,7 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row, earli
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="remote-session-view" data-machine-id={machineId} data-session-id={sessionId} data-sync={sync}
-      data-messages={shown} data-filled={readAt > 0 || undefined}
-      // A click into the chat engages it there (T-132); an offline machine refuses with its reason.
-      onMouseDown={event => { if (event.button === 0 && online) engageRemoteSession(target, 'click'); }}>
+      data-messages={shown} data-filled={readAt > 0 || undefined}>
       <div className="flex min-h-11 flex-shrink-0 items-center gap-2 border-b border-border-primary px-4 py-1.5">
         <h1 className="min-w-0 truncate text-sm font-semibold text-text-primary">{name}</h1>
         <span className="inline-flex flex-shrink-0 items-center gap-1 rounded bg-surface-secondary px-1.5 py-0.5 text-[11px] text-text-secondary" data-testid="remote-session-machine">
@@ -172,7 +177,13 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row, earli
           ))}
         </div>
       )}
-      <div className={cn('flex min-h-0 flex-1 flex-col', sync === 'offline' && 'opacity-90')}>{body}</div>
+      <div className={cn('flex min-h-0 flex-1 flex-col', sync === 'offline' && 'opacity-90')}
+        // A plain click into the chat or its message box engages it there (T-132); selecting text
+        // to copy, a right-click or a control (Earlier messages) does not.
+        onMouseUp={event => {
+          const press = { ...pick(event), inControl: event.target instanceof Element && event.target.closest(VIEW_CONTROLS) !== null };
+          if (online && clickEngages(press, window.getSelection()?.toString() ?? '')) engageRemoteSession(target, 'click');
+        }}>{body}</div>
     </div>
   );
 }

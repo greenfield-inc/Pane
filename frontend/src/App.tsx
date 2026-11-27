@@ -9,7 +9,7 @@ import { useRemoteRuntimeState } from './hooks/useRemoteRuntimeState';
 import { useConnectionPresence } from './hooks/useConnectionPresence';
 import { RemoteWorkspace } from './components/RemoteWorkspace';
 import { EngageHold } from './components/RemoteSessionView';
-import { endEngageSettling, useRemoteEngage } from './services/remoteEngage';
+import { endEngageSettling, engageSettled, useRemoteEngage } from './services/remoteEngage';
 import { TailnetHttpsBanner } from './components/TailnetHttpsBanner';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { followHostAccess } from './stores/readOnlyHostStore';
@@ -179,7 +179,7 @@ function App() {
   // An engage that landed keeps the main area live until the connection says connected (T-132).
   const engageSettling = useRemoteEngage(state => state.settling === true);
   useEffect(() => {
-    if (engageSettling && connectionPresence === 'connected' && connectionState.mode === 'remote' && connectionState.status === 'connected') endEngageSettling();
+    if (engageSettling && engageSettled(connectionState, connectionPresence)) endEngageSettling();
   }, [engageSettling, connectionPresence, connectionState.mode, connectionState.status]);
 
   const openSettings = useCallback((target?: SettingsTarget) => {

@@ -88,4 +88,22 @@ describe('createLatestSwitch (T-128, D-6)', () => {
     expect(await toBuild).toEqual({ superseded: true, value: 'cancelled' });
     expect(await toStudio).toEqual({ superseded: false, value: 'on studio' });
   });
+
+  it('withdraws a request still waiting, which then never runs (T-132, review 1781 SF-2)', async () => {
+    let finish: (value: string) => void = () => undefined;
+    const ran: string[] = [];
+    const latest = createLatestSwitch((target: string) => {
+      ran.push(target);
+      return target === 'studio' ? new Promise<string>(resolve => { finish = resolve; }) : Promise.resolve(`on ${target}`);
+    });
+    const toStudio = latest.request('studio');
+    const toBuild = latest.request('build');
+    expect(latest.withdraw(target => target === 'other')).toBe(false);
+    expect(latest.withdraw(target => target === 'build')).toBe(true);
+    expect(await toBuild).toEqual({ superseded: true });
+    finish('on studio');
+    await toStudio;
+    await Promise.resolve();
+    expect(ran).toEqual(['studio']);
+  });
 });
