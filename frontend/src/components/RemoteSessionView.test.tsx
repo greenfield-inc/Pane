@@ -6,6 +6,7 @@ import type { MachineState } from '../../../shared/types/machineConnections';
 import type { ChatTabView } from '../../../shared/types/chatTab';
 import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 import type { ToolPanel } from '../../../shared/types/panels';
+import type { RemoteSessionEntry } from '../stores/remoteSessionView';
 
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, '\'').replace(/\s+/g, ' ');
 
@@ -19,12 +20,12 @@ const chat: ChatTabView = {
 const session = { id: 's1', name: 'Mirror work', internalSessionId: 'pane-r', agent: 'claude', panelIds: { claude: 'chat-r' }, revision: 2, updatedAt: '' } as OrchestrationSessionSummary;
 const snapshot: SessionSnapshot = { sessionId: 's1', revision: 4, session, chat, tabs: [tab('chat-r', 'Claude', 'chat'), tab('term-r', 'Terminal', 'terminal')], layout: null };
 
-async function render(options: { status?: MachineState['status']; sync?: MachineMirrorSync; snapshot?: SessionSnapshot } = {}) {
+async function render(options: { status?: MachineState['status']; sync?: MachineMirrorSync; snapshot?: SessionSnapshot | null; read?: RemoteSessionEntry['read'] } = {}) {
   const { RemoteSessionPanel } = await import('./RemoteSessionView');
   const status = options.status ?? 'online';
   const machine: MachineState = { id: 'build', label: 'Build box', kind: 'remote', status, offlineSince: status === 'offline' ? '2026-11-26T12:05:00.000Z' : null, mine: true };
   const listing = { state: { machineId: 'build', sync: options.sync ?? 'live', lastSeenAt: '2026-11-26T12:02:00.000Z', sessionCount: 1 }, sessions: { s1: 4 } };
-  return renderToStaticMarkup(<RemoteSessionPanel target={{ machineId: 'build', sessionId: 's1' }} entry={{ snapshot: options.snapshot ?? snapshot, readAt: 0 }} listing={listing} machine={machine} row={undefined} />);
+  return renderToStaticMarkup(<RemoteSessionPanel target={{ machineId: 'build', sessionId: 's1' }} entry={{ snapshot: options.snapshot === null ? undefined : options.snapshot ?? snapshot, read: options.read, readAt: options.read ? 1 : 0 }} listing={listing} machine={machine} row={undefined} />);
 }
 
 beforeEach(() => { vi.stubEnv('TZ', 'UTC'); });
@@ -57,6 +58,12 @@ describe("another machine's Session under the cursor, read-only (T-116 PR 6)", (
     const html = await render({ sync: 'catching-up' });
     expect(text(html)).toContain('Updating from Build box');
     expect(text(html)).toContain('ship the mirror');
+  });
+
+  it('says a Session the host has nothing to show of yet opens there with Enter, instead of reading forever (review suggestion)', async () => {
+    const html = await render({ snapshot: null, read: { view: null, panels: [], layout: null } });
+    expect(text(html)).toContain('This Session opens on Build box when you press Enter.');
+    expect(text(html)).not.toContain('Reading from');
   });
 
   it('says a chat the host has not read since it restarted loads when opened there, instead of showing it empty', async () => {

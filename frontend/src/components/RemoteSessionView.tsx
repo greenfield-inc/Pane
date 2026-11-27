@@ -72,6 +72,8 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
     if (!chat) return;
     const viewer = chatTabViewer(client, chat.panelId);
     viewer.setStartOnRead(false);
+    // Left, it keeps nothing and pushes none of this computer's kept chats out; the next visit paints the mirror's window.
+    viewer.setKeepOnClose(false);
     viewer.prime(firstPaintWindow(chat), performance.now());
   }, [client, chat]);
   const panelId = chat?.panelId;
@@ -85,8 +87,6 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
     return () => {
       clearTimeout(rest);
       showFullRemoteChat(machineId, panelId, false);
-      // Left: the next visit paints the short window again. After the chat's own unsubscribe.
-      queueMicrotask(() => viewer.forgetMessages());
     };
   }, [client, machineId, panelId]);
 
@@ -118,6 +118,9 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
     />;
   } else if (unknown) {
     body = <RemoteNote>Messages load when this Session is opened on {machineName}.</RemoteNote>;
+  } else if (entry?.read && !entry.read.view) {
+    // The host has nothing to show yet (the Session's tab doesn't exist until it is opened there).
+    body = <RemoteNote>This Session opens on {machineName} when you press Enter.</RemoteNote>;
   } else if (entry?.error && !online) {
     body = <RemoteNote>{machineName} is offline, and Pane has no copy of this Session yet.</RemoteNote>;
   } else if (entry?.error) {
