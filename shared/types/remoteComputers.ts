@@ -499,8 +499,11 @@ export function applyRoutesReport(
     || record.routes.some((own) => own.relay?.computerId === route.relay?.computerId && own.relay?.fingerprint === route.relay?.fingerprint);
   const holder = computers.find((candidate) => candidate.id !== computerId && candidate.machineId === report.machineId);
   const confirmed = proven && holder !== undefined && reportNamesKeyOf(holder, report);
+  // Proved yours for the very key this report's route is pinned to: its Tailscale name is its own, whoever claimed it first (review S-8).
+  const provedYours = proven && computer.mine === 'tailscale' && via.relay !== undefined
+    && computer.mineRelay?.computerId === via.relay.computerId && computer.mineRelay.fingerprint === via.relay.fingerprint;
   // A Tailscale name another saved computer has is that computer's: a host claiming it gets no route to it (review MF-1).
-  const takenNames = new Set(computers
+  const takenNames = provedYours ? new Set<string>() : new Set(computers
     .filter((candidate) => candidate.id !== computerId && !(confirmed && candidate === holder))
     .flatMap((candidate) => candidate.routes.flatMap((route) => (route.tailnetMachine && route.tailnetDomain ? [tailnetKey(route.tailnetMachine, route.tailnetDomain)] : []))));
   const found = foundRoutes(report, via.token).filter((route) => (proven || pinned(route, computer))
@@ -519,8 +522,16 @@ export function applyRoutesReport(
   // Another saved record with this install id and the key this route just checked is the same computer: fold it in.
   const twin = confirmed ? holder : undefined;
   if (twin) updated.routes = withRoutes(updated.routes, twin.routes);
+  const ownNames = new Set(provedYours ? found.flatMap((route) => (route.tailnetMachine && route.tailnetDomain ? [tailnetKey(route.tailnetMachine, route.tailnetDomain)] : [])) : []);
+  // Another record's route under one of those names was a claim: it goes, and a record left with no route goes with it.
+  const withoutClaims = (candidate: RemoteComputer): RemoteComputer => (ownNames.size === 0 ? candidate : {
+    ...candidate,
+    routes: candidate.routes.filter((route) => !(route.tailnetMachine && route.tailnetDomain && ownNames.has(tailnetKey(route.tailnetMachine, route.tailnetDomain)))),
+  });
   return {
-    computers: computers.filter((candidate) => candidate !== twin).map((candidate) => (candidate.id === computerId ? updated : candidate)),
+    computers: computers.filter((candidate) => candidate !== twin)
+      .map((candidate) => (candidate.id === computerId ? updated : withoutClaims(candidate)))
+      .filter((candidate) => candidate.routes.length > 0),
     id: computerId,
   };
 }

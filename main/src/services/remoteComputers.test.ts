@@ -194,6 +194,35 @@ describe('merging computers', () => {
     expect(computers.find((computer) => computer.id === devbox.id)?.routes.map((route) => route.kind)).toEqual(['relay']);
   });
 
+  it('lets a computer proved yours take its Tailscale name back from a record that claimed it first, and nothing else does (review S-8)', () => {
+    const claimedRoute = { id: 'tailscale:https://devbox.tail1.ts.net:8443', kind: 'tailscale' as const, source: 'found' as const, baseUrl: 'https://devbox.tail1.ts.net:8443', token: 'mallory-token', tailnetMachine: 'devbox', tailnetDomain: 'tail1.ts.net' };
+    const mallory: RemoteComputer = { id: 'mallory', label: 'mallory', routes: [claimedRoute, { ...relayRoute, id: 'relay:https://m.runpane.net', baseUrl: 'https://m.runpane.net', relay: { computerId: 'm', fingerprint: 'fp-m' } }] };
+    const report = {
+      machineId: 'devbox-install',
+      name: 'devbox',
+      relay: { id: 'k7xq2m4n8p3r5t6v', address: 'https://k7xq2m4n8p3r5t6v.runpane.net', fingerprint: 'fp', local: [] },
+      tailnet: { dnsName: 'devbox.tail1.ts.net.', machine: 'devbox', domain: 'tail1.ts.net', port: 8443 },
+    };
+    const kinds = (computers: RemoteComputer[], id: string) => computers.find((computer) => computer.id === id)?.routes.map((route) => route.kind);
+
+    // Not proved yours: first come keeps it.
+    const unproved = applyRoutesReport([mallory, devbox], devbox.id, relayRoute, report).computers;
+    expect(kinds(unproved, 'mallory')).toEqual(['tailscale', 'relay']);
+    expect(kinds(unproved, devbox.id)).toEqual(['relay']);
+
+    // Proved yours for the key this report's route is pinned to: the name is yours, and the claim goes.
+    const proved: RemoteComputer = { ...devbox, mine: 'tailscale', mineRelay: { computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'fp' } };
+    const taken = applyRoutesReport([mallory, proved], devbox.id, relayRoute, report).computers;
+    expect(kinds(taken, devbox.id)).toEqual(['tailscale', 'relay']);
+    expect(kinds(taken, 'mallory')).toEqual(['relay']);
+
+    // A mark proved for another key, or a report naming another key, takes nothing.
+    const otherKey: RemoteComputer = { ...proved, mineRelay: { computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'other' } };
+    expect(kinds(applyRoutesReport([mallory, otherKey], devbox.id, relayRoute, report).computers, 'mallory')).toEqual(['tailscale', 'relay']);
+    const lying = { ...report, relay: { ...report.relay, fingerprint: 'other' } };
+    expect(kinds(applyRoutesReport([mallory, proved], devbox.id, relayRoute, lying).computers, 'mallory')).toEqual(['tailscale', 'relay']);
+  });
+
   it('saves only https addresses a computer reports, so its token never goes out in the clear', () => {
     const { computers } = applyRoutesReport([devbox], devbox.id, relayRoute, {
       machineId: 'devbox-install',
