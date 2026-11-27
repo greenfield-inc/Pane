@@ -36,10 +36,24 @@ function take(panelId: string, taker: (draft: LaunchDraft) => void): void {
   taker(entry.draft);
 }
 
+const takerListeners = new Set<(panelId: string) => void>();
+
+/** Whether a live chat tab for `panelId` is mounted, so a handover reaches it now. */
+export function chatDraftTakerMounted(panelId: string): boolean {
+  return takers.has(panelId);
+}
+
+/** Calls `listener` with each live chat tab that mounts and can take a draft; returns the unsubscribe. */
+export function onChatDraftTaker(listener: (panelId: string) => void): () => void {
+  takerListeners.add(listener);
+  return () => { takerListeners.delete(listener); };
+}
+
 /** A chat tab that can take a handed-over draft; returns its cleanup. */
 export function acceptChatDraft(panelId: string, taker: (draft: LaunchDraft) => void): () => void {
   takers.set(panelId, taker);
   take(panelId, taker);
+  for (const listener of takerListeners) listener(panelId);
   return () => {
     if (takers.get(panelId) === taker) takers.delete(panelId);
   };

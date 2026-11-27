@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { Monitor } from 'lucide-react';
+import { Monitor, X } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import ChatTabPanel from './chatTab/ChatTabPanel';
 import { LoadingStatus } from './ui/Skeleton';
 import { cn } from '../utils/cn';
@@ -8,7 +9,7 @@ import { switchMark } from '../../../shared/switchMarks';
 import { useAllMachinesStore } from '../stores/allMachinesStore';
 import { machineMirrorApi, useMachineMirrorStore } from '../stores/machineMirrorStore';
 import { heldRemoteChat, remoteChatClient, showFullRemoteChat, remoteSessionKey, useRemoteSessionView, type RemoteSessionEntry, type RemoteSessionTarget } from '../stores/remoteSessionView';
-import { clickEngages, engageKey, engageRemoteSession, holdRemoteText, useRemoteEngage, type EngageCause, type HeldText } from '../services/remoteEngage';
+import { clickEngages, dismissKept, engageKey, engageRemoteSession, holdRemoteText, keptEngage, useRemoteEngage, type EngageCause, type HeldText } from '../services/remoteEngage';
 import type { MachineMirrorListing, MachineMirrorSync } from '../../../shared/types/machineMirror';
 import type { MachineState } from '../../../shared/types/machineConnections';
 import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
@@ -81,6 +82,7 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row, earli
   const unknown = !chat?.transcript && entry?.snapshot?.transcriptUnknown === true;
   const client = useMemo(() => remoteChatClient(machineId, machineName, { held }), [machineId, machineName, held]);
   const readAt = entry?.readAt ?? 0;
+  const keptText = useRemoteEngage(state => state.held[remoteSessionKey(machineId, sessionId)] !== undefined);
 
   // The chat paints the newest 30 messages held at once (drawing 200 takes a long chat ~95 ms);
   // the rest of what is held follows once the cursor stays. A newer copy (the mirror caught up, the
@@ -134,7 +136,8 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row, earli
       // Read-only here: no /clear, and no Clear button.
       clearable={false}
       earlierNote={earlierBlocked ? `Older messages load once this chat is opened on ${machineName}.` : undefined}
-      watchOnly={online ? { composer: <RemoteHeldComposer target={target} machineName={machineName} takesFocus={held} /> } : { note: `${machineName} is offline. This is what it last sent.` }}
+      // Offline, what was typed and not sent stays in its box with why (QA 1781 F-1); otherwise a note.
+      watchOnly={online || keptText ? { composer: <RemoteHeldComposer target={target} machineName={machineName} takesFocus={held} /> } : { note: `${machineName} is offline. This is what it last sent.` }}
     />;
   } else if (unknown) {
     body = <RemoteNote>Messages load when this Session is opened on {machineName}.</RemoteNote>;
@@ -198,11 +201,12 @@ function RemoteHeldComposer({ target, machineName, takesFocus }: { target: Remot
   const held = useRemoteEngage(state => state.held[key]);
   const failure = useRemoteEngage(state => (state.failure && engageKey(state.failure) === key ? state.failure.message : undefined));
   const engagingCause = useRemoteEngage(state => (state.engaging && engageKey(state.engaging) === key ? state.engaging.cause : undefined));
-  return <HeldComposerBox target={target} machineName={machineName} held={held} failure={failure} engagingCause={engagingCause} takesFocus={takesFocus} />;
+  const waiting = useRemoteEngage(state => state.engaging?.waiting === true && engageKey(state.engaging) === key);
+  return <HeldComposerBox target={target} machineName={machineName} held={held} failure={failure} engagingCause={engagingCause} takesFocus={takesFocus} waiting={waiting} />;
 }
 
 /** What `RemoteHeldComposer` draws, from what the engage store holds for the Session. */
-export function HeldComposerBox({ target, machineName, held, failure, engagingCause, takesFocus = false }: {
+export function HeldComposerBox({ target, machineName, held, failure, engagingCause, takesFocus = false, waiting = false }: {
   target: RemoteSessionTarget;
   machineName: string;
   held: HeldText | undefined;
@@ -210,6 +214,8 @@ export function HeldComposerBox({ target, machineName, held, failure, engagingCa
   engagingCause: EngageCause | undefined;
   /** The box held over the main area: the one that takes focus while the switch runs (the tile's goes with the switch). */
   takesFocus?: boolean;
+  /** The window switched but the link there is down: nothing is sent until it is back (QA 1781 F-1). */
+  waiting?: boolean;
 }) {
   const key = engageKey(target);
   const box = useRef<HTMLTextAreaElement>(null);
@@ -250,7 +256,8 @@ export function HeldComposerBox({ target, machineName, held, failure, engagingCa
           }}
         />
       </div>
-      {held?.send && engagingCause && <p role="status" className="chat-notice" data-testid="remote-engage-sending">Sends on {machineName} once it opens there.</p>}
+      {waiting && held && <p role="status" className="chat-notice" data-testid="remote-engage-pending">Not sent yet: waiting for {machineName} to answer. {held.send ? 'It sends there once it does.' : 'It goes into the chat there once it does.'}</p>}
+      {!waiting && held?.send && engagingCause && <p role="status" className="chat-notice" data-testid="remote-engage-sending">Sends on {machineName} once it opens there.</p>}
     </div>
   );
 }
@@ -271,6 +278,51 @@ export function EngageHold() {
   return (
     <div className="absolute inset-0 z-30 flex flex-col bg-bg-primary" data-testid="engage-hold" data-machine-id={target.machineId} data-session-id={target.sessionId}>
       <RemoteSessionTileBody target={target} held />
+    </div>
+  );
+}
+
+/**
+ * Text typed into another machine's Session that wasn't delivered (QA 1781 F-1): the switch failed
+ * (the checklist may cover the main area), or the chat there hasn't opened yet. It floats beside
+ * whatever the main area shows, outside its dimming, with why; Enter tries again, and the chat
+ * there takes it once as it opens.
+ */
+export function EngageKept() {
+  const kept = useRemoteEngage(useShallow(keptEngage));
+  const name = useAllMachinesStore(state => (kept ? state.machines.find(machine => machine.id === kept.machineId)?.label : undefined));
+  if (!kept) return null;
+  return <KeptBar kept={kept} machineName={name ?? 'the other machine'} />;
+}
+
+/** What `EngageKept` draws. */
+export function KeptBar({ kept, machineName }: { kept: NonNullable<ReturnType<typeof keptEngage>>; machineName: string }) {
+  const target = { machineId: kept.machineId, sessionId: kept.sessionId };
+  return (
+    <div role="region" aria-label={`Not sent to ${machineName}`} data-testid="engage-kept" data-pending={kept.pending || undefined}
+      className="fixed bottom-4 right-4 z-fixed w-[420px] max-w-[calc(100vw-2rem)] rounded-lg border border-border-primary bg-surface-primary p-3 text-text-primary shadow-dropdown">
+      <div className="mb-2 flex items-start gap-2">
+        <p role={kept.pending ? 'status' : 'alert'} className="min-w-0 flex-1 text-xs text-text-secondary">{kept.pending ? kept.message : `Not sent yet to ${machineName}: ${kept.message}`}</p>
+        <button type="button" className="flex-shrink-0 rounded p-0.5 text-text-tertiary hover:text-text-primary" aria-label="Discard what you typed" title="Discard what you typed"
+          onClick={() => { holdRemoteText(target, ''); dismissKept(); }}>
+          <X className="h-3.5 w-3.5" aria-hidden />
+        </button>
+      </div>
+      <textarea
+        className="chat-input w-full"
+        rows={2}
+        value={kept.text}
+        aria-label={`Message on ${machineName}, not sent yet`}
+        onChange={event => holdRemoteText(target, event.target.value)}
+        onKeyDown={event => {
+          if (event.nativeEvent.isComposing) return;
+          if (event.key === 'Enter' && !event.shiftKey && !event.altKey) {
+            event.preventDefault();
+            engageRemoteSession(target, 'enter', { send: true });
+          }
+        }}
+      />
+      <p className="mt-1 text-[11px] text-text-tertiary">Press Enter to send it on {machineName}.</p>
     </div>
   );
 }

@@ -106,3 +106,28 @@ describe("engaging another machine's Session (T-132)", () => {
     expect(text(html)).toContain('Sends on Build box once it opens there.');
   });
 });
+
+describe('what was typed and not sent stays on screen (QA 1781 F-1)', () => {
+  it('the kept bar shows the text, why, and that Enter sends it there', async () => {
+    const { KeptBar } = await import('./RemoteSessionView');
+    const html = renderToStaticMarkup(<KeptBar kept={{ machineId: 'build', sessionId: 's1', text: 'ship it', message: 'Pane daemon not running on Build box.', pending: false }} machineName="Build box" />);
+    expect(text(html)).toContain('Not sent yet to Build box: Pane daemon not running on Build box.');
+    expect(html).toMatch(/<textarea[^>]*aria-label="Message on Build box, not sent yet"[^>]*>ship it<\/textarea>/);
+    expect(text(html)).toContain('Press Enter to send it on Build box.');
+    expect(html).toContain('role="alert"');
+  });
+
+  it('a pending one says so as a status', async () => {
+    const { KeptBar } = await import('./RemoteSessionView');
+    const html = renderToStaticMarkup(<KeptBar kept={{ machineId: 'build', sessionId: 's1', text: 'ship it', message: 'Not sent yet: it goes into Release\'s message box on Build box once that chat opens.', pending: true }} machineName="Build box" />);
+    expect(html).toContain('data-pending="true"');
+    expect(html).toContain('role="status"');
+  });
+
+  it('the held view marks text as not sent yet while the link there is down', async () => {
+    const { HeldComposerBox } = await import('./RemoteSessionView');
+    const html = renderToStaticMarkup(<HeldComposerBox target={{ machineId: 'build', sessionId: 's1' }} machineName="Build box" held={{ text: 'ship it', send: true }} failure={undefined} engagingCause="enter" waiting />);
+    expect(text(html)).toContain('Not sent yet: waiting for Build box to answer. It sends there once it does.');
+    expect(html).not.toContain('remote-engage-sending');
+  });
+});

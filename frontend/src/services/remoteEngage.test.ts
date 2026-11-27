@@ -351,3 +351,83 @@ describe('only a plain click into the chat engages it (review 1781 suggestion)',
     expect(clickEngages(press({ inControl: true }), '')).toBe(false);
   });
 });
+
+describe('a link cut as an engage starts never loses what was typed (QA 1781 F-1)', () => {
+  it('a failed switch keeps the text visible with why, and the chat there takes it once, unsent, when it next opens live', async () => {
+    const { engage, handover, stopTaking, state } = await setup(async () => ({ ok: false, error: 'Pane daemon not running on Build box.' }));
+    stopTaking();
+    engage.holdRemoteText(target, 'ship it');
+    engage.engageRemoteSession(target, 'enter', { send: true });
+    await vi.waitFor(() => expect(state().failure).toBeDefined());
+    // The kept bar draws from these, over whatever the main area shows (the checklist).
+    expect(engage.keptEngage(state())).toMatchObject({ ...target, text: 'ship it', message: 'Pane daemon not running on Build box.' });
+
+    const taken: LaunchDraft[] = [];
+    handover.acceptChatDraft('panel-b', draft => taken.push(draft));
+    handover.acceptChatDraft('panel-b', draft => taken.push(draft));
+    expect(taken).toEqual([expect.objectContaining({ text: 'ship it', send: false })]);
+    expect(engage.keptEngage(state())).toBeUndefined();
+  });
+
+  it('on a dead link the hold stays, marked pending, instead of letting go after 3 s', async () => {
+    const { engage, stopTaking, state } = await setup(async () => ({ ok: true }));
+    stopTaking();
+    engage.setEngageLinkUp(false);
+    engage.holdRemoteText(target, 'ship it');
+    engage.engageRemoteSession(target, 'enter', { send: true });
+    await vi.waitFor(() => expect(state().engaging?.switched).toBe(true));
+    await vi.advanceTimersByTimeAsync(engage.LIVE_VIEW_WAIT_MS * 3);
+    expect(state().engaging).toMatchObject({ ...target, waiting: true });
+    expect(state().held[engage.engageKey(target)]?.text).toBe('ship it');
+  });
+
+  it('the link back and the chat there painting sends an Enter pressed meanwhile exactly once', async () => {
+    const { engage, handover, taken, state } = await setup(async () => ({ ok: true }));
+    engage.setEngageLinkUp(false);
+    engage.holdRemoteText(target, 'ship it');
+    engage.engageRemoteSession(target, 'enter', { send: true });
+    await vi.waitFor(() => expect(state().engaging?.switched).toBe(true));
+    await vi.advanceTimersByTimeAsync(engage.LIVE_VIEW_WAIT_MS * 3);
+    expect(taken).toEqual([]);
+    engage.setEngageLinkUp(true);
+    handover.chatTabShown('panel-b');
+    handover.chatTabShown('panel-b');
+    expect(taken).toEqual([expect.objectContaining({ text: 'ship it', send: true })]);
+    expect(state().engaging).toBeUndefined();
+  });
+
+  it('an arrow while it waits on a dead link keeps the text visible, pending, and the chat takes it once, unsent, when it opens', async () => {
+    const { engage, handover, stopTaking, state } = await setup(async () => ({ ok: true }));
+    stopTaking();
+    engage.setEngageLinkUp(false);
+    engage.holdRemoteText(target, 'ship it');
+    engage.engageRemoteSession(target, 'enter', { send: true });
+    await vi.waitFor(() => expect(state().engaging?.switched).toBe(true));
+    await vi.advanceTimersByTimeAsync(engage.LIVE_VIEW_WAIT_MS * 3);
+    engage.cancelRemoteEngage();
+    expect(engage.keptEngage(state())).toMatchObject({ ...target, text: 'ship it', pending: true });
+
+    const taken: LaunchDraft[] = [];
+    handover.acceptChatDraft('panel-b', draft => taken.push(draft));
+    handover.acceptChatDraft('panel-b', draft => taken.push(draft));
+    // The arrow moved on, so it is not sent: it goes into that chat's box once, marked not sent yet.
+    expect(taken).toEqual([expect.objectContaining({ text: 'ship it', send: false, note: expect.stringMatching(/not sent yet/i) })]);
+    expect(engage.keptEngage(state())).toBeUndefined();
+  });
+
+  it('Enter in the kept bar once the window is on that machine opens the Session there and sends once', async () => {
+    const { engage, handover, stopTaking, state } = await setup(async () => ({ ok: false, error: 'Build box stopped answering.' }));
+    stopTaking();
+    engage.holdRemoteText(target, 'ship it');
+    engage.engageRemoteSession(target, 'type');
+    await vi.waitFor(() => expect(state().failure).toBeDefined());
+    const { useAllMachinesStore } = await import('../stores/allMachinesStore');
+    useAllMachinesStore.setState(current => ({ entries: current.entries.map(entry => ({ ...entry, active: entry.id === 'build' })) }));
+
+    engage.engageRemoteSession(target, 'enter', { send: true });
+    await vi.advanceTimersByTimeAsync(10);
+    const taken: LaunchDraft[] = [];
+    handover.acceptChatDraft('panel-b', draft => taken.push(draft));
+    expect(taken).toEqual([expect.objectContaining({ text: 'ship it', send: true })]);
+  });
+});

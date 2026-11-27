@@ -8,8 +8,8 @@ import { ConnectionChecklist } from './components/ConnectionChecklist';
 import { useRemoteRuntimeState } from './hooks/useRemoteRuntimeState';
 import { useConnectionPresence } from './hooks/useConnectionPresence';
 import { RemoteWorkspace } from './components/RemoteWorkspace';
-import { EngageHold } from './components/RemoteSessionView';
-import { endEngageSettling, engageSettled, useRemoteEngage } from './services/remoteEngage';
+import { EngageHold, EngageKept } from './components/RemoteSessionView';
+import { endEngageSettling, engageSettled, setEngageLinkUp, useRemoteEngage } from './services/remoteEngage';
 import { TailnetHttpsBanner } from './components/TailnetHttpsBanner';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { followHostAccess } from './stores/readOnlyHostStore';
@@ -181,6 +181,10 @@ function App() {
   useEffect(() => {
     if (engageSettling && engageSettled(connectionState, connectionPresence)) endEngageSettling();
   }, [engageSettling, connectionPresence, connectionState.mode, connectionState.status]);
+  // An engage that switched waits, held and marked not sent yet, while the link there is down (QA 1781 F-1).
+  useEffect(() => {
+    setEngageLinkUp(engageSettled(connectionState, connectionPresence));
+  }, [connectionPresence, connectionState.mode, connectionState.status]);
 
   const openSettings = useCallback((target?: SettingsTarget) => {
     if (target) {
@@ -1111,6 +1115,8 @@ function App() {
           {!shownConnectionCheck && <EngageHold />}
           <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
         </RemoteWorkspace>
+        {/* Outside the workspace's dimming: what was typed and not sent stays usable (QA 1781 F-1). */}
+        <EngageKept />
         </div>
         <OnboardingDialog
           isOpen={isOnboardingOpen}

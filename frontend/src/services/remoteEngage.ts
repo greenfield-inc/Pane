@@ -20,12 +20,13 @@ import { API } from '../utils/api';
 import { cancelMachineOpen, openOnMachine } from '../utils/machineRowActions';
 import { withdrawMachineSwitch } from '../hooks/useMachines';
 import { showActionError } from '../stores/errorStore';
-import { handOverChatDraft, onChatTabShown } from '../utils/chatDraftHandover';
+import { chatDraftTakerMounted, handOverChatDraft, onChatDraftTaker, onChatTabShown } from '../utils/chatDraftHandover';
 import { useAllMachinesStore, isMachineDimmed } from '../stores/allMachinesStore';
 import { cachedRemoteSession, heldRemoteChat, remoteSessionKey } from '../stores/remoteSessionView';
 import { chatTabViewer, firstPaintWindow } from '../../../shared/chatTabViewer';
 import { switchMark } from '../../../shared/switchMarks';
 import type { ChatTabClient } from '../../../shared/types/chatTab';
+import type { LaunchDraft } from '../utils/launchOutline';
 
 export type EngageCause = 'rest' | 'enter' | 'click' | 'type';
 
@@ -40,6 +41,8 @@ interface Engaging extends EngageTarget {
   panelId?: string;
   /** The window is on that machine now; the mirror's view waits for its chat to paint. */
   switched: boolean;
+  /** Switched, but the link there isn't up: the held view stays, marked not sent yet (QA 1781 F-1). */
+  waiting?: boolean;
 }
 
 /** What was typed into a Session of another machine and not delivered yet. */
@@ -47,13 +50,19 @@ export interface HeldText {
   text: string;
   /** Enter was pressed: the chat there sends it once it shows. */
   send: boolean;
+  /** When Enter was pressed plus its window: a chat that takes it later shows it unsent (SF-4). */
+  sendBy?: number;
 }
 
 interface RemoteEngageState {
   engaging?: Engaging;
   held: Record<string, HeldText>;
-  /** Why the last engage of this Session did not open it; what was typed stays beside it. */
-  failure?: EngageTarget & { message: string };
+  /**
+   * Why the last engage of this Session did not deliver what was typed, which stays beside it (the
+   * kept bar over the main area, `keptEngage`): it failed, or (`pending`) the chat there hasn't
+   * opened yet and takes it once it does.
+   */
+  failure?: EngageTarget & { message: string; panelId?: string; pending?: boolean };
   /**
    * The engage landed and its restore is still finishing: the main area stays live (not dimmed or
    * inert) meanwhile, since the person is already typing in the chat there. App clears it once
@@ -84,6 +93,10 @@ let engageTicket = 0;
 /** Chat tabs that painted since the current engage started, before its switch returned. */
 const shownMeanwhile = new Set<string>();
 let listening = false;
+/** Whether the window's link is up (App says, from the connection state); a dead one keeps the hold. */
+let linkUp = true;
+/** Chat tabs whose live mount takes what was typed into their Session and not delivered yet. */
+const undelivered = new Map<string, EngageTarget>();
 
 /**
  * While an engage that was typed runs, a printable key that finds focus on nothing (the page body:
@@ -149,6 +162,10 @@ function listen(): void {
   window.addEventListener('keydown', onPersonMoves, true);
   window.addEventListener('mousedown', onPersonMoves, true);
   window.addEventListener('focusin', onFocusIn, true);
+  onChatDraftTaker(panelId => {
+    const target = undelivered.get(panelId);
+    if (target) deliverHeld({ ...target, panelId }, { focused: false, sends: true });
+  });
   onChatTabShown(panelId => {
     const engaging = useRemoteEngage.getState().engaging;
     if (!engaging || engaging.panelId !== panelId) return;
@@ -176,7 +193,7 @@ function sessionName(target: EngageTarget): string {
 function keepUnsent(target: EngageTarget): void {
   useRemoteEngage.setState(state => {
     const held = state.held[engageKey(target)];
-    return held?.send ? { held: { ...state.held, [engageKey(target)]: { ...held, send: false } } } : {};
+    return held?.send ? { held: { ...state.held, [engageKey(target)]: { text: held.text, send: false } } } : {};
   });
 }
 
@@ -246,7 +263,7 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
   const key = engageKey(target);
   const state = useRemoteEngage.getState();
   if (options.send && state.held[key]?.text.trim()) {
-    useRemoteEngage.setState({ held: { ...state.held, [key]: { ...state.held[key], send: true } } });
+    useRemoteEngage.setState({ held: { ...state.held, [key]: { ...state.held[key], send: true, sendBy: Date.now() + ENTER_WAITS_MS } } });
   }
   if (sameTarget(state.engaging, target)) return;
   const machine = machineState(target.machineId);
@@ -260,6 +277,7 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
   }
   const ticket = ++engageTicket;
   clearTimeout(liveWait);
+  listen();
   shownMeanwhile.clear();
   const panelId = mirroredChatPanel(target);
   personMovedFocus = false;
@@ -275,9 +293,15 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
       return;
     }
     useRemoteEngage.setState({ engaging: undefined });
-    if (outcome.kind === 'failed') {
+    if (outcome.kind === 'here') {
+      // The window is on that machine already (Enter in the kept bar): the chat there takes it as it opens.
+      deliverHeld({ ...target, panelId }, { focused: true, sends: true });
+    } else if (outcome.kind === 'failed') {
+      // It stays in the kept bar with why, and the chat there takes it, unsent, whenever it next opens live.
       keepUnsent(target);
-      useRemoteEngage.setState({ failure: { ...target, message: outcome.reason } });
+      const chat = panelId ?? mirroredChatPanel(target);
+      if (chat) undelivered.set(chat, target);
+      useRemoteEngage.setState({ failure: { ...target, panelId: chat, message: outcome.reason } });
     }
     switchMark('engage:end', { machineId: target.machineId, sessionId: target.sessionId, status: outcome.kind });
   });
@@ -299,8 +323,48 @@ function switched(target: EngageTarget, engagedPanelId: string | undefined): voi
     land();
     return;
   }
-  // A Session whose agent runs in a terminal has no chat to paint: the view there takes over anyway.
-  liveWait = setTimeout(() => { liveWait = undefined; land(); }, LIVE_VIEW_WAIT_MS);
+  armLiveWait();
+}
+
+/**
+ * The chat there gets LIVE_VIEW_WAIT_MS to paint. With the link up the view there takes over anyway
+ * (a Session whose agent runs in a terminal has no chat to paint); with it down the held view stays,
+ * marked not sent yet, until the link is back (QA 1781 F-1).
+ */
+function armLiveWait(): void {
+  clearTimeout(liveWait);
+  liveWait = setTimeout(() => {
+    liveWait = undefined;
+    if (linkUp) land();
+    else useRemoteEngage.setState(state => (state.engaging ? { engaging: { ...state.engaging, waiting: true } } : {}));
+  }, LIVE_VIEW_WAIT_MS);
+}
+
+/** The window's link is up or down (App, from the connection state): a hold waiting on it resumes once it is up. */
+export function setEngageLinkUp(up: boolean): void {
+  if (linkUp === up) return;
+  linkUp = up;
+  const engaging = useRemoteEngage.getState().engaging;
+  if (up && engaging?.switched && !liveWait) {
+    useRemoteEngage.setState({ engaging: { ...engaging, waiting: false } });
+    armLiveWait();
+  }
+}
+
+/** What the kept bar shows: text typed into a Session and not delivered, with why; none while an engage runs. */
+export function keptEngage(state: RemoteEngageState): (EngageTarget & { text: string; message: string; pending: boolean }) | undefined {
+  const failure = state.failure;
+  if (!failure || state.engaging) return undefined;
+  const held = state.held[engageKey(failure)];
+  if (!held) return undefined;
+  return { machineId: failure.machineId, sessionId: failure.sessionId, text: held.text, message: failure.message, pending: failure.pending === true };
+}
+
+/** The person cleared the kept bar's text themselves. */
+export function dismissKept(): void {
+  const failure = useRemoteEngage.getState().failure;
+  if (failure?.panelId) undelivered.delete(failure.panelId);
+  useRemoteEngage.setState({ failure: undefined });
 }
 
 /** Messages the chat there first draws when an engage lands. */
@@ -347,32 +411,47 @@ function land(): void {
  * the mirror holds no chat for) it stays held, unsent, and the person is told where it is: typed
  * text is never dropped (review 1781 SF-3).
  */
-function deliverHeld(engaging: Engaging, { focused, sends }: { focused: boolean; sends: boolean }): void {
-  const key = engageKey(engaging);
+function deliverHeld(engaging: EngageTarget & { panelId?: string }, { focused, sends }: { focused: boolean; sends: boolean }): void {
+  const target = { machineId: engaging.machineId, sessionId: engaging.sessionId };
+  const key = engageKey(target);
   const text = useRemoteEngage.getState().held[key];
   if (!text) return;
-  const panelId = engaging.panelId ?? mirroredChatPanel(engaging);
+  const panelId = engaging.panelId ?? mirroredChatPanel(target);
   if (!panelId) {
-    keepUnsent(engaging);
-    const message = `Not sent: ${sessionName(engaging)} on ${machineName(engaging.machineId)} has no chat to take what you typed. It is kept with this Session's row: "${text.text}".`;
-    useRemoteEngage.setState({ failure: { ...engaging, message } });
+    keepUnsent(target);
+    const message = `Not sent: ${sessionName(target)} on ${machineName(target.machineId)} has no chat to take what you typed. It is kept with this Session's row: "${text.text}".`;
+    useRemoteEngage.setState({ failure: { ...target, message } });
     showActionError('What you typed was not sent', message);
     return;
   }
+  if (!sends) keepUnsent(target);
+  if (!chatDraftTakerMounted(panelId)) {
+    // The chat there isn't open live (the link is down, or the person moved on): the text stays
+    // visible in the kept bar, and that chat takes it once as it opens.
+    undelivered.set(panelId, target);
+    const sending = sends && text.send;
+    useRemoteEngage.setState({ failure: { ...target, panelId, pending: true, message: `Not sent yet: it goes into ${sessionName(target)}'s message box on ${machineName(target.machineId)} once that chat opens${sending ? ', and sends then' : ''}.` } });
+    return;
+  }
+  undelivered.delete(panelId);
+  const latest = useRemoteEngage.getState().held[key] ?? text;
   useRemoteEngage.setState(state => {
     const rest = { ...state.held };
     delete rest[key];
-    return { held: rest };
+    return { held: rest, failure: state.failure && engageKey(state.failure) === key ? undefined : state.failure };
   });
-  handOverChatDraft(panelId, {
-    text: text.text,
-    selectionStart: text.text.length,
-    selectionEnd: text.text.length,
+  const draft: LaunchDraft = {
+    text: latest.text,
+    selectionStart: latest.text.length,
+    selectionEnd: latest.text.length,
     focused,
-    send: sends && text.send && !!text.text.trim(),
+    send: sends && latest.send && !!latest.text.trim(),
     // The link may still be catching up after the switch: the Enter waits for the chat to be able to send.
-    sendBy: Date.now() + ENTER_WAITS_MS,
-  });
+    sendBy: latest.sendBy ?? Date.now() + ENTER_WAITS_MS,
+  };
+  // Not where the person is typing: the chat says why the text is there unsent.
+  if (!focused) draft.note = 'Not sent yet: you typed this while the window switched to this machine. Press Enter to send it.';
+  handOverChatDraft(panelId, draft);
 }
 
 /**
