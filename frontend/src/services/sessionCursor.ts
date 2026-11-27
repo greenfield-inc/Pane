@@ -45,9 +45,21 @@ export function sessionCursorAttributes(machineId: string, sessionId: string | u
   return { [SESSION_CURSOR_ATTRIBUTE]: sessionId, [SESSION_CURSOR_MACHINE_ATTRIBUTE]: sessionId ? machineId : undefined } as const;
 }
 
+/**
+ * The window's host by config object: every Session row's selector asks on each store change, and
+ * reading it normalizes the whole remote config (T-132's rig: most of the renderer's time during
+ * a switch). The store replaces its config, never changes one in place.
+ */
+const hostIds = new WeakMap<AppConfig, string | null>();
+
 /** The window's host: null on this machine, undefined before the config loads. */
 function hostIdOf(config: AppConfig | null | undefined): string | null | undefined {
-  return config ? getActiveRemoteHostId(config.remoteDaemon) : undefined;
+  if (!config) return undefined;
+  const known = hostIds.get(config);
+  if (known !== undefined) return known;
+  const hostId = getActiveRemoteHostId(config.remoteDaemon);
+  hostIds.set(config, hostId);
+  return hostId;
 }
 
 /** Whether cursor-follow is on: the setting, and the window showing this machine. */
