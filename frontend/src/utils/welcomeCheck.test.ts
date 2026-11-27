@@ -20,3 +20,26 @@ describe('the Welcome check runs once, on this window\'s own first load (QA 1781
     expect(welcomeCheckStep({ ...ready, onOtherMachine: true })).toBe('skip');
   });
 });
+
+describe('QA M-282: welcome seen, no projects, "Don\'t show this again" unticked', () => {
+  it('shows once on the window\'s first load, and never on the 12 switches to B and back that follow', () => {
+    // That machine's state: Welcome closed with X before, so it shows again whenever the check runs.
+    const showsWhenRun = true;
+    let checked = false;
+    let shown = 0;
+    const load = (onOtherMachine: boolean) => {
+      const step = welcomeCheckStep({ checked, isLoaded: true, hasCheckedOnboarding: true, isOnboardingOpen: false, onOtherMachine });
+      if (step === 'wait') return;
+      checked = true;
+      if (step === 'run' && showsWhenRun) shown += 1;
+    };
+    load(false);
+    for (let flip = 0; flip < 6; flip++) {
+      // isLoaded goes false while the switch restores, then true on B, and the same back on A.
+      expect(welcomeCheckStep({ checked, isLoaded: false, hasCheckedOnboarding: true, isOnboardingOpen: false, onOtherMachine: true })).toBe('skip');
+      load(true);
+      load(false);
+    }
+    expect(shown).toBe(1);
+  });
+});
