@@ -114,6 +114,8 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
       client={client}
       connected={online}
       machine={{ id: machineId, name: machineName, os: null, slot: 0, letters: '', local: false }}
+      // Read-only here: no /clear, and no Clear button.
+      clearable={false}
       watchOnly={online ? { placeholder: `Type to continue on ${machineName}` } : { note: `${machineName} is offline. This is what it last sent.` }}
     />;
   } else if (unknown) {

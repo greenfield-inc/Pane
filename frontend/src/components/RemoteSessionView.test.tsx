@@ -43,6 +43,7 @@ describe("another machine's Session under the cursor, read-only (T-116 PR 6)", (
     expect(html).toMatch(/<textarea[^>]*readonly=""/i);
     expect(html).not.toContain('Offline');
     expect(text(html)).not.toContain('Read only: you can watch this chat');
+    expect(html).not.toContain('Start a fresh conversation in this tab');
   });
 
   it('marks an offline machine with when it was last seen, and replaces the message box with a note', async () => {
