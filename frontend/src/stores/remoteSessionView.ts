@@ -270,6 +270,16 @@ const clients = new Map<string, ChatTabClient>();
 const historyReads = new Map<string, Promise<AgentChatMessage[]>>();
 const historyStatusSchema = boundary.object({ messages: boundary.json, unavailable: boundary.optional(boundary.boolean) });
 
+/** The newest status each remote chat's live view reported, by panel id. */
+const liveStatuses = new Map<string, string>();
+
+/** Whether the held copy or the live view says the chat is starting on its host. */
+function startingThere(machineId: string, panelId: string): boolean {
+  const sessionId = sessionOfChat(machineId, panelId);
+  const held = sessionId ? heldRemoteChat(cachedRemoteSession(machineId, sessionId)) : undefined;
+  return held?.status === 'starting' || liveStatuses.get(panelId) === 'starting';
+}
+
 /** The conversation run (generation) of the chat held for a panel of this machine. */
 function heldGeneration(machineId: string, panelId: string): number | undefined {
   const sessionId = sessionOfChat(machineId, panelId);
@@ -350,7 +360,8 @@ export function remoteChatClient(machineId: string, machineName: string): ChatTa
           // A host from before D-19's status answers the bare list.
           const status = decodeOptionalBoundary(result.data, historyStatusSchema);
           if (!status) return decodeChatMessages(result.data);
-          if (status.unavailable === true && generation !== undefined) {
+          // Not while the chat is starting there: it can read them once it has (review of da3ce7c).
+          if (status.unavailable === true && generation !== undefined && !startingThere(machineId, panelId)) {
             useRemoteSessionView.setState(state => ({ earlierUnavailable: { ...state.earlierUnavailable, [remoteSessionKey(machineId, panelId)]: generation } }));
           }
           return decodeChatMessages(status.messages);
@@ -378,6 +389,7 @@ export function remoteChatClient(machineId: string, machineName: string): ChatTa
         const decoded = decodeOrDrop(() => decodeChatTabView(event.payload));
         if (!decoded) return;
         heardLive(decoded.panelId, decoded.generation, 0);
+        liveStatuses.set(decoded.panelId, decoded.status);
         callback(decoded);
       }) ?? (() => undefined);
     },

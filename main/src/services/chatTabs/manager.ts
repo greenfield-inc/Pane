@@ -202,8 +202,10 @@ export class ChatTabManager {
   historyRead(panelId: string, before: number, limit: number): ChatTabHistoryRead {
     const messages = this.history(panelId, before, limit);
     const tab = this.tab(panelId);
-    const replayedNow = !!tab.transcript && replayed(tab);
-    return messages.length === 0 && before > 0 && !replayedNow ? { messages, unavailable: true } : { messages };
+    // Only a chat that isn't running here: one starting or replaying can read them in a moment, in
+    // this same run, and a desktop told "unavailable" keeps that for the run (review of da3ce7c).
+    const idle = !tab.runtime && !tab.starting && !tab.loading;
+    return messages.length === 0 && before > 0 && idle ? { messages, unavailable: true } : { messages };
   }
 
   /** The conversation's messages for readers such as runpane; pages through spooled history without copying it all at once. */

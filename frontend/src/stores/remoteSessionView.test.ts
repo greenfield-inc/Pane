@@ -205,4 +205,20 @@ describe('a shown remote chat stays current (T-116 PR 6)', () => {
     machineRead.mockImplementation(async (machineId: string) => ({ machineId, data: [msg(0), msg(1)] }));
     expect((await remote.remoteChatClient('build', 'Build').history('rp', 2, 100)).map(message => message.id)).toEqual(['m0', 'm1']);
   });
+
+  it("doesn't keep an 'unavailable' answered while the chat is starting there: the next click asks again (review of da3ce7c)", async () => {
+    const { remote } = await shown(5, 3);
+    // The chat is starting on the host (as its live view says).
+    chatListeners.forEach(listener => listener({ machineId: 'build', channel: 'chat-tab:view', payload: { ...snap('b', 'rp', 5, 3).chat, status: 'starting', transcript: undefined } }));
+    const entry = remote.cachedRemoteSession('build', 'b');
+    remote.useRemoteSessionView.setState(state => ({ entries: { ...state.entries, [remote.remoteSessionKey('build', 'b')]: { ...entry!, snapshot: { ...entry!.snapshot!, chat: { ...entry!.snapshot!.chat, status: 'starting' } } } } }));
+    machineRead.mockImplementation(async (machineId: string) => ({ machineId, data: { messages: [], unavailable: true } }));
+    const client = remote.remoteChatClient('build', 'Build');
+
+    expect(await client.history('rp', 2, 100)).toEqual([]);
+    expect(remote.earlierUnavailable('build', 'rp', 1)).toBe(false);
+    machineRead.mockImplementation(async (machineId: string) => ({ machineId, data: { messages: [msg(0), msg(1)] } }));
+    expect((await client.history('rp', 2, 100)).map(message => message.id)).toEqual(['m0', 'm1']);
+    expect(machineRead).toHaveBeenCalledTimes(2);
+  });
 });

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import { applyChatTabEvent, CHAT_FULL_ACCESS_CONTROL, type ChatPanelState, type ChatTabEvent, type ChatTabView } from '../../../../shared/types/chatTab';
 import { PaneError } from '../../../../shared/paneError';
+import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
 import { ChatTabManager, type ChatTabLauncher, type ChatTabManagerOptions, type ChatTabStore } from './manager';
 import { ChatTabNotifyBridge } from './notifyBridge';
@@ -947,6 +948,33 @@ describe('chat tab manager', () => {
     await expect.poll(() => second.manager.historyRead('p1', 1, 50).messages.length, { timeout: 10_000 }).toBe(1);
     expect(second.manager.historyRead('p1', 1, 50).unavailable).toBeUndefined();
     expect(second.manager.historyRead('p1', 0, 50)).toEqual({ messages: [] });
+  });
+
+  it('never says earlier messages are unavailable while the chat is starting and replaying them (review of da3ce7c, D-19)', { timeout: 30_000 }, async () => {
+    const first = harness();
+    const { store, directory } = first;
+    store.add('p1', newTab(directory));
+    await first.manager.ensure('p1');
+    first.manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => first.manager.receipt('p1', 'a')?.state).toBe('completed');
+    const spool = path.join(directory, 'spool');
+    await expect.poll(() => readdirSync(spool).some(folder => existsSync(path.join(spool, folder, 'recent.json'))), { timeout: 10_000 }).toBe(true);
+    await first.manager.stopAll();
+    // The saved window is the newest of a longer chat: it starts at message 5.
+    const folder = readdirSync(spool).find(name => existsSync(path.join(spool, name, 'recent.json')));
+    if (!folder) throw new Error('No saved window');
+    const file = path.join(spool, folder, 'recent.json');
+    const saved = decodeBoundary(JSON.parse(readFileSync(file, 'utf8')), boundary.jsonObject);
+    const held = decodeBoundary(saved.held, boundary.jsonObject);
+    writeFileSync(file, JSON.stringify({ ...saved, held: { ...held, start: 5 } }));
+
+    const second = harness(store, {}, directory);
+    expect(second.manager.view('p1', 200, false).transcript?.start).toBe(5);
+    const starting = second.manager.ensure('p1');
+    // Asked while the chat starts there: nothing yet, but not "unavailable", which a desktop would keep for the run.
+    expect(second.manager.historyRead('p1', 1, 50).unavailable).toBeUndefined();
+    await starting;
+    await expect.poll(() => second.manager.historyRead('p1', 1, 50).messages.length, { timeout: 10_000 }).toBe(1);
   });
 
   it('says a paused tab is paused, and a read that may not start leaves it paused (T-87)', async () => {
