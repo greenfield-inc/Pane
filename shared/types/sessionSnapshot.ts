@@ -46,6 +46,12 @@ export interface SessionSnapshot {
    * message's own text is left out (`SessionSnapshotOmittedData`).
    */
   chat: ChatTabView;
+  /**
+   * True when the host can't read this chat's messages yet: it restarted and the chat's agent hasn't
+   * run since, so `chat.transcript` is absent and `chat.messageCount` is 0 without meaning the chat is
+   * empty. The desktop keeps the messages it holds until a snapshot with a transcript arrives.
+   */
+  transcriptUnknown?: true;
   /** The Session's chat and terminal tabs as a read-only viewer sees them: names, kinds and the few state fields a tab shows; never a screen, launch input or file. */
   tabs: ToolPanel[];
   /** Its stored split layout, or null. */

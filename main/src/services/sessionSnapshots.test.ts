@@ -16,6 +16,8 @@ interface HostSession {
   generation: number;
   /** The chat transcript's revision: it rises with every change to a message. */
   revision: number;
+  /** The host restarted and this chat's agent hasn't run since: it has no transcript to show. */
+  unread?: boolean;
 }
 
 function message(index: number, text = `message ${index}`): AgentChatMessage {
@@ -69,6 +71,8 @@ function fakeHost(sessions: HostSession[]) {
         transcript: { panelId, generation: session.generation, revision: session.revision, start: session.messages.length - window.length, messages: structuredClone(window) },
         messageCount: session.messages.length,
       };
+      // As ChatTabManager.view answers for a chat whose agent hasn't started since Pane did: no transcript, no count.
+      if (session.unread) return { ...view, transcript: undefined, messageCount: 0 };
       return view;
     },
     announce: (sessionId, revision) => { announced.push({ sessionId, revision }); },
@@ -232,6 +236,21 @@ describe('SessionSnapshotService', () => {
     expect(answer.epoch).not.toBe(first.epoch);
     expect(answer.snapshots.map(snapshot => snapshot.sessionId)).toEqual(['a']);
     expect(answer.snapshots[0]?.chat.transcript?.messages).toHaveLength(5);
+  });
+
+  it('says a chat\'s messages are unknown, not empty, when its agent hasn\'t run since the host started (QA F-1)', async () => {
+    const restarted = hostSession('a', { messages: 12 });
+    restarted.unread = true;
+    const host = fakeHost([restarted, hostSession('b', { messages: 2 })]);
+    const service = new SessionSnapshotService(host.sources);
+
+    const answer = await service.snapshots({});
+
+    const [a, b] = answer.snapshots;
+    expect(a?.transcriptUnknown).toBe(true);
+    expect(a?.chat.transcript).toBeUndefined();
+    expect(b?.transcriptUnknown).toBeUndefined();
+    expect(b?.chat.transcript?.messages).toHaveLength(2);
   });
 
   it('keeps listing a Session whose chat cannot be read yet, and sends it once it can', async () => {
