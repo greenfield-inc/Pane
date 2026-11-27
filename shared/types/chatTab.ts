@@ -290,6 +290,16 @@ export interface ChatTabCreate {
 
 export interface ChatTabReadOptions { start?: boolean }
 
+/**
+ * `chat-tab:history` with `{ withStatus: true }` (T-116 D-19): the messages, and `unavailable` when
+ * earlier ones exist but the host can't read them until the chat runs. Without that option it answers
+ * the bare array, as before.
+ */
+export interface ChatTabHistoryRead {
+  messages: AgentChatMessage[];
+  unavailable?: true;
+}
+
 export interface ChatTabClient {
   onReconnect?(callback: () => void): () => void;
   /**

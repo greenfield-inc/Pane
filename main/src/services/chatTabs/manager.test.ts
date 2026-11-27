@@ -925,6 +925,30 @@ describe('chat tab manager', () => {
     expect(second.manager.isRunning('p1')).toBe(false);
   });
 
+  it("says earlier messages aren't available until the chat runs, rather than that there are none (T-116 D-19, QA F-2)", { timeout: 30_000 }, async () => {
+    const first = harness();
+    const { store, directory } = first;
+    store.add('p1', newTab(directory));
+    await first.manager.ensure('p1');
+    first.manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => first.manager.receipt('p1', 'a')?.state).toBe('completed');
+    const spool = path.join(directory, 'spool');
+    await expect.poll(() => readdirSync(spool).some(folder => existsSync(path.join(spool, folder, 'recent.json'))), { timeout: 10_000 }).toBe(true);
+    await first.manager.stopAll();
+
+    // Relaunched: only the saved window is held, so what came before it can't be read without starting the agent.
+    const second = harness(store, {}, directory);
+    expect(second.manager.view('p1', 200, false).transcript?.messages.length).toBeGreaterThan(1);
+    expect(second.manager.historyRead('p1', 1, 50)).toEqual({ messages: [], unavailable: true });
+    expect(second.manager.isRunning('p1')).toBe(false);
+
+    // Once the chat runs, its history reads as before; the start of the conversation is just "no more".
+    await second.manager.ensure('p1');
+    await expect.poll(() => second.manager.historyRead('p1', 1, 50).messages.length, { timeout: 10_000 }).toBe(1);
+    expect(second.manager.historyRead('p1', 1, 50).unavailable).toBeUndefined();
+    expect(second.manager.historyRead('p1', 0, 50)).toEqual({ messages: [] });
+  });
+
   it('says a paused tab is paused, and a read that may not start leaves it paused (T-87)', async () => {
     const { manager, store, directory } = harness();
     store.add('p1', newTab(directory));

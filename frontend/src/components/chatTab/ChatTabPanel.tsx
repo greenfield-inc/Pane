@@ -200,6 +200,8 @@ export interface ChatTabPanelProps {
    * box reads `placeholder` and takes no text; with `note` instead, the note replaces it.
    */
   watchOnly?: { placeholder: string } | { note: ReactNode };
+  /** Shown instead of "Earlier messages" when they exist but can't be read from here yet (another machine's chat, D-19). */
+  earlierNote?: ReactNode;
 }
 
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
@@ -227,7 +229,7 @@ function TurnsSkeleton() {
   </>;
 }
 
-export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, session, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride, watchOnly }: ChatTabPanelProps) {
+export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, session, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride, watchOnly, earlierNote }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
   // A Session the sidebar cursor only shows (T-87): its chat reads never start the agent,
   // and it paints the window the Session's one open or peek call returned.
@@ -623,7 +625,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       </div>}
       <ThreadPrimitive.Viewport ref={viewportRef} onScroll={onViewportScroll} aria-label="Conversation messages" role="region" className="chat-viewport" scrollToBottomOnRunStart={false} autoScroll={!snapshot.hasNewer && !paged}>
         <div className="chat-column">
-          {(snapshot.transcript?.start ?? 0) > 0 && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingEarlier} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadEarlier(); }}>
+          {(snapshot.transcript?.start ?? 0) > 0 && earlierNote && <p role="status" className="chat-notice self-center" data-testid="chat-earlier-note">{earlierNote}</p>}
+          {(snapshot.transcript?.start ?? 0) > 0 && !earlierNote && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingEarlier} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadEarlier(); }}>
             {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`}
           </button>}
           {view?.clearedAt && (snapshot.transcript?.start ?? 0) === 0 && <ClearedDivider at={view.clearedAt} />}

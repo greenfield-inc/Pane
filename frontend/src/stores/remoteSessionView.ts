@@ -41,9 +41,11 @@ export interface RemoteSessionEntry {
 interface RemoteSessionViewState {
   target?: RemoteSessionTarget;
   entries: Record<string, RemoteSessionEntry>;
+  /** By machine and panel: the chat run (generation) in which its host said earlier messages aren't readable until it runs. */
+  earlierUnavailable: Record<string, number>;
 }
 
-export const useRemoteSessionView = create<RemoteSessionViewState>(() => ({ entries: {} }));
+export const useRemoteSessionView = create<RemoteSessionViewState>(() => ({ entries: {}, earlierUnavailable: {} }));
 
 /** How long the cursor stays on a row before its host is read: rows passed over at key-repeat speed are never read. */
 const REMOTE_READ_REST_MS = 150;
@@ -266,6 +268,18 @@ function refused(machineName: string): Promise<never> {
 const clients = new Map<string, ChatTabClient>();
 /** Earlier-message reads under way, by machine, panel and page: a second ask for the same page shares the first. */
 const historyReads = new Map<string, Promise<AgentChatMessage[]>>();
+const historyStatusSchema = boundary.object({ messages: boundary.json, unavailable: boundary.optional(boundary.boolean) });
+
+/** The conversation run (generation) of the chat held for a panel of this machine. */
+function heldGeneration(machineId: string, panelId: string): number | undefined {
+  const sessionId = sessionOfChat(machineId, panelId);
+  return sessionId ? heldRemoteChat(cachedRemoteSession(machineId, sessionId))?.generation : undefined;
+}
+
+/** Whether the host said this chat's earlier messages can't be read until it runs, in this run (`generation`) of it (D-19). */
+export function earlierUnavailable(machineId: string, panelId: string, generation: number): boolean {
+  return useRemoteSessionView.getState().earlierUnavailable[remoteSessionKey(machineId, panelId)] === generation;
+}
 /** Remote chats the cursor has stayed on, keyed by machine and panel: their reads answer every message held. */
 const fullChats = new Set<string>();
 
@@ -325,11 +339,22 @@ export function remoteChatClient(machineId: string, machineName: string): ChatTa
     // nothing, served only for your own machines (OWNER_ONLY_MACHINE_READS). One read per chat at a time.
     history(panelId, before, limit) {
       if (!machineOnline(machineId)) return Promise.reject(new Error(`${machineName} is offline: its earlier messages load once it is back.`));
+      // The host said earlier messages can't be read until this chat runs there: not again in this run.
+      const generation = heldGeneration(machineId, panelId);
+      if (generation !== undefined && earlierUnavailable(machineId, panelId, generation)) return Promise.resolve([]);
       const key = `${remoteSessionKey(machineId, panelId)}\u0000${before}:${limit}`;
       const pending = historyReads.get(key);
       if (pending) return pending;
-      const read = window.electronAPI.machines.read(machineId, 'chat-tab:history', [panelId, before, limit])
-        .then(result => decodeChatMessages(result.data))
+      const read = window.electronAPI.machines.read(machineId, 'chat-tab:history', [panelId, before, limit, { withStatus: true }])
+        .then(result => {
+          // A host from before D-19's status answers the bare list.
+          const status = decodeOptionalBoundary(result.data, historyStatusSchema);
+          if (!status) return decodeChatMessages(result.data);
+          if (status.unavailable === true && generation !== undefined) {
+            useRemoteSessionView.setState(state => ({ earlierUnavailable: { ...state.earlierUnavailable, [remoteSessionKey(machineId, panelId)]: generation } }));
+          }
+          return decodeChatMessages(status.messages);
+        })
         .finally(() => { historyReads.delete(key); });
       historyReads.set(key, read);
       return read;

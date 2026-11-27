@@ -165,7 +165,7 @@ describe('a shown remote chat stays current (T-116 PR 6)', () => {
     const first = client.history('rp', 2, 100);
     const second = client.history('rp', 2, 100);
     expect(machineRead).toHaveBeenCalledTimes(1);
-    expect(machineRead).toHaveBeenCalledWith('build', 'chat-tab:history', ['rp', 2, 100]);
+    expect(machineRead).toHaveBeenCalledWith('build', 'chat-tab:history', ['rp', 2, 100, { withStatus: true }]);
     answer({ machineId: 'build', data: earlier });
     expect((await first).map(message => message.id)).toEqual(['m0', 'm1']);
     expect((await second).map(message => message.id)).toEqual(['m0', 'm1']);
@@ -175,5 +175,34 @@ describe('a shown remote chat stays current (T-116 PR 6)', () => {
     machineRead.mockClear();
     await expect(client.history('rp', 2, 100)).rejects.toThrow(/offline/);
     expect(machineRead).not.toHaveBeenCalled();
+  });
+
+  it("a host that can't read earlier messages until the chat runs is asked once per run, and the chat says so (QA F-2)", async () => {
+    const { remote, useMachineMirrorStore } = await shown(5, 3);
+    machineRead.mockImplementation(async (machineId: string) => ({ machineId, data: { messages: [], unavailable: true } }));
+    const client = remote.remoteChatClient('build', 'Build');
+
+    expect(await client.history('rp', 2, 100)).toEqual([]);
+    expect(remote.earlierUnavailable('build', 'rp', 1)).toBe(true);
+    expect(await client.history('rp', 2, 100)).toEqual([]);
+    expect(machineRead).toHaveBeenCalledTimes(1);
+
+    // The chat runs on the host (a new generation): earlier messages are read again.
+    const runCopy = snap('b', 'rp', 6, 2);
+    runCopy.chat.generation = 2;
+    runCopy.chat.transcript.generation = 2;
+    mirrorSession.mockResolvedValue(runCopy);
+    useMachineMirrorStore.setState({ listings: listing({ b: 6 }) });
+    await tick(20);
+    expect(remote.earlierUnavailable('build', 'rp', 2)).toBe(false);
+    machineRead.mockImplementation(async (machineId: string) => ({ machineId, data: { messages: [msg(0)] } }));
+    expect((await client.history('rp', 2, 100)).map(message => message.id)).toEqual(['m0']);
+    expect(machineRead).toHaveBeenCalledTimes(2);
+  });
+
+  it('an older host that answers a bare list still loads earlier messages', async () => {
+    const { remote } = await shown(5, 3);
+    machineRead.mockImplementation(async (machineId: string) => ({ machineId, data: [msg(0), msg(1)] }));
+    expect((await remote.remoteChatClient('build', 'Build').history('rp', 2, 100)).map(message => message.id)).toEqual(['m0', 'm1']);
   });
 });

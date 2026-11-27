@@ -281,7 +281,11 @@ messages, and while it is shown the chat follows that machine's chat events for
 it alone. If its live events skip ahead of what is held (a gap, or its agent
 starting a new run there), one more read of that machine catches it up, with the
 events that arrive meanwhile applied on top. **Earlier messages** reads older
-messages from that machine (`chat-tab:history`, which starts nothing). These
+messages from that machine (`chat-tab:history`, which starts nothing). On a
+chat that machine hasn't run since it started, only its saved window is there:
+the host answers `unavailable` (asked with `{ withStatus: true }`; an older
+desktop still gets the plain list), and the button gives way to "Older messages
+load once this chat is opened on *machine*", asked again only once the chat runs. These
 reads (`peek` and `chat-tab:history`) are served only for your own machines.
 A Session the mirror doesn't hold (just created, or one whose agent runs in a
 terminal) shows its name at once and fills from that same one read.

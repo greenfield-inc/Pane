@@ -6,7 +6,7 @@ import type { ContentBlock, InitializeResponse, McpServer, NewSessionRequest, Se
 import type { AgentState, PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
 import type { AgentChatMessage, AgentChatReceipt } from '../../../../shared/types/agentChat';
 import type { TerminalPausedMark, ToolPanel } from '../../../../shared/types/panels';
-import { CHAT_CONVERSATION_LIMIT, CHAT_FULL_ACCESS_CONTROL, type ChatPanelState, type ChatTabConversation, type ChatTabSwitchBanner, type ChatTabEvent, type ChatTabAnswer, type ChatTabProblem, type ChatTabQueuedPrompt, type ChatTabSend, type ChatTabStatus, type ChatTabTranscript, type ChatTabView, type ChatTurnTime } from '../../../../shared/types/chatTab';
+import { CHAT_CONVERSATION_LIMIT, CHAT_FULL_ACCESS_CONTROL, type ChatPanelState, type ChatTabConversation, type ChatTabHistoryRead, type ChatTabSwitchBanner, type ChatTabEvent, type ChatTabAnswer, type ChatTabProblem, type ChatTabQueuedPrompt, type ChatTabSend, type ChatTabStatus, type ChatTabTranscript, type ChatTabView, type ChatTurnTime } from '../../../../shared/types/chatTab';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { readOnlyPaneCaller } from '../../daemon/commandRegistry';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
@@ -192,6 +192,18 @@ export class ChatTabManager {
     if (!held) return [];
     const end = Math.min(before, held.start + held.messages.length) - held.start;
     return structuredClone(held.messages.slice(Math.max(0, end - Math.min(500, limit)), Math.max(0, end)));
+  }
+
+  /**
+   * `history`, saying when earlier messages exist but can't be read yet (T-116 D-19): the chat hasn't
+   * run since Pane started, so only its saved window is held, and reading more would start its agent.
+   * An empty answer without `unavailable` is the start of the conversation.
+   */
+  historyRead(panelId: string, before: number, limit: number): ChatTabHistoryRead {
+    const messages = this.history(panelId, before, limit);
+    const tab = this.tab(panelId);
+    const replayedNow = !!tab.transcript && replayed(tab);
+    return messages.length === 0 && before > 0 && !replayedNow ? { messages, unavailable: true } : { messages };
   }
 
   /** The conversation's messages for readers such as runpane; pages through spooled history without copying it all at once. */

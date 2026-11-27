@@ -37,17 +37,22 @@ export function RemoteSessionTileBody({ target }: { target: RemoteSessionTarget 
   const listing = useMachineMirrorStore(state => state.listings[machineId]);
   const machine = useAllMachinesStore(state => state.machines.find(candidate => candidate.id === machineId));
   const row = useAllMachinesStore(state => state.snapshots[machineId]?.sessions.find(session => session.id === sessionId));
-  return <RemoteSessionPanel target={target} entry={entry} listing={listing} machine={machine} row={row} />;
+  const chatPanelId = heldRemoteChat(entry)?.panelId;
+  const blockedRun = useRemoteSessionView(state => (chatPanelId ? state.earlierUnavailable[remoteSessionKey(machineId, chatPanelId)] : undefined));
+  const earlierBlocked = blockedRun !== undefined && blockedRun === heldRemoteChat(entry)?.generation;
+  return <RemoteSessionPanel target={target} entry={entry} listing={listing} machine={machine} row={row} earlierBlocked={earlierBlocked} />;
 }
 
 /** What `RemoteSessionTileBody` shows, from what the stores hold. */
-export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
+export function RemoteSessionPanel({ target, entry, listing, machine, row, earlierBlocked }: {
   target: RemoteSessionTarget;
   entry: RemoteSessionEntry | undefined;
   listing: MachineMirrorListing | undefined;
   machine: MachineState | undefined;
   /** The All machines row's record, for a Session nothing was read of yet. */
   row: OrchestrationSessionSummary | undefined;
+  /** Its host said earlier messages can't be read until the chat runs there (D-19, QA F-2). */
+  earlierBlocked: boolean;
 }) {
   const { machineId, sessionId } = target;
   const machineName = machine?.label ?? 'another machine';
@@ -116,6 +121,7 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
       machine={{ id: machineId, name: machineName, os: null, slot: 0, letters: '', local: false }}
       // Read-only here: no /clear, and no Clear button.
       clearable={false}
+      earlierNote={earlierBlocked ? `Older messages load once this chat is opened on ${machineName}.` : undefined}
       watchOnly={online ? { placeholder: `Type to continue on ${machineName}` } : { note: `${machineName} is offline. This is what it last sent.` }}
     />;
   } else if (unknown) {

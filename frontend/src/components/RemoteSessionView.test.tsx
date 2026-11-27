@@ -20,12 +20,12 @@ const chat: ChatTabView = {
 const session = { id: 's1', name: 'Mirror work', internalSessionId: 'pane-r', agent: 'claude', panelIds: { claude: 'chat-r' }, revision: 2, updatedAt: '' } as OrchestrationSessionSummary;
 const snapshot: SessionSnapshot = { sessionId: 's1', revision: 4, session, chat, tabs: [tab('chat-r', 'Claude', 'chat'), tab('term-r', 'Terminal', 'terminal')], layout: null };
 
-async function render(options: { status?: MachineState['status']; sync?: MachineMirrorSync; snapshot?: SessionSnapshot | null; read?: RemoteSessionEntry['read'] } = {}) {
+async function render(options: { status?: MachineState['status']; sync?: MachineMirrorSync; snapshot?: SessionSnapshot | null; read?: RemoteSessionEntry['read']; earlierBlocked?: boolean } = {}) {
   const { RemoteSessionPanel } = await import('./RemoteSessionView');
   const status = options.status ?? 'online';
   const machine: MachineState = { id: 'build', label: 'Build box', kind: 'remote', status, offlineSince: status === 'offline' ? '2026-11-26T12:05:00.000Z' : null, mine: true };
   const listing = { state: { machineId: 'build', sync: options.sync ?? 'live', lastSeenAt: '2026-11-26T12:02:00.000Z', sessionCount: 1 }, sessions: { s1: 4 } };
-  return renderToStaticMarkup(<RemoteSessionPanel target={{ machineId: 'build', sessionId: 's1' }} entry={{ snapshot: options.snapshot === null ? undefined : options.snapshot ?? snapshot, read: options.read, readAt: options.read ? 1 : 0 }} listing={listing} machine={machine} row={undefined} />);
+  return renderToStaticMarkup(<RemoteSessionPanel target={{ machineId: 'build', sessionId: 's1' }} entry={{ snapshot: options.snapshot === null ? undefined : options.snapshot ?? snapshot, read: options.read, readAt: options.read ? 1 : 0 }} listing={listing} machine={machine} row={undefined} earlierBlocked={options.earlierBlocked ?? false} />);
 }
 
 beforeEach(() => { vi.stubEnv('TZ', 'UTC'); });
@@ -59,6 +59,16 @@ describe("another machine's Session under the cursor, read-only (T-116 PR 6)", (
     const html = await render({ sync: 'catching-up' });
     expect(text(html)).toContain('Updating from Build box');
     expect(text(html)).toContain('ship the mirror');
+  });
+
+  it("says older messages load once the chat is opened there, in place of a button that can't load them (QA F-2)", async () => {
+    // Its own chat: the viewer of each chat is kept per machine for the app's life.
+    const later = { ...chat, panelId: 'chat-early', transcript: { ...chat.transcript!, panelId: 'chat-early', start: 550 } };
+    const shown = await render({ snapshot: { ...snapshot, chat: later } });
+    expect(text(shown)).toContain('Earlier messages (550)');
+    const blocked = await render({ snapshot: { ...snapshot, chat: later }, earlierBlocked: true });
+    expect(text(blocked)).toContain('Older messages load once this chat is opened on Build box.');
+    expect(text(blocked)).not.toContain('Earlier messages');
   });
 
   it('says a Session the host has nothing to show of yet opens there with Enter, instead of reading forever (review suggestion)', async () => {
