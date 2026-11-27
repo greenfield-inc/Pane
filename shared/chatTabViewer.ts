@@ -227,6 +227,10 @@ export class ChatTabViewer {
       }
       this.pending = [];
       if (gap) this.resyncNeeded = true;
+      // A copy older than the window shown (a held copy behind the live events, T-116 PR 6) never
+      // replaces it: the conversation would jump backwards. A host's own read is never older.
+      const shown = this.state.transcript;
+      if (transcript && shown && transcript.generation === shown.generation && transcript.revision < shown.revision) transcript = shown;
       // Closed before this read landed: it keeps what a close keeps, and counts toward the five.
       const closed = this.listeners.size === 0;
       if (closed && transcript) transcript = this.keepOnClose ? newest(transcript) : undefined;

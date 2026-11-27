@@ -290,6 +290,23 @@ describe('chat tab viewer reopen', () => {
     expect(kept.map(viewer => ids(viewer).length)).toEqual([3, 3, 3, 3, 3]);
   });
 
+  it('a read answering an older copy of the same conversation never replaces the newer window shown (review follow-up SF)', async () => {
+    const fake = host(3);
+    const viewer = new ChatTabViewer(fake.client, 'p');
+    viewer.subscribe(() => undefined);
+    await settle();
+    fake.append();
+    await settle();
+    expect(ids(viewer)).toEqual(['m0', 'm1', 'm2', 'm3']);
+
+    // A held client answers a copy from before the last event.
+    const older = fake.view();
+    older.transcript = { ...older.transcript!, revision: older.transcript!.revision - 1, messages: older.transcript!.messages.slice(0, 3) };
+    fake.get.mockResolvedValueOnce(older);
+    await viewer.refresh();
+    expect(ids(viewer)).toEqual(['m0', 'm1', 'm2', 'm3']);
+  });
+
   it('counts a chat closed before its first read lands toward the five', async () => {
     const fake = host(3);
     const viewers = ['a', 'b', 'c', 'd', 'e', 'f'].map(panel => new ChatTabViewer(fake.client, panel));
