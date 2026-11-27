@@ -20,6 +20,7 @@ import { API } from '../utils/api';
 import { cancelMachineOpen, openOnMachine } from '../utils/machineRowActions';
 import { withdrawMachineSwitch } from '../hooks/useMachines';
 import { showActionError } from '../stores/errorStore';
+import { useWindowLink } from '../stores/windowLink';
 import { chatDraftTakerMounted, handOverChatDraft, onChatDraftTaker, onChatTabShown } from '../utils/chatDraftHandover';
 import { useAllMachinesStore, isMachineDimmed } from '../stores/allMachinesStore';
 import { cachedRemoteSession, heldRemoteChat, remoteSessionKey } from '../stores/remoteSessionView';
@@ -342,6 +343,7 @@ function armLiveWait(): void {
 
 /** The window's link is up or down (App, from the connection state): a hold waiting on it resumes once it is up. */
 export function setEngageLinkUp(up: boolean): void {
+  if (useWindowLink.getState().up !== up) useWindowLink.setState({ up });
   if (linkUp === up) return;
   linkUp = up;
   const engaging = useRemoteEngage.getState().engaging;

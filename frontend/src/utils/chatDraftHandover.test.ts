@@ -66,3 +66,15 @@ describe('chat draft handover (T-132, review 1781 SF-4)', () => {
     expect(sendDeadline(draft('x', { send: true }), 5000)).toBe(Date.now() + 5000);
   });
 });
+
+describe('a handed-over Enter waits for the window\'s link (QA 1781 F-1)', () => {
+  it('waits while the link is down or the chat cannot send, sends once both are ready, and gives up past its deadline', async () => {
+    const { pendingSendStep } = await import('./chatDraftHandover');
+    const pending = { until: 1000 };
+    expect(pendingSendStep(pending, { edited: false, now: 500, sendDisabled: false, linkUp: false })).toBe('wait');
+    expect(pendingSendStep(pending, { edited: false, now: 500, sendDisabled: true, linkUp: true })).toBe('wait');
+    expect(pendingSendStep(pending, { edited: false, now: 500, sendDisabled: false, linkUp: true })).toBe('send');
+    expect(pendingSendStep(pending, { edited: false, now: 1001, sendDisabled: false, linkUp: true })).toBe('expired');
+    expect(pendingSendStep(pending, { edited: true, now: 500, sendDisabled: false, linkUp: true })).toBe('edited');
+  });
+});

@@ -45,7 +45,8 @@ import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
 import { FindBar } from '../find/FindBar';
 import { useSurfaceFind } from '../find/surfaceFind';
 import { takeLaunchDraft, type LaunchDraft } from '../../utils/launchOutline';
-import { acceptChatDraft, chatTabShown, handOverChatDraft, sendDeadline } from '../../utils/chatDraftHandover';
+import { acceptChatDraft, chatTabShown, handOverChatDraft, pendingSendStep, sendDeadline } from '../../utils/chatDraftHandover';
+import { useWindowLink } from '../../stores/windowLink';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
@@ -473,6 +474,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   // caret, focus when it had it, and an Enter pressed before the chat loaded, which sends that text
   // once (D-62) if the chat can send it soon after; an edit or a chat that stays unable drops it.
   const launchSend = useRef<{ text: string; until: number } | null>(null);
+  const linkUp = useWindowLink(state => state.up);
   /** Re-runs the launch send check: the handover can land after mount, once the box settles, and the send window closes. */
   const [launchTick, setLaunchTick] = useState(0);
   const watching = watchOnly !== undefined;
@@ -518,15 +520,15 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   useEffect(() => {
     const pending = launchSend.current;
     if (!pending) return;
-    const edited = runtime.thread.composer.getState().text !== pending.text;
-    if (edited || Date.now() > pending.until) {
-      switchMark('chat:draft-send', { panelId, status: edited ? 'edited' : 'expired' });
+    const step = pendingSendStep(pending, { edited: runtime.thread.composer.getState().text !== pending.text, now: Date.now(), sendDisabled, linkUp });
+    if (step === 'edited' || step === 'expired') {
+      switchMark('chat:draft-send', { panelId, status: step });
       launchSend.current = null;
       // The Enter pressed before the chat could send is not lost silently: the text stays, with why (T-132).
-      if (!edited) viewer.setError('Not sent: the chat could not take your message in time (its connection may have dropped). It is still here; press Enter to send it.');
+      if (step === 'expired') viewer.setError('Not sent: the chat could not take your message in time (its connection may have dropped). It is still here; press Enter to send it.');
       return;
     }
-    if (sendDisabled) {
+    if (step === 'wait') {
       // Re-checked when the window closes, so a chat that never becomes able to send never sends.
       const timer = setTimeout(() => setLaunchTick(tick => tick + 1), pending.until - Date.now() + 1);
       return () => clearTimeout(timer);
@@ -534,7 +536,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     launchSend.current = null;
     switchMark('chat:draft-send', { panelId, status: 'sent' });
     void runtime.thread.composer.send();
-  }, [runtime, sendDisabled, launchTick, viewer]);
+  }, [runtime, sendDisabled, linkUp, launchTick, viewer]);
   // Every refusal is shown (assistant-ui's own paste and picker swallow them), and a file
   // that failed while copying leaves no chip behind.
   useEffect(() => runtime.thread.composer.unstable_on('attachmentAddError', event => {

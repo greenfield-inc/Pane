@@ -49,6 +49,15 @@ export function onChatDraftTaker(listener: (panelId: string) => void): () => voi
   return () => { takerListeners.delete(listener); };
 }
 
+/** What a chat does next with an Enter handed to it (`launchSend`): send it now, keep waiting, or give up and why. */
+export function pendingSendStep(pending: { until: number }, { edited, now, sendDisabled, linkUp }: { edited: boolean; now: number; sendDisabled: boolean; linkUp: boolean }): 'send' | 'wait' | 'edited' | 'expired' {
+  if (edited) return 'edited';
+  if (now > pending.until) return 'expired';
+  // The window's link isn't up yet (a switch still restoring): main would refuse the send.
+  if (sendDisabled || !linkUp) return 'wait';
+  return 'send';
+}
+
 /** A chat tab that can take a handed-over draft; returns its cleanup. */
 export function acceptChatDraft(panelId: string, taker: (draft: LaunchDraft) => void): () => void {
   takers.set(panelId, taker);
