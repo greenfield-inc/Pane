@@ -1305,7 +1305,7 @@ async function initializeServices() {
     // D-500: a saved computer is yours when its Tailscale owner is this computer's Tailscale login.
     ownership: {
       check: (tailnet) => tailnetLoginMatches(tailnet, readTailscaleStatus),
-      save: (computerId, mine) => remotePaneClientController.saveOwnership(computerId, mine),
+      save: (computerId, mine, relay) => remotePaneClientController.saveOwnership(computerId, mine, relay),
       relayKey: (tailnet, secret) => tailnetRelayKey(tailnet, secret, readTailscaleStatus),
     },
   });

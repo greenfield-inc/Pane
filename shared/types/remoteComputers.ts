@@ -59,6 +59,11 @@ export interface RemoteComputer {
    * connects; absent when it has no Tailscale name here or another login owns it.
    */
   mine?: 'tailscale';
+  /**
+   * The relay key (id and fingerprint) of the machine `mine` was proved for (review MF-1). While
+   * connected over a route pinned to another key, or to none, the mark doesn't count.
+   */
+  mineRelay?: { computerId: string; fingerprint: string };
   /** "This is my computer" in Settings › Remote Access, when the person set it; it wins over `mine` both ways. */
   mineOverride?: boolean;
   routes: ComputerRoute[];
@@ -109,11 +114,13 @@ const computerSchema = boundary.object({
   linkedBy: boundary.optional(boundary.nonEmptyString),
   mine: boundary.optional(boundary.json),
   mineOverride: boundary.optional(boundary.json),
+  mineRelay: boundary.optional(boundary.json),
   routes: boundary.array(boundary.json),
 });
 
 const osSchema = boundary.enumeration('macOS', 'Windows', 'Linux');
 const mineSchema = boundary.literal('tailscale');
+const relayKeySchema = boundary.object({ computerId: boundary.nonEmptyString, fingerprint: boundary.nonEmptyString });
 
 const reportSchema: BoundarySchema<ComputerRoutesReport> = boundary.object({
   machineId: boundary.nonEmptyString,
@@ -149,7 +156,7 @@ export function decodeComputers(value: JsonValue | undefined, log: (line: string
       log(`[computers] dropped saved computer ${index + 1}: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
-    const { os, mine, mineOverride, routes: savedRoutes, ...fields } = saved;
+    const { os, mine, mineOverride, mineRelay, routes: savedRoutes, ...fields } = saved;
     const routes = savedRoutes.flatMap((route) => {
       try {
         return [decodeBoundary(route, routeSchema)];
@@ -168,6 +175,8 @@ export function decodeComputers(value: JsonValue | undefined, log: (line: string
     if (decodeOptionalBoundary(mine, mineSchema)) computer.mine = 'tailscale';
     const override = decodeOptionalBoundary(mineOverride, boundary.boolean);
     if (override !== undefined) computer.mineOverride = override;
+    const bound = decodeOptionalBoundary(mineRelay, relayKeySchema);
+    if (bound && computer.mine) computer.mineRelay = bound;
     return [computer];
   });
 }
@@ -488,9 +497,14 @@ export function applyRoutesReport(
     && via.relay.computerId === report.relay.id && via.relay.fingerprint === report.relay.fingerprint;
   const pinned = (route: ComputerRoute, record: RemoteComputer) => route.relay === undefined
     || record.routes.some((own) => own.relay?.computerId === route.relay?.computerId && own.relay?.fingerprint === route.relay?.fingerprint);
-  const found = foundRoutes(report, via.token).filter((route) => proven || pinned(route, computer));
   const holder = computers.find((candidate) => candidate.id !== computerId && candidate.machineId === report.machineId);
   const confirmed = proven && holder !== undefined && reportNamesKeyOf(holder, report);
+  // A Tailscale name another saved computer has is that computer's: a host claiming it gets no route to it (review MF-1).
+  const takenNames = new Set(computers
+    .filter((candidate) => candidate.id !== computerId && !(confirmed && candidate === holder))
+    .flatMap((candidate) => candidate.routes.flatMap((route) => (route.tailnetMachine && route.tailnetDomain ? [tailnetKey(route.tailnetMachine, route.tailnetDomain)] : []))));
+  const found = foundRoutes(report, via.token).filter((route) => (proven || pinned(route, computer))
+    && !(route.tailnetMachine && route.tailnetDomain && takenNames.has(tailnetKey(route.tailnetMachine, route.tailnetDomain))));
   if (computer.machineId && computer.machineId !== report.machineId && (!holder || confirmed)) {
     const remaining = computers.map((candidate) => (candidate.id === computerId
       ? { ...candidate, routes: candidate.routes.filter((route) => route.id !== via.id) }
@@ -509,6 +523,10 @@ export function applyRoutesReport(
     computers: computers.filter((candidate) => candidate !== twin).map((candidate) => (candidate.id === computerId ? updated : candidate)),
     id: computerId,
   };
+}
+
+function tailnetKey(machine: string, domain: string): string {
+  return `${machine.toLowerCase()}@${domain.toLowerCase()}`;
 }
 
 /** Whether a report's relay id and key fingerprint are the ones a saved record pins. */

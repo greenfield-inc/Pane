@@ -2,7 +2,7 @@ import type { WebSocket } from 'ws';
 import { MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL, MACHINE_HEALTH_CLEANUP_CHANNEL, MACHINE_HEALTH_IGNORE_LEAK_CHANNEL, MACHINE_HEALTH_PAUSE_IDLE_CHANNEL, MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_APP_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL } from '../../../shared/types/machineHealth';
 import os from 'os';
 import { RemotePaneClient, type RemoteRouteCandidate } from '../daemon/client/remotePaneClient';
-import { isOwnComputer, isWatchedComputer, primaryProfile, routeProfile, routesReachableHere, type ComputerRoutesReport, type RemoteComputer } from '../../../shared/types/remoteComputers';
+import { decodeComputerRoutesReport, isOwnComputer, isWatchedComputer, primaryProfile, routeProfile, routesReachableHere, type ComputerRoutesReport, type RemoteComputer } from '../../../shared/types/remoteComputers';
 import type { ConfigManager } from './configManager';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { READ_ONLY_ACCESS_CODE } from '../../../shared/types/accessLevel';
@@ -58,16 +58,19 @@ export interface MachineConnectionsDeps {
   ownership?: {
     /** Whether the named Tailscale machine's owner is this computer's login; undefined when Tailscale here can't say. */
     check(tailnet: { name: string; domain: string }): Promise<boolean | undefined>;
-    /** Saves the result as the computer's `mine` mark. */
-    save(computerId: string, mine: boolean): Promise<void>;
+    /** Saves the result as the computer's `mine` mark, bound to the relay key of the machine it was proved for. */
+    save(computerId: string, mine: boolean, relay?: RelayKey | null): Promise<void>;
     /**
      * The side check: one short owner-authenticated read over the named Tailscale machine, through
      * this computer's Tailscale, for the relay key it holds. Null when it has none; undefined when it
      * can't be reached.
      */
-    relayKey?(tailnet: { name: string; domain: string }, secret: string): Promise<{ computerId: string; fingerprint: string } | null | undefined>;
+    relayKey?(tailnet: { name: string; domain: string }, secret: string): Promise<RelayKey | null | undefined>;
   };
 }
+
+/** A relay key: the id and fingerprint a Same network or relay route is pinned to. */
+type RelayKey = { computerId: string; fingerprint: string };
 
 interface RemoteMachine {
   key: string;
@@ -300,12 +303,7 @@ export class MachineConnections {
       const computer = wanted.get(id);
       if (computer && connectionKey(computer) === machine.key) {
         if (machine.state.label !== computer.label) { machine.state.label = computer.label; changed = true; }
-        const mine = isOwnComputer(computer);
-        if (mine !== (machine.state.mine === true)) {
-          if (mine) machine.state.mine = true;
-          else delete machine.state.mine;
-          changed = true;
-        }
+        if (this.updateMine(machine, computer)) changed = true;
         continue;
       }
       this.machines.delete(id);
@@ -330,7 +328,7 @@ export class MachineConnections {
       key: connectionKey(computer),
       profile,
       retryTimer: null,
-      state: { id, label: profile.label, kind: 'remote', status: 'connecting', offlineSince: null, ...(isWatchedComputer(computer) && { access: 'read' as const }), ...(isOwnComputer(computer) && { mine: true as const }) },
+      state: { id, label: profile.label, kind: 'remote', status: 'connecting', offlineSince: null, ...(isWatchedComputer(computer) && { access: 'read' as const }), ...(ownedNow(computer, undefined) && { mine: true as const }) },
       client: this.createClient(profile, {
         machineId: this.deps.configManager.getConfig().machineId,
         routes,
@@ -343,6 +341,9 @@ export class MachineConnections {
           if (metadata?.routeId && moved) { machine.state.routeId = metadata.routeId; this.emitMachines(); }
           const arrived = status === 'connected' && (machine.state.status !== 'online' || moved);
           this.updateStatus(machine, status, metadata?.hostMachineId, metadata?.hostWorkspaceEntries);
+          // Whether the mark counts depends on the route the connection is on now.
+          const saved = this.savedComputer(id);
+          if (saved && this.updateMine(machine, saved)) this.emitMachines();
           // A new connection, or one moved to another route: the route it is on decides what it proves.
           if (arrived) void this.checkOwnership(id, machine.state.routeId);
           if (status === 'connected') clearRetry(machine);
@@ -380,12 +381,20 @@ export class MachineConnections {
     const hasTailscale = computer.routes.some(route => route.kind === 'tailscale');
     try {
       let matches: boolean | undefined;
+      let relay: RelayKey | null | undefined;
       if (!hasTailscale) matches = false;
-      else if (via?.kind === 'tailscale' && via.tailnetMachine && via.tailnetDomain) matches = await ownership.check({ name: via.tailnetMachine, domain: via.tailnetDomain });
-      else if (via?.relay) matches = await this.sideCheck(computer, via.relay);
+      else if (via?.kind === 'tailscale' && via.tailnetMachine && via.tailnetDomain) {
+        matches = await ownership.check({ name: via.tailnetMachine, domain: via.tailnetDomain });
+        // The relay key of the machine this Tailscale connection reached, read over it (review MF-1).
+        if (matches) relay = await this.connectedRelayKey(computerId);
+      } else if (via?.relay) {
+        matches = await this.sideCheck(computer, via.relay);
+        relay = via.relay;
+      }
       const now = saved();
-      if (matches === undefined || !now || matches === (now.mine === 'tailscale')) return;
-      await ownership.save(computerId, matches);
+      if (matches === undefined || !now) return;
+      if (matches === (now.mine === 'tailscale') && (!matches || sameKey(now.mineRelay, relay ?? undefined))) return;
+      await ownership.save(computerId, matches, matches ? relay ?? null : undefined);
     } catch (error) {
       console.warn(`[MachineConnections] Could not check whether ${computer.label} is yours:`, reasonOf(error));
     }
@@ -405,9 +414,9 @@ export class MachineConnections {
     const record = this.sideChecks.get(computer.id) ?? { failures: 0, retryAt: 0 };
     this.sideChecks.set(computer.id, record);
     const now = Date.now();
-    const due = computer.mine === 'tailscale'
-      ? record.provedAt === undefined || now - record.provedAt >= SIDE_CHECK_AGAIN_MS
-      : now >= record.retryAt;
+    // A proof, either way, is checked again a day later (review S-7); a mark bound to another key isn't a proof for this one.
+    const proved = record.provedAt !== undefined && (computer.mine !== 'tailscale' || sameKey(computer.mineRelay, pinned));
+    const due = proved ? now - (record.provedAt ?? 0) >= SIDE_CHECK_AGAIN_MS : now >= record.retryAt;
     if (!due) return undefined;
     let proven: boolean | undefined;
     for (const route of computer.routes) {
@@ -427,6 +436,32 @@ export class MachineConnections {
       record.retryAt = 0;
     }
     return proven;
+  }
+
+  /** The relay key the machine at the other end of this connection reports (`computers:routes-report`); undefined when it reports none. */
+  private async connectedRelayKey(computerId: string): Promise<RelayKey | undefined> {
+    const machine = this.machines.get(computerId);
+    if (!machine) return undefined;
+    try {
+      const relay = decodeComputerRoutesReport(decodeOptionalBoundary(await machine.client.invoke('computers:routes-report', []), boundary.json))?.relay;
+      return relay ? { computerId: relay.id, fingerprint: relay.fingerprint } : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private savedComputer(computerId: string): RemoteComputer | undefined {
+    return this.deps.configManager.getConfig().remoteDaemon?.client.computers.find(computer => computer.id === computerId);
+  }
+
+  /** Sets `state.mine` from the saved computer and the route the connection is on; true when it changed. */
+  private updateMine(machine: RemoteMachine, computer: RemoteComputer): boolean {
+    const route = machine.state.status === 'online' ? computer.routes.find(candidate => candidate.id === machine.state.routeId) ?? null : undefined;
+    const mine = ownedNow(computer, route);
+    if (mine === (machine.state.mine === true)) return false;
+    if (mine) machine.state.mine = true;
+    else delete machine.state.mine;
+    return true;
   }
 
   private async close(machine: RemoteMachine): Promise<void> {
@@ -627,4 +662,22 @@ export function remoteMachineAccess(machines: MachineConnections): RemoteMachine
       }
     },
   };
+}
+
+function sameKey(left: RelayKey | undefined, right: RelayKey | undefined): boolean {
+  return left !== undefined && right !== undefined && left.computerId === right.computerId && left.fingerprint === right.fingerprint;
+}
+
+/**
+ * Whether a saved computer counts as the person's own now (D-500, review MF-1). The switch wins. A
+ * Tailscale mark counts while offline (its copy stays), on a Tailscale route (checked by name on every
+ * connect), and on a Same network or relay route only when that route is pinned to the relay key
+ * the mark was proved for. On any other route (`null`: one this computer can't place, an SSH or
+ * public address), it doesn't. `route` undefined: not connected.
+ */
+function ownedNow(computer: RemoteComputer, route: RemoteComputer['routes'][number] | null | undefined): boolean {
+  if (!isOwnComputer(computer)) return false;
+  if (computer.mineOverride !== undefined || route === undefined) return true;
+  if (route?.kind === 'tailscale') return true;
+  return route?.relay !== undefined && sameKey(computer.mineRelay, route.relay);
 }

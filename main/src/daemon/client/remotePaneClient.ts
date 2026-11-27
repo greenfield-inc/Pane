@@ -1763,15 +1763,18 @@ export class RemotePaneClientController extends EventEmitter {
   }
 
   /** Saves whether a saved computer's Tailscale owner is this computer's login (its `mine` mark, D-500). */
-  async saveOwnership(computerId: string, mine: boolean): Promise<void> {
+  async saveOwnership(computerId: string, mine: boolean, relay?: { computerId: string; fingerprint: string } | null): Promise<void> {
     if (!this.configManager) return;
     await this.configManager.updateConfigWith((current) => {
       const remote = normalizeRemoteDaemonConfig(current.remoteDaemon);
       const computer = remote.client.computers.find((candidate) => candidate.id === computerId);
-      if (!computer || mine === (computer.mine === 'tailscale')) return {};
+      if (!computer) return {};
       const updated = { ...computer };
+      delete updated.mine;
+      delete updated.mineRelay;
       if (mine) updated.mine = 'tailscale';
-      else delete updated.mine;
+      if (mine && relay) updated.mineRelay = relay;
+      if (JSON.stringify(updated) === JSON.stringify(computer)) return {};
       const computers = remote.client.computers.map((candidate) => (candidate.id === computerId ? updated : candidate));
       return { remoteDaemon: { ...remote, client: { ...remote.client, computers } } };
     });

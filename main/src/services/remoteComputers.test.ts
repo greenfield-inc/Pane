@@ -116,11 +116,13 @@ describe('which saved computers are yours (D-500)', () => {
 
   it('keeps the Tailscale mark and the switch, and drops a value it can\'t read without dropping the computer', () => {
     expect(decodeComputers([
-      { id: 'a', label: 'a', mine: 'tailscale', mineOverride: false, routes: [link] },
-      { id: 'b', label: 'b', mine: 'someday', mineOverride: 'yes', routes: [link] },
+      { id: 'a', label: 'a', mine: 'tailscale', mineRelay: { computerId: 'x', fingerprint: 'f' }, mineOverride: false, routes: [link] },
+      { id: 'b', label: 'b', mine: 'someday', mineRelay: { computerId: 'x', fingerprint: 'f' }, mineOverride: 'yes', routes: [link] },
+      { id: 'c', label: 'c', mine: 'tailscale', mineRelay: 'x', routes: [link] },
     ], () => undefined)).toEqual([
-      { id: 'a', label: 'a', mine: 'tailscale', mineOverride: false, routes: [link] },
+      { id: 'a', label: 'a', mine: 'tailscale', mineRelay: { computerId: 'x', fingerprint: 'f' }, mineOverride: false, routes: [link] },
       { id: 'b', label: 'b', routes: [link] },
+      { id: 'c', label: 'c', mine: 'tailscale', routes: [link] },
     ]);
   });
 
@@ -179,6 +181,17 @@ describe('merging computers', () => {
       ['tailscale', 'https://devbox.tail1234.ts.net:8443', 'tok', 'found'],
       ['relay', 'https://k7xq2m4n8p3r5t6v.runpane.net', 'tok', 'link'],
     ]);
+  });
+
+  it('refuses a Tailscale route a computer reports under a name another saved computer already has (review MF-1)', () => {
+    const studio: RemoteComputer = { id: 'studio', label: 'studio', routes: [{ id: 'tailscale:https://studio.tail1.ts.net:8443', kind: 'tailscale', source: 'found', baseUrl: 'https://studio.tail1.ts.net:8443', token: '', tailnetMachine: 'studio', tailnetDomain: 'tail1.ts.net' }] };
+    const { computers } = applyRoutesReport([studio, devbox], devbox.id, relayRoute, {
+      machineId: 'devbox-install',
+      name: 'devbox',
+      relay: { id: 'k7xq2m4n8p3r5t6v', address: 'https://k7xq2m4n8p3r5t6v.runpane.net', fingerprint: 'fp', local: [] },
+      tailnet: { dnsName: 'Studio.tail1.ts.net.', machine: 'Studio', domain: 'tail1.ts.net', port: 8443 },
+    });
+    expect(computers.find((computer) => computer.id === devbox.id)?.routes.map((route) => route.kind)).toEqual(['relay']);
   });
 
   it('saves only https addresses a computer reports, so its token never goes out in the clear', () => {

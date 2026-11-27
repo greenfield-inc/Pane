@@ -325,7 +325,12 @@ describe('MachineConnections: which saved computers are yours (D-500)', () => {
   const keyOf = (name: string) => ({ computerId: `${name}-relay`, fingerprint: `fp-${name}` });
 
   /** Saved computers whose config changes as the mark and the switch are saved; `logins` is who owns each Tailscale name, as Tailscale here reports it. */
-  function own(computers: RemoteComputer[], logins: Record<string, boolean | undefined>, keys: Record<string, { computerId: string; fingerprint: string } | null | undefined> = {}) {
+  /**
+   * `logins`: who owns each Tailscale name, as Tailscale here reports it. `keys`: the relay key each
+   * Tailscale name's machine holds, read by the side check. `reached`: the relay key of the machine at
+   * the other end of each computer's connection, as `computers:routes-report` answers over it.
+   */
+  function own(computers: RemoteComputer[], logins: Record<string, boolean | undefined>, keys: Record<string, { computerId: string; fingerprint: string } | null | undefined> = {}, reached: Record<string, { computerId: string; fingerprint: string }> = {}) {
     const configManager = new ConfigManager();
     const defaults = createDefaultRemoteDaemonConfig();
     let config: AppConfig = { gitRepoPath: '', verbose: false, remoteDaemon: { ...defaults, client: { ...defaults.client, computers } } };
@@ -343,15 +348,22 @@ describe('MachineConnections: which saved computers are yours (D-500)', () => {
       invokeLocal: vi.fn(async () => ({ success: true })),
       createClient: (saved, options) => {
         clients.set(saved.id, options);
-        return { invoke: vi.fn(async () => undefined), connect: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), retryNow: vi.fn(async () => undefined), suspend: vi.fn(), resume: vi.fn(), openPortStream: vi.fn(), measureLatency: vi.fn(async () => 4) };
+        const invoke = vi.fn(async (channel: string): Promise<JsonValue | undefined> => {
+          const key = reached[saved.id];
+          if (channel !== 'computers:routes-report' || !key) return undefined;
+          return { machineId: `${saved.id}-install`, name: saved.id, relay: { id: key.computerId, address: 'https://relay.example', fingerprint: key.fingerprint, local: [] } };
+        });
+        return { invoke, connect: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), retryNow: vi.fn(async () => undefined), suspend: vi.fn(), resume: vi.fn(), openPortStream: vi.fn(), measureLatency: vi.fn(async () => 4) };
       },
       ownership: {
         check: async ({ name }) => { checks.push(name); return logins[name]; },
         relayKey: async ({ name }) => { probes.push(name); return keys[name]; },
-        save: async (computerId, mine) => change(computerId, computer => {
+        save: async (computerId, mine, relay) => change(computerId, computer => {
           const next = { ...computer };
+          delete next.mine;
+          delete next.mineRelay;
           if (mine) next.mine = 'tailscale';
-          else delete next.mine;
+          if (mine && relay) next.mineRelay = relay;
           return next;
         }),
       },
@@ -365,7 +377,7 @@ describe('MachineConnections: which saved computers are yours (D-500)', () => {
       clients.get(id)?.onConnectionStateChange?.('connected', null, route ? { routeId: route } : undefined);
     };
     const drop = (id: string) => clients.get(id)?.onConnectionStateChange?.('reconnecting');
-    return { machines, mine, connect, drop, checks, probes, keys, change, saved: (id: string) => config.remoteDaemon?.client.computers.find(computer => computer.id === id), logins };
+    return { machines, mine, connect, drop, checks, probes, keys, reached, change, saved: (id: string) => config.remoteDaemon?.client.computers.find(computer => computer.id === id), logins };
   }
 
   it('marks a saved computer yours once it connects over its Tailscale route and Tailscale names this computer\'s login as its owner', async () => {
@@ -465,7 +477,7 @@ describe('MachineConnections: which saved computers are yours (D-500)', () => {
   });
 
   it('checks again on each connect over Tailscale, keeps the mark when Tailscale can\'t say or the connection is on another route', async () => {
-    const { mine, connect, drop, checks, logins } = own([{ id: 'studio', label: 'studio', routes: [tailscaleRoute('studio'), relayRoute('studio')] }], { studio: true });
+    const { mine, connect, drop, checks, logins } = own([{ id: 'studio', label: 'studio', routes: [tailscaleRoute('studio'), relayRoute('studio')] }], { studio: true }, {}, { studio: keyOf('studio') });
     connect('studio');
     await vi.waitFor(() => expect(mine('studio')).toBe(true));
 
@@ -518,5 +530,59 @@ describe('MachineConnections: which saved computers are yours (D-500)', () => {
     const { mine } = own([{ id: 'shared', label: 'shared', mineOverride: true, mine: 'tailscale', routes: [tailscaleRoute('shared', 'pane_read_shared')] }], { shared: true });
     await new Promise(resolve => setImmediate(resolve));
     expect(mine('shared')).toBe(false);
+  });
+
+  it('keeps no mark proved over a Tailscale name a teammate\'s host claimed once the connection moves to its relay (review MF-1, R1)', async () => {
+    // The claimed route is dialed first: it reaches your real studio, which proves your login and holds studio's key.
+    const claimed = { ...tailscaleRoute('studio'), id: 'tailscale:https://studio.tail1.ts.net:4800#claimed' };
+    const { mine, connect, drop, saved } = own([{ id: 'mallory', label: 'mallory', routes: [claimed, relayRoute('mallory')] }], { studio: true }, { studio: keyOf('studio') }, { mallory: keyOf('studio') });
+    connect('mallory', claimed.id);
+    await vi.waitFor(() => expect(saved('mallory')?.mineRelay).toEqual(keyOf('studio')));
+    expect(mine('mallory')).toBe(true);
+
+    // Studio sleeps: the connection moves to the relay, which reaches the teammate's host and its own key.
+    drop('mallory');
+    connect('mallory', relayRoute('mallory').id);
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    expect(mine('mallory')).toBe(false);
+  });
+
+  it('binds a Tailscale proof to the relay key read over that connection, and honours it on Same network only for that key', async () => {
+    const { mine, connect, drop, saved } = own([{ id: 'macbook', label: 'macbook', routes: [lanRoute('macbook'), tailscaleRoute('macbook')] }], { macbook: true }, {}, { macbook: keyOf('macbook') });
+    connect('macbook', tailscaleRoute('macbook').id);
+    await vi.waitFor(() => expect(saved('macbook')?.mineRelay).toEqual(keyOf('macbook')));
+
+    drop('macbook');
+    connect('macbook', lanRoute('macbook').id);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(mine('macbook')).toBe(true);
+  });
+
+  it('keeps the mark while the computer is offline, so its saved copy stays', async () => {
+    const { mine, connect, drop } = own([{ id: 'studio', label: 'studio', routes: [tailscaleRoute('studio')] }], { studio: true }, {}, { studio: keyOf('studio') });
+    connect('studio');
+    await vi.waitFor(() => expect(mine('studio')).toBe(true));
+    drop('studio');
+    expect(mine('studio')).toBe(true);
+  });
+
+  it('after a side check proves a computer isn\'t yours, checks it again only a day later (review S-7)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-26T12:00:00.000Z'));
+    try {
+      const { connect, drop, probes } = own([{ id: 'teammate', label: 'teammate', routes: [lanRoute('teammate'), tailscaleRoute('teammate')] }], { teammate: false }, { teammate: keyOf('teammate') });
+      const reconnect = async () => { drop('teammate'); connect('teammate'); await new Promise(resolve => setTimeout(resolve, 10)); };
+      await reconnect();
+      await reconnect();
+      vi.setSystemTime(new Date('2026-11-27T11:00:00.000Z'));
+      await reconnect();
+      expect(probes).toHaveLength(1);
+      vi.setSystemTime(new Date('2026-11-27T12:01:00.000Z'));
+      await reconnect();
+      expect(probes).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

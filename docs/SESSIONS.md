@@ -1106,8 +1106,17 @@ through this computer's Tailscale (`computers:routes-report`, as this
 computer's login). Only a machine there that holds the same relay key is the
 one connected, so only its Tailscale owner sets or clears the mark. It runs
 once per connect while the computer is unmarked (backing off after one that
-proved nothing, up to an hour) and once a day after. When Tailscale here can't
-say, the last result is kept. A machine with no
+proved nothing, up to an hour) and once a day after a result either way. When
+Tailscale here can't say, the last result is kept.
+
+The mark is bound to the relay key of the machine it was proved for
+(`mineRelay`): read with `computers:routes-report` over the proving Tailscale
+connection, or the key the side check matched. While connected, it counts on a
+Tailscale route (checked by name on every connect) and on a Same network or
+relay route only when that route is pinned to the same key; on any other key or
+route the machine is not mirrored until proved again. While offline the mark
+stands, so the saved copy stays. A Tailscale route a host reports under a name
+another saved computer already has is refused. A machine with no
 Tailscale name here (relay only, say) or owned by another login is not
 mirrored. **This is my computer** in Settings › Remote Access › Computers
 (`mineOverride`) wins over the check both ways: on mirrors the machine, off
