@@ -271,10 +271,6 @@ export function openSessionView(target: SessionViewTarget, { select = false, res
 /** How long an open made while the window's host restores waits for it to be connected. */
 const CONNECTED_WAIT_MS = 20_000;
 
-function refusedWhileRestoring(error: unknown): boolean {
-  return error instanceof Error && error.message.includes('ERR_REMOTE_OFFLINE');
-}
-
 /** Settles when the window's host connection says connected, or after `timeoutMs`. */
 function connectedOrTimeout(timeoutMs: number): Promise<void> {
   const remote = window.electronAPI?.remoteDaemon;
@@ -296,7 +292,8 @@ async function openOnceConnected(target: SessionViewTarget, options: { select: b
   try {
     return await API.orchestrationSessions.open({ sessionId: target.sessionId }, options);
   } catch (error) {
-    if (!refusedWhileRestoring(error)) throw error;
+    // Refused while the host restores (`ERR_REMOTE_OFFLINE` in the IPC error's text).
+    if (!(error instanceof Error && error.message.includes('ERR_REMOTE_OFFLINE'))) throw error;
     if (!cachedSessionView(target.sessionId) && !peeks.has(target.sessionId)) void readPeek(target).catch(() => undefined);
     await connectedOrTimeout(CONNECTED_WAIT_MS);
     return API.orchestrationSessions.open({ sessionId: target.sessionId }, options);
