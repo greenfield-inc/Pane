@@ -294,10 +294,11 @@ export interface ChatTabClient {
   onReconnect?(callback: () => void): () => void;
   /**
    * The viewer found a gap in the live events, or a new conversation run, and reads again. A client
-   * whose reads answer from a held copy (another machine's chat, T-116 PR 6) fetches a fresh one,
-   * which it then announces through `onReconnect`. Clients that read the host directly need none.
+   * whose reads answer from a held copy (another machine's chat, T-116 PR 6) fetches a fresh one and
+   * returns that fetch: the viewer's read waits for it, with the events heard meanwhile queued onto
+   * its answer. Clients that read the host directly need none.
    */
-  resync?(panelId: string): void;
+  resync?(panelId: string): Promise<void> | void;
   /** `start: false` reads a stopped tab without starting its agent (it shows the newest messages it saved). */
   get(panelId: string, limit?: number, options?: ChatTabReadOptions): Promise<ChatTabView>;
   history(panelId: string, before: number, limit: number): Promise<AgentChatMessage[]>;

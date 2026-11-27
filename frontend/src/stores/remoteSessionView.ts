@@ -64,36 +64,32 @@ export function cachedRemoteSession(machineId: string, sessionId: string): Remot
 const order: string[] = [];
 const mirrorReads = new Map<string, Promise<void>>();
 const hostReads = new Map<string, Promise<RemoteSessionEntry | undefined>>();
-/** When each Session's last host read started (performance.now()), keyed by machine and Session. */
-const readStartedAt = new Map<string, number>();
 
 /** The newest live event heard for each remote chat (by panel id): how far ahead of what is held the host is. */
-const liveRevisions = new Map<string, { generation: number; revision: number; at: number }>();
+const liveRevisions = new Map<string, { generation: number; revision: number }>();
+/** Counts live events and views heard; a read records the count when it starts, so it covers every one heard before. */
+let heardSeq = 0;
+const heardAtSeq = new Map<string, number>();
+const readStartSeq = new Map<string, number>();
 
 function heardLive(panelId: string, generation: number, revision: number): void {
+  heardSeq += 1;
+  heardAtSeq.set(panelId, heardSeq);
   const known = liveRevisions.get(panelId);
-  if (!known || generation > known.generation || (generation === known.generation && revision > known.revision)) liveRevisions.set(panelId, { generation, revision, at: performance.now() });
+  if (!known || generation > known.generation || (generation === known.generation && revision > known.revision)) liveRevisions.set(panelId, { generation, revision });
 }
 
-/** Chats whose host read is under way while newer live events came in: read once more when it lands. */
-const readAgain = new Set<string>();
-
 /**
- * Reads the host for a gap in a shown chat's live events: at once, unless a read started after the
- * newest event was heard (it covers it). One under way when a newer event arrived reads again when it lands.
+ * The host read for a gap in a shown chat's live events: the one under way, a new one, or none when
+ * a read already started after the newest event was heard (it covers it). The viewer waits for it.
  */
-function readForLive(machineId: string, sessionId: string, panelId: string): void {
+function readForLive(machineId: string, sessionId: string, panelId: string): Promise<void> | undefined {
   const key = remoteSessionKey(machineId, sessionId);
-  const heardAt = liveRevisions.get(panelId)?.at ?? performance.now();
-  if (hostReads.has(key)) {
-    if ((readStartedAt.get(key) ?? -Infinity) < heardAt) readAgain.add(key);
-    return;
-  }
-  if ((readStartedAt.get(key) ?? -Infinity) >= heardAt) return;
-  void readRemoteSession(machineId, sessionId).then(() => {
-    if (!readAgain.delete(key) || !isTarget(machineId, sessionId) || !machineOnline(machineId)) return;
-    readForLive(machineId, sessionId, panelId);
-  });
+  const pending = hostReads.get(key);
+  if (pending) return pending.then(() => undefined);
+  if ((readStartSeq.get(key) ?? -1) > (heardAtSeq.get(panelId) ?? 0)) return undefined;
+  readStartSeq.set(key, heardSeq + 1);
+  return readRemoteSession(machineId, sessionId).then(() => undefined);
 }
 
 /** Whether the live events heard for a chat are ahead of the copy held: a gap only the host can close. */
@@ -171,7 +167,6 @@ function readRemoteSession(machineId: string, sessionId: string): Promise<Remote
   const key = remoteSessionKey(machineId, sessionId);
   const pending = hostReads.get(key);
   if (pending) return pending;
-  readStartedAt.set(key, performance.now());
   switchMark('remote:peek:start', { machineId, sessionId });
   const read = window.electronAPI.machines.read(machineId, 'orchestration-sessions:peek', [{ sessionId }, PEEK_OPTIONS])
     .then(result => {
@@ -304,8 +299,8 @@ export function remoteChatClient(machineId: string, machineName: string): ChatTa
     // can't close it, so the host is read, unless a read started since the newest event was heard.
     resync(panelId) {
       const sessionId = sessionOfChat(machineId, panelId);
-      if (!sessionId || !isTarget(machineId, sessionId) || !machineOnline(machineId)) return;
-      readForLive(machineId, sessionId, panelId);
+      if (!sessionId || !isTarget(machineId, sessionId) || !machineOnline(machineId)) return undefined;
+      return readForLive(machineId, sessionId, panelId);
     },
     // Only the shown Session's copy, and only one carrying more than its live events already did (a
     // copy behind them would draw nothing new: the viewer keeps the newer window anyway).

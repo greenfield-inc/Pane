@@ -329,6 +329,36 @@ describe('chat tab viewer reopen', () => {
     expect(fake.get.mock.calls.length).toBeLessThanOrEqual(2);
   });
 
+  it('jump to latest from a scrolled-back window shows the newest window even when the read answers an older copy (review quick check suggestion)', async () => {
+    // A 900-message chat whose reads answer a held copy at revision 1000.
+    const view = (): ChatTabView => ({
+      panelId: 'p', agent: 'claude', generation: 1, status: 'idle', canAttachImages: false, controls: [], commands: [], permissions: [], questions: [], queue: [], messageCount: 900,
+      transcript: { panelId: 'p', generation: 1, revision: 1000, start: 700, messages: Array.from({ length: 200 }, (_, index) => message(700 + index)) },
+    });
+    let onEvent: ((event: ChatTabEvent) => void) | undefined;
+    const unused = async (): Promise<never> => { throw new Error('Not used by the viewer'); };
+    const client: ChatTabClient = {
+      get: async () => view(),
+      history: async (_panelId, before, limit) => Array.from({ length: Math.min(limit, before) }, (_, index) => message(before - Math.min(limit, before) + index)),
+      onEvent: callback => { onEvent = callback; return () => undefined; },
+      onState: () => () => undefined,
+      send: unused, receipt: unused, unqueue: unused, sendNow: unused, editQueued: unused, clear: unused, stopTask: unused, configure: unused, cancel: unused, permission: unused, answer: unused, restart: unused, signIn: unused,
+      conversations: unused, resume: unused, dismissBanner: unused, agents: unused, files: unused,
+    };
+    const viewer = new ChatTabViewer(client, 'p');
+    viewer.subscribe(() => undefined);
+    await settle();
+    for (let page = 0; page < 6; page++) await viewer.loadEarlier();
+    expect(viewer.snapshot().hasNewer).toBe(true);
+    // A live event past the scrolled-back window's end moves its revision to 1001.
+    onEvent?.({ panelId: 'p', generation: 1, revision: 1001, index: 900, change: { type: 'append', id: 'm900', role: 'assistant', part: { type: 'text', text: 'x' } } });
+
+    await viewer.jumpToLatest();
+    const shown = viewer.snapshot().transcript!;
+    expect(shown.start + shown.messages.length).toBe(900);
+    expect(viewer.snapshot().hasNewer).toBe(false);
+  });
+
   it('counts a chat closed before its first read lands toward the five', async () => {
     const fake = host(3);
     const viewers = ['a', 'b', 'c', 'd', 'e', 'f'].map(panel => new ChatTabViewer(fake.client, panel));

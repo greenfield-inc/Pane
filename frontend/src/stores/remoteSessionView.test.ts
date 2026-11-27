@@ -117,4 +117,41 @@ describe('a shown remote chat stays current (T-116 PR 6)', () => {
     expect(viewer.snapshot().transcript?.revision).toBe(5);
     expect(machineRead).not.toHaveBeenCalled();
   });
+
+  it('a chat entered mid-turn catches the live tail with one host read, and follows the stream with no more (review quick check SF)', async () => {
+    const { viewer } = await shown(5, 3);
+    // The host: message i lands at revision i + 3; a read takes 300 ms and answers what the host has when it arrives.
+    let hostCount = 10;
+    machineRead.mockImplementation((machineId: string) => {
+      const count = hostCount;
+      return new Promise(resolve => setTimeout(() => resolve({ machineId, data: { success: true, data: { view: null, panels: [], layout: null, chat: snap('b', 'rp', count + 2, count).chat } } }), 300));
+    });
+    const end = () => (viewer.snapshot().transcript?.start ?? 0) + (viewer.snapshot().transcript?.messages.length ?? 0);
+
+    // One message every 100 ms for 5 s; the first is 7 messages past what is held.
+    for (let step = 0; step < 50; step++) {
+      const index = hostCount;
+      hostCount += 1;
+      chatListeners.forEach(listener => listener(event(index, index + 3)));
+      await tick(100);
+    }
+
+    expect(machineRead).toHaveBeenCalledTimes(1);
+    expect(end()).toBe(hostCount);
+    expect(viewer.snapshot().transcript?.revision).toBe(hostCount + 2);
+  });
+
+  it('a host that fails every read is read once per gap the events open, and not at all once they stop', async () => {
+    const { viewer } = await shown(5, 3);
+    machineRead.mockImplementation((machineId: string) => new Promise(resolve => setTimeout(() => resolve({ machineId, data: { success: false, error: 'nope' } }), 50)));
+    for (let step = 0; step < 20; step++) {
+      chatListeners.forEach(listener => listener(event(10 + step, 13 + step)));
+      await tick(100);
+    }
+    const during = machineRead.mock.calls.length;
+    await tick(10_000);
+    expect(during).toBeLessThanOrEqual(20);
+    expect(machineRead.mock.calls.length).toBe(during);
+    expect(viewer.snapshot().transcript?.revision).toBe(5);
+  });
 });
