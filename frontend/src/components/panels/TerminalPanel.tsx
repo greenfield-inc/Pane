@@ -36,6 +36,7 @@ import { terminalTiming } from '../../utils/terminalTiming';
 import { acknowledgeTerminalOutput } from '../../utils/terminalAck';
 import { FileEdit, FolderOpen } from 'lucide-react';
 import { hoverTerminalLink, openTerminalLink, useTerminalLinks } from '../terminal/hooks/useTerminalLinks';
+import { toAgentPasteInput } from '../terminal/agentPasteInput';
 import { openPaneLink } from '../terminal/openPaneLink';
 import { PANE_LINK_REGEX } from '../terminal/paneLink';
 import { TerminalLinkTooltip } from '../terminal/TerminalLinkTooltip';
@@ -1562,7 +1563,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             if (!terminal) return;
             const shouldProtectMultilinePaste = isCliPanelRef.current && !tuiActiveRef.current && /[\r\n]/.test(text);
             if (shouldProtectMultilinePaste) {
-              sendTerminalInput(panel.id, text.replace(/\r\n|\r|\n/g, '\x1b\r'));
+              sendTerminalInput(panel.id, toAgentPasteInput(text));
               return;
             }
 
