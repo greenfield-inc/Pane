@@ -264,6 +264,32 @@ describe('chat tab viewer reopen', () => {
     expect(rest.map(viewer => ids(viewer).length)).toEqual([3, 3, 3, 3]);
   });
 
+  it('chats primed by renders that were thrown away keep their messages for only the newest few (review SF-4)', async () => {
+    const fake = host(3);
+    const kept = ['k1', 'k2', 'k3', 'k4', 'k5'].map(panel => new ChatTabViewer(fake.client, panel));
+    kept.map(viewer => viewer.subscribe(() => undefined)).forEach(close => close());
+    await settle();
+    const primed = Array.from({ length: 10 }, (_, index) => new ChatTabViewer(fake.client, `x${index}`));
+    for (const viewer of primed) viewer.prime({ ...fake.view(), panelId: viewer.panelId }, performance.now());
+
+    expect(primed.map(viewer => ids(viewer).length)).toEqual([0, 0, 0, 0, 0, 0, 0, 3, 3, 3]);
+    // The five closed chats are not pushed out by them.
+    expect(kept.map(viewer => ids(viewer).length)).toEqual([3, 3, 3, 3, 3]);
+  });
+
+  it('a chat that is not kept on close holds nothing once closed, and pushes none of the five out (review suggestion)', async () => {
+    const fake = host(3);
+    const kept = ['k1', 'k2', 'k3', 'k4', 'k5'].map(panel => new ChatTabViewer(fake.client, panel));
+    kept.map(viewer => viewer.subscribe(() => undefined)).forEach(close => close());
+    const passing = new ChatTabViewer(fake.client, 'remote');
+    passing.setKeepOnClose(false);
+    passing.subscribe(() => undefined)();
+    await settle();
+
+    expect(ids(passing)).toEqual([]);
+    expect(kept.map(viewer => ids(viewer).length)).toEqual([3, 3, 3, 3, 3]);
+  });
+
   it('counts a chat closed before its first read lands toward the five', async () => {
     const fake = host(3);
     const viewers = ['a', 'b', 'c', 'd', 'e', 'f'].map(panel => new ChatTabViewer(fake.client, panel));

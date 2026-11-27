@@ -61,6 +61,7 @@ export class ChatTabViewer {
   private startOnRead = true;
   /** When the window prime() last painted was read (performance.now()); a fresh one moves the attach's read after the paint. */
   private primedAt = 0;
+  private keepOnClose = true;
 
   constructor(private chatClient: ChatTabClient, readonly panelId: string) {}
 
@@ -105,14 +106,18 @@ export class ChatTabViewer {
   prime(view: ChatTabView, readAt: number): void {
     if (view.panelId !== this.panelId) return;
     // About to be shown: the chat it replaces closes before this one subscribes, and must not push
-    // this one's kept messages out of the five (T-116 PR 6).
-    if (this.listeners.size === 0) removeClosed(this);
+    // this one's kept messages out of the five (T-116 PR 6). Until it subscribes it waits among the
+    // few primed ones, so a render thrown away (a deferred one, at key-repeat speed) keeps nothing for long.
+    if (this.listeners.size === 0) { removeClosed(this); keepPrimed(this); }
     if (this.state.transcript || !view.transcript) return;
     this.state = { ...this.state, view: this.state.view ?? { ...view, transcript: undefined }, transcript: view.transcript, hasNewer: false };
     // Read this instant by the Session's call: the attach that follows reads again only after it paints.
     // A starting tab reads at once.
     if (view.status !== 'starting') this.primedAt = readAt;
   }
+
+  /** Whether this chat keeps its newest messages once closed (counted among the five). Another machine's shown chat doesn't. */
+  setKeepOnClose(keep: boolean): void { this.keepOnClose = keep; }
 
   setDraft(draft: string): void { this.publish({ draft }); }
   setPendingDelivery(pendingDelivery?: ChatTabSend): void { this.publish({ pendingDelivery }); }
@@ -141,6 +146,7 @@ export class ChatTabViewer {
     this.listeners.add(listener);
     if (!this.detach) {
       removeClosed(this);
+      removePrimed(this);
       this.attach();
     }
     return () => {
@@ -152,7 +158,7 @@ export class ChatTabViewer {
         this.detach = undefined;
         // Keep the draft, an unconfirmed send and, for a reopen, the newest messages; a window
         // scrolled back from the newest would paint the wrong end, so it goes.
-        const transcript = this.state.transcript;
+        const transcript = this.keepOnClose ? this.state.transcript : undefined;
         this.state = { ...this.state, transcript: transcript && !this.state.hasNewer ? newest(transcript) : undefined, hasNewer: false };
         this.pending = [];
         if (this.state.transcript) keepClosed(this);
@@ -223,7 +229,7 @@ export class ChatTabViewer {
       if (gap) this.resyncNeeded = true;
       // Closed before this read landed: it keeps what a close keeps, and counts toward the five.
       const closed = this.listeners.size === 0;
-      if (closed && transcript) transcript = newest(transcript);
+      if (closed && transcript) transcript = this.keepOnClose ? newest(transcript) : undefined;
       this.publish({ view: { ...view, transcript: undefined }, transcript, hasNewer: false, error: gap ? this.state.error : this.state.pendingDelivery ? this.state.error : undefined });
       if (closed && transcript) keepClosed(this);
     }).catch(error => {
@@ -326,7 +332,10 @@ export class ChatTabViewer {
 
   /** Drops the messages kept for a reopen, once it is no longer among the chats closed most recently. */
   forgetMessages(): void {
-    if (this.listeners.size === 0) this.state = { ...this.state, transcript: undefined };
+    if (this.listeners.size > 0) return;
+    this.state = { ...this.state, transcript: undefined };
+    removeClosed(this);
+    removePrimed(this);
   }
 }
 
@@ -338,6 +347,21 @@ function newest(transcript: ChatTabTranscript): ChatTabTranscript {
 function removeClosed(viewer: ChatTabViewer): void {
   const at = closedWithMessages.indexOf(viewer);
   if (at >= 0) closedWithMessages.splice(at, 1);
+}
+
+/** Viewers primed for a render that hasn't subscribed yet, the most recent last (see prime). */
+const primedWaiting: ChatTabViewer[] = [];
+const KEPT_PRIMED = 3;
+
+function removePrimed(viewer: ChatTabViewer): void {
+  const at = primedWaiting.indexOf(viewer);
+  if (at >= 0) primedWaiting.splice(at, 1);
+}
+
+function keepPrimed(viewer: ChatTabViewer): void {
+  removePrimed(viewer);
+  primedWaiting.push(viewer);
+  while (primedWaiting.length > KEPT_PRIMED) primedWaiting.shift()?.forgetMessages();
 }
 
 function keepClosed(viewer: ChatTabViewer): void {
