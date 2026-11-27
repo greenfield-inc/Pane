@@ -1051,7 +1051,8 @@ per unarchived chat Session. It holds:
 
 Any string over 4 KB outside a message's own text is replaced in place by
 `{ omitted: { field, length } }`. That covers an image's `data`, a `data:` URI,
-a resource's `blob` or `text`, and a tool's input or output.
+a resource's `blob` or `text`, a tool's input or output, a waiting approval's
+tool call and a question's form.
 
 Each snapshot has a `revision` that rises on any change to the record (except
 order and selection), the tabs, the layout or the chat.

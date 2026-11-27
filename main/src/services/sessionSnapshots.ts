@@ -173,7 +173,13 @@ export class SessionSnapshotService implements PaneEventSink {
         sessionId: record.id,
         revision: sessionRevision,
         session: readableCopy(record),
-        chat: { ...chat, transcript: chat.transcript && withoutInlineData(changedSince(chat.transcript, chat.messageCount, held, this.chats.get(chatPanelId))) },
+        chat: {
+          ...chat,
+          transcript: chat.transcript && withoutInlineData(changedSince(chat.transcript, chat.messageCount, held, this.chats.get(chatPanelId))),
+          // A waiting approval's tool call can carry a whole file; a question's form, a long schema.
+          permissions: chat.permissions.map(lighter),
+          questions: chat.questions.map(lighter),
+        },
         tabs: this.sources.tabs(record.internalSessionId).filter(tab => isReadableTabType(tab.type)).map(tab => readableCopy(tab)),
         layout: this.sources.layout(record.internalSessionId),
       });
@@ -190,8 +196,9 @@ export class SessionSnapshotService implements PaneEventSink {
   /** Remembers which message a chat event changed, so a desktop gets earlier messages that changed too. */
   private track(event: { panelId: string; generation: number; revision: number; index?: number }): void {
     let changes = this.chats.get(event.panelId);
-    if (!changes || changes.generation !== event.generation || event.index === undefined || event.revision <= changes.latest) {
-      // A new conversation, or an event that names no message: watch afresh from the next change.
+    if (!changes || changes.generation !== event.generation || event.index === undefined || event.revision !== changes.latest + 1) {
+      // A new conversation, an event that names no message, or a revision committed with no event:
+      // what changed before is unknown, so watch afresh from here.
       changes = { generation: event.generation, from: event.index === undefined ? event.revision + 1 : event.revision, latest: event.revision, changed: new Map() };
       this.chats.set(event.panelId, changes);
       if (event.index === undefined) return;
@@ -315,8 +322,13 @@ function withoutInlineData(transcript: ChatTabTranscript): ChatTabTranscript {
 /** A part with every string over 4 KB replaced in place by its length; a message's own text is kept whole. */
 function lighterPart(part: AgentChatPart): AgentChatPart {
   if (part.type === 'text' || part.type === 'thought') return part;
-  // SAFETY: the replacer only swaps long strings for an omitted marker, so the part keeps its kind and keys.
-  return JSON.parse(JSON.stringify(part, omitLong)) as AgentChatPart;
+  return lighter(part);
+}
+
+/** A copy with every string over 4 KB replaced in place by its length. */
+function lighter<Value extends object>(value: Value): Value {
+  // SAFETY: the replacer only swaps long strings for an omitted marker, so the value keeps its kind and keys.
+  return JSON.parse(JSON.stringify(value, omitLong)) as Value;
 }
 
 function omitLong(key: string, value: JsonValue): JsonValue {
