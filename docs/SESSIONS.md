@@ -284,8 +284,17 @@ An offline machine's Session shows what it last sent, with an **Offline · last
 seen** *time* chip and a note in place of the message box; while the mirror
 catches up after a reconnect, the header says **Updating from** *machine*; and
 a chat its host can't read yet says its messages load when it is opened there.
-Resting on another machine's row shows it and nothing more: it starts no agent
-there and switches nothing until you press Enter or click. A teammate's machine,
+Typing into that message box (or on the row), pressing Enter, clicking into the
+Session, or resting on its row for a second **engages** it: the window switches to
+that machine and opens the Session there. Arrow keys, shortcuts and Escape don't
+engage, and an arrow press cancels a rest that hasn't ended or a switch still
+running, so the window stays where it was. While the switch runs, the mirrored
+view stays on screen (the sidebar marks its row) and keeps taking text; once the
+chat there shows, what you typed moves into its own message box, once, and an
+Enter pressed meanwhile sends it there once. If the switch fails, the text stays
+in the box with the reason; an offline machine refuses with its offline reason
+and switches nothing. A rest alone keeps a paused chat there paused until you
+type, press Enter or click, as on this computer. A teammate's machine,
 or one that isn't mirrored, keeps Enter (the cursor stops on its rows). Sessions
 whose agent runs in a terminal on this computer, Pane and project rows, and a
 window showing another machine keep Enter. With the setting off, the arrows
