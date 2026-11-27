@@ -45,7 +45,7 @@ import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
 import { FindBar } from '../find/FindBar';
 import { useSurfaceFind } from '../find/surfaceFind';
 import { takeLaunchDraft, type LaunchDraft } from '../../utils/launchOutline';
-import { acceptChatDraft, chatTabShown, handOverChatDraft } from '../../utils/chatDraftHandover';
+import { acceptChatDraft, chatTabShown, handOverChatDraft, sendDeadline } from '../../utils/chatDraftHandover';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
@@ -484,7 +484,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       switchMark('chat:draft', { panelId, status: draft.send ? 'send' : 'text' });
       viewer.setDraft(draft.text);
       runtime.thread.composer.setText(draft.text);
-      if (draft.send) launchSend.current = { text: draft.text, until: Date.now() + (draft.sendWithinMs ?? LAUNCH_SEND_MS) };
+      if (draft.send) launchSend.current = { text: draft.text, until: sendDeadline(draft, LAUNCH_SEND_MS) };
       setLaunchTick(tick => tick + 1);
       const box = input();
       if (!box) return;
@@ -505,7 +505,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       const pending = launchSend.current;
       if (pending && pending.until > Date.now()) {
         launchSend.current = null;
-        handOverChatDraft(panelId, { text: pending.text, selectionStart: pending.text.length, selectionEnd: pending.text.length, focused: false, send: true, sendWithinMs: pending.until - Date.now() });
+        handOverChatDraft(panelId, { text: pending.text, selectionStart: pending.text.length, selectionEnd: pending.text.length, focused: false, send: true, sendBy: pending.until });
       }
     };
   }, [panelId, runtime, viewer, watching]);

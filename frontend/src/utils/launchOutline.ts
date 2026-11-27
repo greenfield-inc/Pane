@@ -13,8 +13,11 @@ export interface LaunchDraft {
   focused: boolean;
   /** Enter was pressed: the chat sends the text once it can. */
   send: boolean;
-  /** How long the chat may wait to be able to send it; the launch outline's default is 5 s. */
-  sendWithinMs?: number;
+  /**
+   * When (epoch ms) the chat must have been able to send it; past it the text stays unsent with
+   * why. Without it the chat waits the launch outline's default 5 s from when it takes the draft.
+   */
+  sendBy?: number;
 }
 
 /** How long the outline waits, from the app's start, for the app's first render and the launch chat. */
