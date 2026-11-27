@@ -10,8 +10,8 @@
  * Imports allotment/dist/style.css and overrides theme tokens.
  */
 
-import React, { useCallback, useMemo } from 'react';
-import { Allotment } from 'allotment';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Allotment, type AllotmentHandle } from 'allotment';
 import 'allotment/dist/style.css';
 import { PanelGroupView } from './PanelGroupView';
 import type {
@@ -24,6 +24,7 @@ import { containsGroup } from '../../utils/panelLayout';
 import type { DropZone } from '../../utils/panelLayout';
 import type { PanelTabPresentationResolver } from '../../types/panelComponents';
 import { useAllotmentSizeSync } from '../../hooks/useAllotmentSizeSync';
+import { splitPixelSizes, type SplitPixels } from '../../utils/splitPixelSizes';
 
 // ---------------------------------------------------------------------------
 // Allotment theme overrides (inlined as a style element on first render)
@@ -164,6 +165,41 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
   // removes a sibling needs the model synced from what was actually drawn.
   const recordLiveSizes = useAllotmentSizeSync<PanelGroupNode>(layout.root, onSizesChange);
 
+  // Allotment lays its panes out only when the resize observer it starts in a passive
+  // effect reports, so a layout mounted by a commit whose effects run after paint (a
+  // Session shown from a peek, T-140) painted its panes unsized first: the chat shrunk
+  // or centered, the split arriving a frame later. Instead the stage is measured before
+  // Allotment mounts (one empty commit, before paint); each Allotment mounts with pane
+  // sizes in pixels that fill it and is laid out in this commit's layout effect, and
+  // each pane's content mounts at its size, so what it measures as it mounts (a chat's
+  // composer and scroll) is already final. Then the panes follow Allotment as before.
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState<SplitPixels | null | undefined>(undefined);
+  const [sized, setSized] = useState(false);
+  useLayoutEffect(() => {
+    if (mounted !== undefined || !stageRef.current) return;
+    const { width, height } = stageRef.current.getBoundingClientRect();
+    // A stage with no size yet (hidden): Allotment sizes itself when it shows, as before.
+    setMounted(width > 0 && height > 0 ? splitPixelSizes(layout.root, { width, height }) : null);
+  }, [mounted, layout.root]);
+  const handles = useRef(new Map<string, AllotmentHandle>());
+  const laidOut = useRef(new Set<string>());
+  useLayoutEffect(() => {
+    if (!mounted) return;
+    for (const [id, handle] of handles.current) {
+      const sizes = mounted.sizes.get(id);
+      if (!sizes || laidOut.current.has(id)) continue;
+      laidOut.current.add(id);
+      handle.resize(sizes);
+    }
+    if (!sized) setSized(true);
+  }, [mounted, sized]);
+  /** A pane's content: at its measured size while Allotment lays out, then filling the pane. */
+  const paneContent = useCallback((id: string, content: React.ReactNode) => {
+    const box = sized ? undefined : mounted?.boxes.get(id);
+    return <div className="h-full w-full" style={box ? { width: box.width, height: box.height } : undefined}>{content}</div>;
+  }, [mounted, sized]);
+
   // Recursive render
   const renderNode = useCallback((node: PanelLayoutNode, isRoot = false): React.ReactNode => {
     if (node.type === 'group' && !isRoot) {
@@ -221,7 +257,11 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
         // by sibling tabs, but rebuild when changing to/from a column split.
         key={isRoot ? (node.type === 'split' && node.direction === 'column' ? 'root-column' : 'root-row') : node.id}
         vertical={node.type === 'split' && node.direction === 'column'}
-        defaultSizes={node.type === 'split' ? node.sizes : undefined}
+        ref={handle => {
+          if (handle) handles.current.set(node.id, handle);
+          else handles.current.delete(node.id);
+        }}
+        defaultSizes={mounted?.sizes.get(node.id) ?? (node.type === 'split' ? node.sizes : undefined)}
         proportionalLayout
         onChange={handleChange}
         onDragEnd={handleDragEnd}
@@ -234,7 +274,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
               minSize={120}
               visible={isVisible}
             >
-              {renderNode(child)}
+              {paneContent(child.id, renderNode(child))}
             </Allotment.Pane>
           );
         })}
@@ -246,9 +286,11 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
     isTabDragging, draggedPanelId, dropZones, onDropZoneChange,
     onDropTab, onDragStart, onDragEnd, onStripDrop, getPanelTabPresentation, zoomedGroupId, emptyState,
     showAddTool, alwaysShowClose, keepPermanentTabsInGroups, renderAddTool,
-    onToggleMaximize, hidden, renderPanelContent,
+    onToggleMaximize, hidden, renderPanelContent, mounted, paneContent,
   ]);
 
+  // Measured first: the empty stage takes the place Allotment's root then fills (both fill their parent).
+  if (mounted === undefined) return <div ref={stageRef} className="h-full w-full" />;
   return <>{renderNode(layout.root, true)}</>;
 });
 

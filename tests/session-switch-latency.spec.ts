@@ -627,6 +627,186 @@ test('arrow keys show chat Sessions at once, and only a settle starts an agent (
   }
 });
 
+// ---------------------------------------------------------------------------
+// The chat column holds still (T-140): from the first frame the cursor's Session shows to
+// its settle, its chat keeps its left edge and width, and its composer its height (within 1 px). A Session with a right
+// split draws that split in its first frame, and one without draws its chat full width at
+// once; neither shows the chat centered first and then pushes it aside.
+
+/** One painted frame: the Session shown (not kept dimmed behind the cursor), its chat group as [left, width] and composer as [left, width, height]. */
+interface ColumnFrame { t: number; session: string | null; group: number[] | null; composer: number[] | null }
+declare global {
+  var __paneColumnFrames: ColumnFrame[] | undefined;
+  /** In the main process: the screencast frames of the move in flight (SESSION_SWITCH_FRAMES). */
+  var __paneFrames: Array<{ at: number; data: string }> | undefined;
+  var __paneFramesOn: boolean | undefined;
+}
+
+/**
+ * From the next keydown, for `ms`: what each frame painted. Read in a task posted from the
+ * frame's rAF, so after that frame's layout, resize observers and paint (a read inside rAF
+ * would see a split before its own resize observer lays it out, which is never painted).
+ */
+async function recordColumns(page: Page, ms: number): Promise<void> {
+  await page.evaluate(ms => {
+    const frames: ColumnFrame[] = [];
+    globalThis.__paneColumnFrames = frames;
+    let start: number | undefined;
+    window.addEventListener('keydown', event => { start ??= event.timeStamp; }, { capture: true, once: true });
+    const box = (element: Element | null | undefined, withHeight = false): number[] | null => {
+      if (!element || element.getClientRects().length === 0) return null;
+      const rect = element.getBoundingClientRect();
+      if (rect.width <= 0) return null;
+      return withHeight ? [+rect.left.toFixed(1), +rect.width.toFixed(1), +rect.height.toFixed(1)] : [+rect.left.toFixed(1), +rect.width.toFixed(1)];
+    };
+    const painted = new MessageChannel();
+    let frameAt = 0;
+    painted.port1.onmessage = () => {
+      if (start === undefined) return;
+      // The Session's own workspace, not the one kept dimmed behind the cursor while it is read.
+      const content = Array.from(document.querySelectorAll('[data-session-content-id]')).find(element => !element.closest('[data-session-shown-before]'));
+      const composer = content?.querySelector('textarea[data-chat-composer]');
+      frames.push({ t: +(frameAt - start).toFixed(1), session: content?.getAttribute('data-session-content-id') ?? null, group: box(composer?.closest('[data-panel-group-id]')), composer: box(composer, true) });
+    };
+    const tick = (now: number) => {
+      frameAt = now;
+      painted.port2.postMessage(null);
+      if (start === undefined || now - start <= ms) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, ms);
+}
+
+/** Per Session shown, in order: the frames whose chat is not where that showing ends (more than 1 px off). */
+function columnMoves(frames: ColumnFrame[]): Array<{ session: string; first: ColumnFrame; last: ColumnFrame; moved: ColumnFrame[] }> {
+  const off = (a: number[] | null, b: number[] | null) => !a || !b || a.length !== b.length || a.some((value, index) => Math.abs(value - b[index]) > 1);
+  const runs: Array<{ session: string; frames: ColumnFrame[] }> = [];
+  for (const frame of frames) {
+    if (!frame.session) continue;
+    const run = runs.at(-1);
+    if (run && run.session === frame.session) run.frames.push(frame);
+    else runs.push({ session: frame.session, frames: [frame] });
+  }
+  return runs.map(({ session, frames: shown }) => {
+    const last = shown[shown.length - 1];
+    return { session, first: shown[0], last, moved: shown.filter(frame => off(frame.group, last.group) || off(frame.composer, last.composer)) };
+  });
+}
+
+/** The Session's Pane laid out with its chat alone: Overview and To-dos as tabs beside it, no right split. */
+async function withoutSplit(page: Page, session: Seeded): Promise<void> {
+  await page.evaluate(async ({ sessionId, panelId }) => {
+    const list = await window.electronAPI.orchestrationSessions.list();
+    // SAFETY: orchestration-sessions:list returns an OrchestrationSessionListResult in `data`.
+    const records = ((list.data as { sessions?: Array<{ id: string; internalSessionId: string }> } | undefined)?.sessions) ?? [];
+    const internal = records.find(record => record.id === sessionId)?.internalSessionId;
+    if (!internal) throw new Error(`Session ${sessionId} has no internal Pane in the list.`);
+    const id = `t140-${internal}`;
+    const layout = { version: 1 as const, root: { type: 'group' as const, id, panelIds: [panelId, `session-overview:${internal}`, `session-todos:${internal}`], activePanelId: panelId }, focusedGroupId: id };
+    // The host's last-used layout and this desktop's own copy, which wins.
+    await window.electronAPI.invoke('panels:set-layout', internal, layout);
+    await window.electronAPI.uiState.savePaneLayout(null, internal, layout);
+  }, { sessionId: session.id, panelId: session.panelId });
+}
+
+/** A frame strip of one move when SESSION_SWITCH_FRAMES names a folder: the window's screencast. */
+async function startFrames(app: ElectronApplication): Promise<void> {
+  if (!process.env.SESSION_SWITCH_FRAMES) return;
+  await app.evaluate(async ({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows().find(candidate => !candidate.webContents.getURL().includes('notify.html'));
+    if (!window) return;
+    const debug = window.webContents.debugger;
+    if (!debug.isAttached()) debug.attach('1.3');
+    const store = globalThis;
+    store.__paneFrames = [];
+    if (!store.__paneFramesOn) {
+      store.__paneFramesOn = true;
+      debug.on('message', (_event, method, params: { data: string; sessionId: number; metadata: { timestamp: number } }) => {
+        if (method !== 'Page.screencastFrame') return;
+        store.__paneFrames?.push({ at: params.metadata.timestamp, data: params.data });
+        void debug.sendCommand('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => undefined);
+      });
+    }
+    await debug.sendCommand('Page.startScreencast', { format: 'png', everyNthFrame: 1 });
+  });
+}
+
+async function saveFrames(app: ElectronApplication, name: string): Promise<void> {
+  const dir = process.env.SESSION_SWITCH_FRAMES;
+  if (!dir) return;
+  const frames = await app.evaluate(async ({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows().find(candidate => !candidate.webContents.getURL().includes('notify.html'));
+    await window?.webContents.debugger.sendCommand('Page.stopScreencast').catch(() => undefined);
+    const store = globalThis;
+    const taken = store.__paneFrames ?? [];
+    store.__paneFrames = [];
+    return taken;
+  });
+  mkdirSync(path.join(dir, name), { recursive: true });
+  const first = frames[0]?.at ?? 0;
+  for (const [index, frame] of frames.entries()) {
+    writeFileSync(path.join(dir, name, `${String(index).padStart(3, '0')}-${Math.round((frame.at - first) * 1000)}ms.png`), Buffer.from(frame.data, 'base64'));
+  }
+}
+
+test('the chat column holds still from the first preview frame to settle, with and without a split (T-140)', async ({ baseURL }) => {
+  test.setTimeout(10 * 60_000);
+  const { pane, sessions } = await fixture(baseURL);
+  const { app, page } = await launch(pane, baseURL);
+  try {
+    const order = await sidebarOrder(page, sessions);
+    const named = new Map(sessions.map(session => [session.id, session.name]));
+    // Below the start: a Session with the right split, one without, and one more; each first not opened, then held.
+    // Then a fast walk over rows 4-9 (two without a split), not opened, and back up over them, held.
+    const [start, splitRow, plainRow, beyond] = order;
+    const fast = order.slice(4, 10);
+    for (const session of [plainRow, fast[1], fast[3]]) await withoutSplit(page, session);
+    await switchTo(page, start, 'click', 't140-start');
+    await page.waitForTimeout(1_500);
+    await focusRow(page, start);
+    mkdirSync(OUT, { recursive: true });
+    const failures: string[] = [];
+    /** Presses each key `gapMs` apart, then rests past the 1 s settle, so its open and what it reads again land inside the window. */
+    const record = async (name: string, keys: Array<'ArrowDown' | 'ArrowUp'>, gapMs: number) => {
+      await recordColumns(page, keys.length * gapMs + 2_500);
+      await startFrames(app);
+      for (const [index, key] of keys.entries()) {
+        await page.keyboard.press(key);
+        if (index < keys.length - 1) await page.waitForTimeout(gapMs);
+      }
+      await page.waitForTimeout(2_700);
+      await saveFrames(app, name);
+      const frames = await page.evaluate(() => globalThis.__paneColumnFrames ?? []);
+      const runs = columnMoves(frames);
+      writeFileSync(path.join(OUT, `t140-${name}.json`), JSON.stringify({ runs: runs.map(run => ({ ...run, session: named.get(run.session) ?? run.session, moved: run.moved.length })), frames }, null, 2));
+      for (const run of runs) {
+        if (run.moved.length === 0) continue;
+        failures.push(`${name}: ${named.get(run.session) ?? run.session}'s chat was off where it ended in ${run.moved.length} painted frame(s); first ${JSON.stringify(run.first)}, end ${JSON.stringify(run.last)}, off: ${JSON.stringify(run.moved.slice(0, 3))}`);
+      }
+      return runs;
+    };
+    const splitShown = (session: Seeded) => page.evaluate(id => document.querySelectorAll(`[data-session-content-id="${CSS.escape(id)}"] [data-panel-group-id]`).length > 1, session.id);
+    for (const [session, key, name, split] of [
+      [splitRow, 'ArrowDown', 'split-not-opened', true],
+      [plainRow, 'ArrowDown', 'plain-not-opened', false],
+      [beyond, 'ArrowDown', 'beyond', true],
+      [plainRow, 'ArrowUp', 'plain-cached', false],
+      [splitRow, 'ArrowUp', 'split-cached', true],
+    ] as const) {
+      const runs = await record(name, [key], 0);
+      expect(runs.at(-1)?.session, `${name}: ends on ${session.name}`).toBe(session.id);
+      expect(await splitShown(session), `${name}: ${session.name} ${split ? 'has' : 'has no'} right split`).toBe(split);
+    }
+    // Quickly, as a person scans: 120 ms apart, down over rows not opened yet, then back up over them.
+    await focusRow(page, beyond);
+    await record('fast-down-not-opened', fast.map(() => 'ArrowDown' as const), 120);
+    await record('fast-up-held', fast.map(() => 'ArrowUp' as const), 120);
+    expect(failures, 'the chat column holds still from the first frame to settle').toEqual([]);
+  } finally {
+    await app.close().catch(() => undefined);
+  }
+});
+
 test(`arrow-key switching leaves at most ${MAX_RETAINED_NODES_PER_SWITCH} DOM nodes per switch after GC (T-87)`, async ({ baseURL }) => {
   test.setTimeout(10 * 60_000);
   const { pane, sessions } = await fixture(baseURL);
