@@ -307,6 +307,28 @@ describe('chat tab viewer reopen', () => {
     expect(ids(viewer)).toEqual(['m0', 'm1', 'm2', 'm3']);
   });
 
+  it('a read answering an older copy while events arrive keeps the newer window and reads no more (CI smoke loop)', async () => {
+    const fake = host(3);
+    const viewer = new ChatTabViewer(fake.client, 'p');
+    viewer.subscribe(() => undefined);
+    await settle();
+    fake.append();
+    await settle();
+    // Every read from now on answers the copy from before the last event (a held copy, or a host that lags).
+    const older = fake.view();
+    older.transcript = { ...older.transcript!, revision: older.transcript!.revision - 1, messages: older.transcript!.messages.slice(0, 3) };
+    fake.get.mockClear();
+    fake.get.mockResolvedValue(older);
+    const reading = viewer.refresh();
+    fake.append();
+    await reading;
+    await settle();
+    await settle();
+
+    expect(ids(viewer)).toEqual(['m0', 'm1', 'm2', 'm3', 'm4']);
+    expect(fake.get.mock.calls.length).toBeLessThanOrEqual(2);
+  });
+
   it('counts a chat closed before its first read lands toward the five', async () => {
     const fake = host(3);
     const viewers = ['a', 'b', 'c', 'd', 'e', 'f'].map(panel => new ChatTabViewer(fake.client, panel));
