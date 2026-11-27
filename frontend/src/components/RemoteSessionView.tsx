@@ -66,7 +66,8 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
   const readAt = entry?.readAt ?? 0;
 
   // The chat paints the newest 30 messages held at once (drawing 200 takes a long chat ~95 ms);
-  // the rest of what is held follows once the cursor stays, and again when the host's read lands.
+  // the rest of what is held follows once the cursor stays. A newer copy (the mirror caught up, the
+  // host's read landed) reaches the chat through its client's onReconnect.
   useMemo(() => {
     if (!chat) return;
     const viewer = chatTabViewer(client, chat.panelId);
@@ -88,9 +89,6 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
       queueMicrotask(() => viewer.forgetMessages());
     };
   }, [client, machineId, panelId]);
-  useEffect(() => {
-    if (panelId && readAt > 0) void chatTabViewer(client, panelId).refresh();
-  }, [client, panelId, readAt]);
 
   // While shown and the machine answers, the chat follows the host's events for it, and only for it.
   const followed = online && chat ? chat.panelId : undefined;

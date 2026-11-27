@@ -64,6 +64,16 @@ export function cachedRemoteSession(machineId: string, sessionId: string): Remot
 const order: string[] = [];
 const mirrorReads = new Map<string, Promise<void>>();
 const hostReads = new Map<string, Promise<RemoteSessionEntry | undefined>>();
+/** When each Session's last host read started (performance.now()), keyed by machine and Session. */
+const readStartedAt = new Map<string, number>();
+/** The fewest milliseconds between two host reads a gap in a shown chat's events starts. */
+const GAP_READ_MS = 2000;
+
+/** Which copy of a chat is held: its panel, conversation, revision and window. */
+function heldVersion(chat: ChatTabView | undefined): string {
+  const transcript = chat?.transcript;
+  return chat && transcript ? `${chat.panelId}:${transcript.generation}:${transcript.revision}:${transcript.start}:${transcript.messages.length}` : '';
+}
 let restTimer: ReturnType<typeof setTimeout> | undefined;
 let followingMirror = false;
 
@@ -126,6 +136,7 @@ function readRemoteSession(machineId: string, sessionId: string): Promise<Remote
   const key = remoteSessionKey(machineId, sessionId);
   const pending = hostReads.get(key);
   if (pending) return pending;
+  readStartedAt.set(key, performance.now());
   switchMark('remote:peek:start', { machineId, sessionId });
   const read = window.electronAPI.machines.read(machineId, 'orchestration-sessions:peek', [{ sessionId }, PEEK_OPTIONS])
     .then(result => {
@@ -250,7 +261,27 @@ export function remoteChatClient(machineId: string, machineName: string): ChatTa
       const sessionId = sessionOfChat(machineId, panelId);
       const chat = heldRemoteChat(sessionId ? cachedRemoteSession(machineId, sessionId) : undefined);
       if (!chat || chat.panelId !== panelId) throw new Error(`Pane has nothing of this chat from ${machineName} yet.`);
-      return fullChats.has(remoteSessionKey(machineId, panelId)) ? chat : firstPaintWindow(chat);
+      const full = fullChats.has(remoteSessionKey(machineId, panelId));
+      // A read of a chat the cursor stays on may be a gap in its live events that what is held can't
+      // close (the host is ahead of the mirror): one host read, at most every GAP_READ_MS. Its answer
+      // reaches the viewer through onReconnect.
+      if (full && sessionId && machineOnline(machineId) && performance.now() - (readStartedAt.get(remoteSessionKey(machineId, sessionId)) ?? -Infinity) >= GAP_READ_MS) {
+        void readRemoteSession(machineId, sessionId);
+      }
+      return full ? chat : firstPaintWindow(chat);
+    },
+    // A newer copy of a chat held for this machine (the mirror caught up, a host read landed): its viewer reads it.
+    onReconnect(callback) {
+      const versions = () => Object.entries(useRemoteSessionView.getState().entries)
+        .filter(([key]) => key.startsWith(remoteSessionKey(machineId, '')))
+        .map(([, entry]) => heldVersion(heldRemoteChat(entry)));
+      let seen = versions();
+      return useRemoteSessionView.subscribe(() => {
+        const now = versions();
+        const newer = now.some(version => version !== '' && !seen.includes(version));
+        seen = now;
+        if (newer) callback();
+      });
     },
     // Scroll-back reads the host once the window has switched to it.
     history: async () => [],
