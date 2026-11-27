@@ -1,4 +1,4 @@
-import { useContext, type ReactNode } from 'react';
+import { useContext, useRef, type ReactNode } from 'react';
 import { Check, Clock, CornerUpLeft, ListChecks, ArrowUp, Zap, AlertCircle, ChevronDown, ChevronRight, MessageSquareReply } from 'lucide-react';
 import type { AgentMessageRecord } from '../../../../shared/types/agentMessages';
 import { messageStatus, ownWorkerExchange, senderInitials, senderOfName, threadReplies, threadRoot, type ChatAgentLine, type ChatSender, type MessageStatus } from '../../../../shared/agentMessagePresentation';
@@ -56,7 +56,7 @@ function ReplySection({ reply, renderText, collapsed, onExpand }: { reply: Agent
       <span className="chat-agent-spacer" />
       <ReplyPill reply={reply} />
     </div>
-    {collapsed ? <Preview text={reply.text} onExpand={onExpand} /> : <div className="chat-agent-body">{renderText(reply.text)}</div>}
+    {collapsed ? <Preview text={reply.text} label={`Show all of reply ${reply.ref}`} onExpand={onExpand} /> : <div className="chat-agent-body">{renderText(reply.text)}</div>}
   </div>;
 }
 
@@ -69,11 +69,12 @@ const preview = (text: string, length = 240) => text.replace(/\s+/gu, ' ').trim(
 
 /**
  * A collapsed card's message or reply (T-139): its first words as plain text, clipped to two lines.
- * Clicking it opens the card; the header's toggle is the keyboard way in.
+ * Clicking it opens the card. It is a click shortcut, not a disclosure of its own: the header's
+ * toggle is the one control with `aria-expanded`, and the keyboard way in, so this stays out of
+ * the tab order and has a short name rather than the message text.
  */
-function Preview({ text, onExpand }: { text: string; onExpand: () => void }) {
-  // Out of the tab order: the header's toggle already opens the card from the keyboard.
-  return <button type="button" className="chat-agent-preview-text" data-testid="agent-message-preview" tabIndex={-1} aria-expanded={false} onClick={onExpand}><span>{preview(text, 600)}</span></button>;
+function Preview({ text, label, onExpand }: { text: string; label: string; onExpand: () => void }) {
+  return <button type="button" className="chat-agent-preview-text" data-testid="agent-message-preview" tabIndex={-1} aria-label={label} onClick={onExpand}><span>{preview(text, 600)}</span></button>;
 }
 
 /** Failed sends this card's message retried (T-133): one note instead of a card each. */
@@ -97,10 +98,13 @@ function Card({ anchorId, messageRef, who, compactWho, meta, body, record, hint,
   const { byRef, panelId, attempts } = useContext(AgentMessagesContext);
   const status = record ? messageStatus(record, byRef) : undefined;
   const collapsible = record !== undefined && ownWorkerExchange(record, panelId);
-  // A card without a record (the PWA, a To-dos line) keeps its choice under its anchor instead.
-  const [open, setOpen] = useAgentMessageOpen(panelId, record?.ref ?? messageRef ?? anchorId, !collapsible);
   const ref = record?.ref ?? messageRef;
-  const expand = () => setOpen(true);
+  // Kept per tab and M-n. A card with no M-n (a To-dos line) keeps its choice only while it is
+  // shown: its anchor changes when the agent restarts, so storing it would only crowd out M-n choices.
+  const [open, setOpen] = useAgentMessageOpen(panelId, ref, !collapsible);
+  const toggle = useRef<HTMLButtonElement>(null);
+  // The clicked preview goes away as the card opens, so focus moves to the toggle, which stays.
+  const expand = () => { setOpen(true); toggle.current?.focus(); };
   const failed = record ? attempts.get(record.ref) : undefined;
   // Without a record (the PWA, the phone) the reply hint still shows: the card hides the line Pane added.
   const footHint = status ? status.state === 'waiting' && hint : hint;
@@ -128,10 +132,10 @@ function Card({ anchorId, messageRef, who, compactWho, meta, body, record, hint,
       <div className="chat-agent-head">{who}<span className="chat-agent-spacer" />
         {/* M-n, time and the chevron wrap together, so the chevron never sits on a line of its own. */}
         <span className="chat-agent-head-end">{meta}
-          <button type="button" className="chat-agent-toggle" aria-expanded={open} aria-label={label} title={label} onClick={() => setOpen(!open)}>{open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}</button>
+          <button ref={toggle} type="button" className="chat-agent-toggle" aria-expanded={open} aria-label={label} title={label} onClick={() => setOpen(!open)}>{open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}</button>
         </span>
       </div>
-      {previewed ? <Preview text={body} onExpand={expand} /> : <div className="chat-agent-body">{POINTER.test(body) ? plainBody(body) : renderText(body)}</div>}
+      {previewed ? <Preview text={body} label={`Show all of message${ref ? ` ${ref}` : ''}`} onExpand={expand} /> : <div className="chat-agent-body">{POINTER.test(body) ? plainBody(body) : renderText(body)}</div>}
       {((status && status.state !== 'answered') || footHint || failed) && <div className="chat-agent-foot">{status && status.state !== 'answered' && <StatusPill status={status} />}{footHint}{failed && <Attempts attempts={failed} />}</div>}
       {status?.state === 'answered' && threadReplies(status.replies, byRef).map(reply => <ReplySection key={reply.ref} reply={reply} renderText={renderText} collapsed={previewed} onExpand={expand} />)}
     </div>
@@ -200,6 +204,8 @@ function ReplyArrival({ line, anchorId, startedAt, text, renderText }: { line: E
         card.focus({ preventScroll: true });
       };
       // A collapsed card (an own worker's one line, T-133, or any card's preview, T-139) opens first, then scrolls once it has its full height.
+      // Without a tab id the card's choice is its own local state, which this can't reach: it scrolls to the card still collapsed,
+      // where the reply's preview shows.
       if (panelId && document.querySelector<HTMLElement>(selector)?.dataset.collapsed) {
         setAgentMessageOpen(panelId, root, true);
         requestAnimationFrame(scroll);

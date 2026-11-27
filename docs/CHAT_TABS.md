@@ -373,7 +373,8 @@ composer marks it in amber like a mode that never asks.
   card collapses at once rather than the message and reply separately: the
   long part is usually the reply, and one control shrinks the exchange
   without a chevron per reply. The choice is kept with the own-worker cards'
-  choices, per tab and `M-n`, and a jump up to the card opens it.
+  choices, per tab and `M-n`, and a jump up to the card opens it. A card with
+  no `M-n` (a To-dos line) keeps its choice only while it is shown.
 - **Pane's approval lines** (`answer: Q-4 → … (by you)`, `reply:`, `closed:`,
   `correction:`) that Pane typed into this tab show as one quiet *Pane* line
   with the text as typed, not the person's bubble. They count only when an

@@ -288,7 +288,7 @@ describe('collapsing any agent message card (T-139)', () => {
     expect(text(markup)).toContain('Here is the plan.');
   });
 
-  it('offers the toggle where the app has no records, keyed by the card itself', () => {
+  it('offers the toggle on a card with no M-n too', () => {
     const markup = render({ ...view('worker', []), available: false, byRef: new Map() }, turn('t', '[From Pane, To-dos] You are assigned T-105.'));
     expect(markup).toContain('aria-expanded="true"');
     expect(markup).toContain('aria-label="Collapse message"');

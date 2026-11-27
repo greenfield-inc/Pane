@@ -62,9 +62,8 @@ export function resetAgentMessageOpenForTests(): void {
 }
 
 /**
- * A card's open state: the person's last choice for it, else `byDefault`; and the setter. `ref` is
- * the card's M-n, or another key stable for that card. Without a tab id (a chat outside a panel)
- * the choice lasts while the card is shown.
+ * A card's open state: the person's last choice for it, else `byDefault`; and the setter. Without
+ * a tab id (a chat outside a panel) or an M-n (a To-dos line), the choice lasts while the card is shown.
  */
 export function useAgentMessageOpen(panelId: string | undefined, ref: string | undefined, byDefault: boolean): [boolean, (open: boolean) => void] {
   const read = () => (panelId && ref ? current().get(keyOf(panelId, ref)) : undefined);
