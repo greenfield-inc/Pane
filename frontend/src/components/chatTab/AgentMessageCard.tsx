@@ -93,6 +93,7 @@ function Card({ anchorId, who, compactWho, meta, body, record, hint, copyText, r
   const card = { className: 'chat-agent-card', tabIndex: -1, 'data-pane-part': 'chat-message', 'data-anchor-id': anchorId, 'data-testid': 'agent-message-card', 'data-ref': record?.ref, 'data-state': status?.state } as const;
   const actions = <div className="chat-message-actions"><ChatCopyButton label="Copy message" text={() => copyText} /></div>;
   if (collapsible && !open) {
+    // One line, without the copy row under it: opening the card shows Copy message.
     return <div className="chat-agent-row" data-outgoing={outgoing}>
       <div {...card} data-collapsed="true">
         <button type="button" className="chat-agent-compact" aria-expanded={false} aria-label={`Show message ${record.ref}`} onClick={() => setOpen(true)}>
@@ -103,7 +104,6 @@ function Card({ anchorId, who, compactWho, meta, body, record, hint, copyText, r
           <ChevronRight className="chat-agent-chevron" aria-hidden="true" />
         </button>
       </div>
-      {actions}
     </div>;
   }
   return <div className="chat-agent-row" data-outgoing={outgoing}>
