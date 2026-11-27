@@ -1373,11 +1373,15 @@ describe('RemotePaneClientController switches fast (T-128)', () => {
     });
     controller.setRecentAnswers(() => ({ routeId: studio.routes[0].id, baseUrl: server.baseUrl }));
 
+    // As the switch's IPC handler does: hold syncs, switch, commit the host to config, resync.
+    const release = controller.holdConfigSync();
     await controller.activateProfile(primaryProfile(studio));
     expect(wrote).toBe(true);
-    // The switch's IPC handler commits the host to config, then lets the restore go.
+    // Another write after the switch connected, before the handler commits: still this computer.
+    configManager.setRemoteConfig(configManager.getConfig().remoteDaemon);
     configManager.setRemoteConfig({ ...config, client: { ...config.client, mode: 'remote', activeProfileId: studio.id } });
     controller.commitActivation();
+    release();
 
     await waitFor(() => restores.length > 0);
     expect(restores[0]).toBe(true);

@@ -122,17 +122,24 @@ export function registerRemoteDaemonHandlers(
       resyncRenderer: boolean;
     },
   ): Promise<RemoteDaemonConfig> {
-    const current = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
-    const result = await transition(current);
-    const next = normalizeRemoteDaemonConfig(result.next);
+    // A switch owns the connection until its config is written: a config write from elsewhere
+    // meanwhile still names the old machine and must not close the switch's connection.
+    const releaseSync = remotePaneClientController.holdConfigSync();
+    try {
+      const current = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
+      const result = await transition(current);
+      const next = normalizeRemoteDaemonConfig(result.next);
 
-    await configManager.updateConfig({ remoteDaemon: next });
-    if (result.resyncRenderer) {
-      if (next.client.mode === 'remote') remotePaneClientController.commitActivation();
-      else requestRendererRemoteResync();
+      await configManager.updateConfig({ remoteDaemon: next });
+      if (result.resyncRenderer) {
+        if (next.client.mode === 'remote') remotePaneClientController.commitActivation();
+        else requestRendererRemoteResync();
+      }
+
+      return next;
+    } finally {
+      releaseSync();
     }
-
-    return next;
   }
 
   ipcMain.handle('remote-daemon:get-config', async () => {

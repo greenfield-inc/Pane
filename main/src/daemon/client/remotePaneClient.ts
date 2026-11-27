@@ -1403,11 +1403,36 @@ export class RemotePaneClientController extends EventEmitter {
   /** When this app last heard from each host, and its version; kept in memory only. */
   private readonly sightings = new Map<string, { at: string | null; version: string | null }>();
 
-  /** Switches between starting to dial and connecting (or failing); config syncs wait for them. */
-  private activationsDialing = 0;
+  /** Holds on config syncs: a switch in flight, until its caller has committed config. */
+  private configSyncHolds = 0;
+  /** A config write came in during a hold; it syncs once the last hold ends. */
+  private configSyncSkipped = false;
+
+  /**
+   * Holds config syncs while a switch owns the connection: config still names the old machine
+   * until the switch commits it, and a sync then would close the switch's connection and dial
+   * one that tells the renderer the host did not change. Call the result once; a skipped sync
+   * runs when the last hold ends, unless `syncSkipped` is false (the caller syncs itself).
+   */
+  holdConfigSync(): (syncSkipped?: boolean) => void {
+    this.configSyncHolds += 1;
+    let released = false;
+    return (syncSkipped = true) => {
+      if (released) return;
+      released = true;
+      this.configSyncHolds -= 1;
+      if (!syncSkipped) this.configSyncSkipped = false;
+      if (this.configSyncHolds > 0 || !this.configSyncSkipped) return;
+      this.configSyncSkipped = false;
+      this.configUpdatedListener();
+    };
+  }
 
   private readonly configUpdatedListener = () => {
-    if (this.activationsDialing > 0) return;
+    if (this.configSyncHolds > 0) {
+      this.configSyncSkipped = true;
+      return;
+    }
     void this.syncToConfig().catch((error) => {
       this.setConnectionState({
         ...this.state,
@@ -1609,8 +1634,8 @@ export class RemotePaneClientController extends EventEmitter {
     }
     // While the switch dials, config still names the old machine; a config write then must not
     // close or redial the switch's connection (#1767's rig: the landing never armed). The switch
-    // commits config itself once it connects, or syncs to config when it fails.
-    this.activationsDialing += 1;
+    // syncs to config itself when it fails; its caller holds syncs until it commits config.
+    const releaseSync = this.holdConfigSync();
     try {
       try {
         await this.connectProfile(profile, { retryOnInitialFailure: false, resolveOnReady: true, firstRoute: recent, quietInitialFailure: Boolean(recent) });
@@ -1619,10 +1644,10 @@ export class RemotePaneClientController extends EventEmitter {
         if (!recent || generation !== this.activationGeneration) throw error;
         await this.connectProfile(profile, { retryOnInitialFailure: false, resolveOnReady: true });
       }
-      this.activationsDialing -= 1;
+      releaseSync();
       return this.getConnectionState();
     } catch (error) {
-      this.activationsDialing -= 1;
+      releaseSync(false);
       await this.syncToConfig().catch((syncError) => {
         console.error('[Pane remote daemon] Failed to restore saved client state after activation error', syncError);
       });
