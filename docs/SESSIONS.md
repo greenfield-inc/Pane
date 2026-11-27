@@ -1073,6 +1073,25 @@ event stream, at most once a second per Session. Reading creates no tab and
 starts no agent. Only the owner's own devices get an answer; teammates and Read
 only devices are refused with `SESSION_SNAPSHOTS_OWNER_ONLY`.
 
+The desktop keeps a mirror of these snapshots for each of the owner's other
+machines (`main/src/services/machineMirror.ts`). It is saved in
+`<PANE_DIR>/machine-mirror/<machine id>.json` (folder 0700, file 0600, at most
+one save every 2 s). It reads `snapshots` once when a machine connects or
+resyncs, then after its `session-snapshot:changed` notices, batched for 250 ms.
+Each read sends back `since`, `epoch` and `held`, so only changed messages
+cross. A machine stays at 25 MB at most; when it is over, the Sessions changed
+longest ago are left out first.
+
+Some machines are never copied, and their file is removed:
+- a machine this computer only watches (a Read only token);
+- a machine whose host answers `SESSION_SNAPSHOTS_OWNER_ONLY` (tried again on
+  its next connection);
+- a machine that is forgotten;
+- a machine not seen for 30 days.
+
+A machine whose Pane has no snapshots is left alone until it reconnects. Each
+machine's state is `live`, `catching-up` or `offline`, with `lastSeenAt`.
+
 The existing
 `pane-chat:*` channels remain compatibility endpoints for the imported legacy
 conversation.

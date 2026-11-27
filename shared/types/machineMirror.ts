@@ -1,0 +1,39 @@
+import type { SessionSnapshot } from './sessionSnapshot';
+
+/**
+ * The desktop mirror (T-116 PR 5): this computer's copy of the chat Sessions on each of the owner's
+ * other machines, kept from their host snapshots so a Session shows at once, and while its
+ * machine is offline. One file per machine in `<PANE_DIR>/machine-mirror/`, mode 0600 (D-4).
+ */
+
+/** The folder in the Pane data folder that holds one mirror file per machine. */
+export const MACHINE_MIRROR_FOLDER = 'machine-mirror';
+
+/** How current a machine's mirror is. */
+export type MachineMirrorSync =
+  /** Connected, and the last read caught up with every change it announced. */
+  | 'live'
+  /** Connected, and a read is under way or due (just reconnected, or a change was announced). */
+  | 'catching-up'
+  /** Not connected: the mirror shows what the machine last sent, as of `lastSeenAt`. */
+  | 'offline';
+
+export interface MachineMirrorState {
+  machineId: string;
+  sync: MachineMirrorSync;
+  /** When the machine last answered a read (ISO 8601); null before its first. */
+  lastSeenAt: string | null;
+  sessionCount: number;
+}
+
+/** What a mirror file holds. */
+export interface MachineMirrorFile {
+  version: 1;
+  machineId: string;
+  /** The host run (`epoch`) of the last read; null before the first. */
+  epoch: string | null;
+  /** The host's `revision` from the last read, sent back as `since`. */
+  revision: number;
+  lastSeenAt: string | null;
+  sessions: SessionSnapshot[];
+}

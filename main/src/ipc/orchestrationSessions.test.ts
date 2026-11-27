@@ -172,7 +172,7 @@ describe('orchestration-sessions:snapshots', () => {
     const result = await registry.invokeRemote('orchestration-sessions:snapshots', [{}], { teammate: 'sam@example.com' });
 
     expect(snapshots).not.toHaveBeenCalled();
-    expect(result).toEqual({ success: false, error: expect.stringContaining('Only this computer\'s owner') });
+    expect(result).toEqual({ success: false, error: expect.stringContaining('Only this computer\'s owner'), code: 'SESSION_SNAPSHOTS_OWNER_ONLY' });
   });
 
   it('refuses a device paired Read only and reads nothing', async () => {
@@ -181,7 +181,7 @@ describe('orchestration-sessions:snapshots', () => {
     const result = await registry.invokeRemote('orchestration-sessions:snapshots', [{}], { readOnly: true });
 
     expect(snapshots).not.toHaveBeenCalled();
-    expect(result).toEqual({ success: false, error: expect.stringContaining('Only this computer\'s owner') });
+    expect(result).toEqual({ success: false, error: expect.stringContaining('Only this computer\'s owner'), code: 'SESSION_SNAPSHOTS_OWNER_ONLY' });
   });
 
   it('names a malformed request and reads nothing', async () => {

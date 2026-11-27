@@ -139,6 +139,8 @@ import { usageManager } from './services/usage/usageManager';
 import { SharedCredentialSync } from './services/sharedCredentialSync';
 import { startSecretLeases } from './services/secretLeaseRuntime';
 import { MachineConnections, remoteMachineAccess } from './services/machineConnections';
+import { MachineMirror } from './services/machineMirror';
+import { MACHINE_MIRROR_FOLDER } from '../../shared/types/machineMirror';
 import { RemoteMemberEvents } from './services/remoteMemberEvents';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
 import { followSavedMachines, prepareNotifyForQuit } from './ipc/notify';
@@ -285,6 +287,8 @@ function setAppTitle() {
 // Service instances (configManager exported for shell preference access)
 export let configManager: ConfigManager;
 let sharedCredentialSync: SharedCredentialSync | null = null;
+/** This computer's copy of the chat Sessions on the owner's other machines (T-116 PR 5). */
+let machineMirror: MachineMirror | null = null;
 let machineConnections: MachineConnections | null = null;
 let logger: Logger;
 export let sessionManager: SessionManager;
@@ -1680,6 +1684,16 @@ if (launchRemoteSetup) {
   // Share integration keys with the hosts this desktop has paired with.
   if (machineConnections) {
     machineConnections.start();
+    const connections = machineConnections;
+    machineMirror = new MachineMirror({
+      directory: join(getAppDirectory(), MACHINE_MIRROR_FOLDER),
+      machines: {
+        list: () => connections.list(),
+        subscribe: listener => connections.subscribe(listener),
+        read: (machineId, channel, args) => connections.read(machineId, channel, args),
+      },
+    });
+    void machineMirror.start().catch(error => console.warn('[Machine mirror] Could not start:', error));
     sharedCredentialSync = new SharedCredentialSync(configManager, machineConnections);
     sharedCredentialSync.start();
     // Secret leases: renewal reminders, and pushing a lease again to a machine that lost it.
@@ -1728,6 +1742,7 @@ if (launchRemoteSetup) {
 
   usageManager.stop();
   void sharedCredentialSync?.stop();
+  void machineMirror?.stop();
   void machineConnections?.stop();
 
   // Guard against multiple shutdown attempts

@@ -227,7 +227,7 @@ export function registerOrchestrationSessionHandlers(
       const snapshots = services.sessionSnapshots;
       if (!snapshots) throw new Error('Session snapshots are not initialized');
       return snapshots.snapshots(decodeSnapshotsRequest(request));
-    });
+    }, { withCode: true });
   });
   commandRegistry.bindChannel(ipcMain, SESSION_SNAPSHOTS_CHANNEL);
 }
@@ -277,14 +277,13 @@ function decodeSelector(value: PaneCommandValue): OrchestrationSessionSelector {
   return decodeBoundary(value, selectorSchema);
 }
 
-async function invokeSafely<Value>(operation: () => Promise<Value>): Promise<object> {
+async function invokeSafely<Value>(operation: () => Promise<Value>, options: { withCode?: boolean } = {}): Promise<object> {
   try {
     return { success: true, data: await operation() };
   } catch (error) {
-    return {
-      success: false,
-      // Electron IPC keeps only text, so a PaneError carries its next step as "Next: ...".
-      error: error instanceof PaneError ? paneErrorText(error) : error instanceof Error ? error.message : 'Sessions operation failed',
-    };
+    // Electron IPC keeps only text, so a PaneError carries its next step as "Next: ...". `withCode`
+    // adds its code for a caller that acts on it (another machine's mirror on SESSION_SNAPSHOTS_OWNER_ONLY).
+    if (error instanceof PaneError) return { success: false, error: paneErrorText(error), ...(options.withCode && { code: error.code }) };
+    return { success: false, error: error instanceof Error ? error.message : 'Sessions operation failed' };
   }
 }
