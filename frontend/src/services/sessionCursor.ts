@@ -49,9 +49,12 @@ export function useCursorFollowEnabled(): boolean {
 
 /**
  * Whether a Session row on `machineId` shows its Session as the cursor passes, rather than
- * waiting for Enter (T-116). Today only this computer's rows, in a window on this computer:
+ * waiting for Enter (T-116). Both sidebars' Session rows ask it before they carry
+ * `SESSION_CURSOR_ATTRIBUTE`. Today only this computer's rows, in a window on this computer:
  * a Session on another machine has nothing here to show until the window switches to it.
- * Mirrored machines (T-116 PR 6) extend this, and every row asks it.
+ * Mirrored machines (T-116 PR 6) widen this predicate, and a remote row will then also need
+ * its machine in the row attribute and in the Session view cache's key, both of which name
+ * a Session by its id alone today.
  */
 export function rowShowsInstantly(machineId: string, config: AppConfig | null | undefined = useConfigStore.getState().config): boolean {
   return cursorFollowEnabled(config) && machineId === LOCAL_MACHINE_ID;
@@ -102,7 +105,7 @@ function listen(): void {
 
 /**
  * This machine's record of a Session: from the Sessions list, or from the All machines
- * view's read of this machine when the list has not loaded (that view does not load it).
+ * view's read of this machine while the list is still loading at startup or failed to load.
  */
 function sessionRecord(sessionId: string): OrchestrationSessionRecord | undefined {
   return useOrchestrationSessionStore.getState().sessions.find(session => session.id === sessionId)
@@ -165,12 +168,12 @@ export function settleSessionCursor(): void {
   const sessions = useOrchestrationSessionStore.getState();
   // Only what the cursor still shows, with the setting on and the window on this machine.
   if (!sessionId || sessions.cursorSessionId !== sessionId || !cursorFollowEnabled()) return;
-  void sessions.settle(sessionId, hostIdOf(useConfigStore.getState().config), { resume: !chatPaused(sessionId) }).catch(() => undefined);
+  void sessions.settle(sessionId, hostIdOf(useConfigStore.getState().config), { resume: !chatPaused(sessionId), record: sessionRecord(sessionId) }).catch(() => undefined);
 }
 
 /** Whether the Session's chat is paused, from its record or the tabs this window holds for it. */
 function chatPaused(sessionId: string): boolean {
-  const record = useOrchestrationSessionStore.getState().sessions.find(session => session.id === sessionId);
+  const record = sessionRecord(sessionId);
   if (record?.paused) return true;
   const panels = cachedSessionView(sessionId)?.panels ?? (record ? usePanelStore.getState().panels[record.internalSessionId] : undefined);
   return panels !== undefined && panePausedMark(panels) !== undefined;
@@ -197,5 +200,5 @@ export function settleOnSession(sessionId: string): Promise<void> {
   // unless it settled by itself and a paused chat waits for this Enter or click to resume.
   if (sessionId === sessions.selectedSessionId && !sessions.cursorSessionId && sessions.quietSessionId !== sessionId
     && sessions.availability === 'ready' && !sessions.selectionError) return Promise.resolve();
-  return sessions.settle(sessionId, hostIdOf(useConfigStore.getState().config));
+  return sessions.settle(sessionId, hostIdOf(useConfigStore.getState().config), { record: sessionRecord(sessionId) });
 }

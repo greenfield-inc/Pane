@@ -60,7 +60,7 @@ describe('Arrow keys open chat Sessions (T-87)', () => {
     expect(settle).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(settle).toHaveBeenCalledTimes(1);
-    expect(settle).toHaveBeenCalledWith('c', null, { resume: true });
+    expect(settle).toHaveBeenCalledWith('c', null, { resume: true, record: records[2] });
   });
 
   it('peeks each Session it does not hold once, and none it holds', async () => {
@@ -90,7 +90,7 @@ describe('Arrow keys open chat Sessions (T-87)', () => {
     expect(settle).not.toHaveBeenCalled();
     expect(store.getState().cursorSessionId).toBe('b');
     cursor.settleSessionCursor();
-    expect(settle).toHaveBeenCalledWith('b', null, { resume: true });
+    expect(settle).toHaveBeenCalledWith('b', null, { resume: true, record: records[1] });
   });
 
   it('skips a Session whose agent runs in a terminal', async () => {
@@ -116,7 +116,7 @@ describe('settling from a click or Enter (T-87)', () => {
     await cursor.settleOnSession('a');
     expect(settle).not.toHaveBeenCalled();
     await cursor.settleOnSession('b');
-    expect(settle).toHaveBeenCalledWith('b', null);
+    expect(settle).toHaveBeenCalledWith('b', null, { record: records[1] });
   });
 });
 
@@ -144,7 +144,7 @@ describe('the cursor never outlives its intent (T-87)', () => {
     const { cursor, store, settle } = await setup();
     store.setState({ quietSessionId: 'a' });
     await cursor.settleOnSession('a');
-    expect(settle).toHaveBeenCalledWith('a', null);
+    expect(settle).toHaveBeenCalledWith('a', null, { record: records[0] });
   });
 });
 
@@ -155,7 +155,7 @@ describe('a paused chat (T-87)', () => {
     store.setState({ sessions: store.getState().sessions.map(session => (session.id === 'b' ? { ...session, paused: { at: '2026-11-25T00:00:00.000Z', by: 'manual' } } as OrchestrationSessionRecord : session)) });
     cursor.showSessionAtCursor('b');
     vi.advanceTimersByTime(1000);
-    expect(settle).toHaveBeenCalledWith('b', null, { resume: false });
+    expect(settle).toHaveBeenCalledWith('b', null, { resume: false, record: store.getState().sessions[1] });
   });
 });
 
@@ -184,6 +184,22 @@ describe('which rows the cursor shows at once (T-116)', () => {
     cursor.showSessionAtCursor('b');
     expect(store.getState().cursorSessionId).toBe('b');
     expect(peek).toHaveBeenCalledWith({ sessionId: 'b' });
+  });
+});
+
+describe('a Session only the All machines read holds (T-116 review SF-1)', () => {
+  it('a 1 s rest on a paused one keeps it paused, and settles with the record it peeked', async () => {
+    const { cursor, store, settle } = await setup();
+    const { useAllMachinesStore } = await import('../stores/allMachinesStore');
+    // The Sessions list has not loaded yet (startup, or a failed load); the peek never answers.
+    store.setState({ sessions: [] });
+    const paused: OrchestrationSessionRecord = { ...records[1], paused: { at: '2026-11-25T00:00:00.000Z', by: 'manual' } };
+    // SAFETY: the cursor reads only the local snapshot's Session records.
+    useAllMachinesStore.setState({ snapshots: { local: { sessions: [records[0], paused, records[2]] } } as never });
+    peek.mockReturnValue(new Promise(() => undefined));
+    cursor.showSessionAtCursor('b');
+    vi.advanceTimersByTime(1000);
+    expect(settle).toHaveBeenCalledWith('b', null, { resume: false, record: paused });
   });
 });
 

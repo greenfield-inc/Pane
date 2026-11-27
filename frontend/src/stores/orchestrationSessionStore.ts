@@ -51,7 +51,12 @@ interface OrchestrationSessionState {
    * The cursor rested, or Enter, a click or typing: select the Session with one `open`
    * call, which also starts its chat's agent (T-87). `select` without the extra reads.
    */
-  settle: (sessionId: string, hostId: string | null | undefined, options?: { resume?: boolean }) => Promise<void>;
+  /**
+   * `record`: the Session's record when the caller already holds it (the cursor's peek, from the
+   * All machines read), so a Session the list has not loaded yet still settles with one open call
+   * and keeps `resume: false` instead of falling back to `select`.
+   */
+  settle: (sessionId: string, hostId: string | null | undefined, options?: { resume?: boolean; record?: OrchestrationSessionRecord }) => Promise<void>;
   invalidateHost: () => void;
   load: () => Promise<void>;
   refresh: (options?: { adoptServerSelection?: boolean; throwOnError?: boolean }) => Promise<void>;
@@ -154,7 +159,8 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
   },
 
   settle: async (sessionId, hostId, options) => {
-    const intended = get().sessions.find(session => session.id === sessionId);
+    const intended = get().sessions.find(session => session.id === sessionId)
+      ?? (options?.record?.id === sessionId ? options.record : undefined);
     if (!intended || isArchivedOrchestrationSession(intended)) {
       set({ cursorSessionId: undefined });
       return get().select({ sessionId });
