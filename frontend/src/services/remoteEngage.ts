@@ -21,6 +21,7 @@ import { cancelMachineOpen, machineOpenPressCount, openOnMachine } from '../util
 import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 import { latestMachineSwitchTicket, withdrawMachineSwitch } from '../hooks/useMachines';
 import { showActionError } from '../stores/errorStore';
+import { switchFailureReason } from '../utils/switchErrorText';
 import { useWindowLink } from '../stores/windowLink';
 import { chatDraftTakerMounted, handOverChatDraft, onChatDraftTaker, onChatTabShown } from '../utils/chatDraftHandover';
 import { useAllMachinesStore, isMachineDimmed } from '../stores/allMachinesStore';
@@ -363,7 +364,8 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
       if (chat) undelivered.set(chat, target);
       // Typing when it failed: the kept bar takes focus and the keys that follow (M-280).
       keysToKept = cause === 'type' || cause === 'enter';
-      useRemoteEngage.setState({ failure: { ...target, panelId: chat, message: outcome.reason }, keptFocus: keysToKept });
+      // One plain line, never a host's raw error body or a proxy's HTML page.
+      useRemoteEngage.setState({ failure: { ...target, panelId: chat, message: switchFailureReason(outcome.reason, machineName(target.machineId)) }, keptFocus: keysToKept });
     }
     switchMark('engage:end', { machineId: target.machineId, sessionId: target.sessionId, status: outcome.kind });
   });

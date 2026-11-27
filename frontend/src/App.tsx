@@ -26,6 +26,7 @@ import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/SessionView';
 import { PaneChatIntroOffer } from './components/PaneChatIntroOffer';
 import Welcome from './components/Welcome';
+import { welcomeCheckStep } from './utils/welcomeCheck';
 import Help, { KeyboardShortcutSheet } from './components/Help';
 import { useCommittedRef } from './hooks/useCommittedRef';
 import { isWritableCodeEditorFocused } from './utils/hotkeyUtils';
@@ -132,7 +133,8 @@ function App() {
   const analyticsIdentityPromise = useRef<Promise<AnalyticsIdentity | undefined> | null>(null);
   const appFirstOpenedCaptured = useRef(false);
   const onboardingCheckStarted = useRef(false);
-  const welcomeCheckStarted = useRef(false);
+  /** The Welcome check ran or was skipped for good: only this window's own first load decides (F-5). */
+  const welcomeChecked = useRef(false);
   const supportPromptCheckStarted = useRef(false);
 
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -697,13 +699,15 @@ function App() {
   }, [hasCheckedOnboarding, hasCheckedAnalyticsDefault]);
 
   useEffect(() => {
-    // Show the welcome screen intelligently based on user state.
-    // This should only run once when the app is loaded, not when sessions change
-    // Don't show welcome until onboarding check has completed and its dialog (if any) is closed
-    if (!isLoaded || welcomeCheckStarted.current || !hasCheckedOnboarding || isOnboardingOpen) {
+    // Show the welcome screen intelligently based on user state, once, on this window's own first
+    // load: never again on a host switch, and never for another machine (QA 1781 F-5).
+    const step = welcomeCheckStep({ checked: welcomeChecked.current, isLoaded, hasCheckedOnboarding, isOnboardingOpen, onOtherMachine: connectionState.mode === 'remote' });
+    if (step === 'wait') return;
+    welcomeChecked.current = true;
+    if (step === 'skip') {
+      setHasResolvedStartupDialogs(true);
       return;
     }
-    welcomeCheckStarted.current = true;
     let cancelled = false;
 
     const checkInitialState = async () => {
@@ -736,8 +740,8 @@ function App() {
             const isReturningUserWithNoData = !hasProjects && !hasSessions && hasSeenWelcome;
 
 
-            if (isFirstTimeUser || isReturningUserWithNoData) {
-              if (!cancelled) setIsWelcomeOpen(true);
+            if ((isFirstTimeUser || isReturningUserWithNoData) && !cancelled) {
+              setIsWelcomeOpen(true);
               // Mark that welcome has been shown at least once
               await API.preferences.set('welcome_shown', 'true');
             }
@@ -747,16 +751,15 @@ function App() {
         }
 
       } finally {
-        if (!cancelled) setHasResolvedStartupDialogs(true);
+        setHasResolvedStartupDialogs(true);
       }
     };
 
     void checkInitialState();
-    return () => {
-      cancelled = true;
-      welcomeCheckStarted.current = false;
-    };
-  }, [isLoaded, hasCheckedOnboarding, isOnboardingOpen, completedOnboardingThisSession]);
+    // A switch while it reads (the window's data changed under it): what it read may be the other
+    // machine's, so it shows nothing, and it doesn't run again.
+    return () => { cancelled = true; };
+  }, [isLoaded, hasCheckedOnboarding, isOnboardingOpen, completedOnboardingThisSession, connectionState.mode]);
 
   /**
    * The once-only Support Pane dialog, for users past the first screen with GitHub CLI ready.
