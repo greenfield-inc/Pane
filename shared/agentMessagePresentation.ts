@@ -32,7 +32,9 @@ export type ChatAgentLine =
   /** A reply to a message this tab sent (`reply: M-12 → "…"`). */
   | { type: 'reply'; replyTo: string; ref: string; body: string; sender: ChatSender }
   /** A line naming M-n that the loaded records can't vouch for: shown as typed, credited to nobody. */
-  | { type: 'unverified'; ref: string };
+  | { type: 'unverified'; ref: string }
+  /** Pane's own line about an approval (`answer: Q-4 → … (by you)`), vouched for by its record: a system line (T-133). */
+  | { type: 'pane'; kind: 'answer' | 'reply' | 'closed' | 'correction'; refs: string[] };
 
 const REPLY_ROUTE = /\n*Reply with runpane reply (M-[0-9]+) "…": it reaches ([^\n]+), who never sees your own chat\.\s*$/u;
 const REPLY_LINE = /^reply: (M-[0-9]+) → "([\s\S]*)" \(from ([^\n]+?)\) \[(M-[0-9]+); answer it with runpane reply M-[0-9]+ "…"\](?: — if a waiting command already returned this reply, act on it once\.)?\s*$/u;
@@ -105,7 +107,7 @@ export interface ChatMessageRecords {
  */
 export function checkedChatLine(line: ChatAgentLine | undefined, records: ChatMessageRecords): ChatAgentLine | undefined {
   if (!line || !records.available) return line;
-  if (line.type === 'unverified') return line;
+  if (line.type === 'unverified' || line.type === 'pane') return line;
   if (line.type === 'reply') {
     // A reply line with no record here (a paste, or a Session orchestrator's new tab, whose replies' records
     // name the old tab) is shown as typed: nothing here says who sent it or which thread it belongs to.
@@ -223,7 +225,8 @@ function turnStarts(turns: readonly TurnSpan[]): number[] {
  * when the message was made. A message older than every turn shown (its turn paged out) is left out.
  */
 export function sentMessagesByTurn(turns: readonly TurnSpan[], records: readonly AgentMessageRecord[], panelId: string): ReadonlyMap<string, AgentMessageRecord[]> {
-  const sent = records.filter(record => record.kind === 'message' && record.sender.panelId === panelId)
+  const { folded } = retriedAttempts(records, panelId);
+  const sent = records.filter(record => record.kind === 'message' && record.sender.panelId === panelId && !folded.has(record.ref))
     .sort((a, b) => a.number - b.number);
   const placed = new Map<string, AgentMessageRecord[]>();
   if (sent.length === 0 || turns.length === 0) return placed;
@@ -244,4 +247,47 @@ export function sentMessagesByTurn(turns: readonly TurnSpan[], records: readonly
     placed.set(turn.id, [...(placed.get(turn.id) ?? []), record]);
   }
   return placed;
+}
+
+/**
+ * A message between a Session's orchestrator and one of its own workers, seen from the orchestrator's
+ * chat: its card starts collapsed to one line (T-133). The Session comes from the message's record
+ * (each end's Session and whether it was the orchestrator when Pane sent it), never from the text.
+ * Messages from other Sessions, Autopilot or Pane's To-dos (no record) stay open.
+ */
+export function ownWorkerExchange(record: AgentMessageRecord, panelId: string | undefined): boolean {
+  const { sender, receiver } = record;
+  if (!sender.sessionId || sender.sessionId !== receiver.sessionId) return false;
+  // This chat's end: the sender when this tab sent it, else the receiver (a reply that followed the Session to a newer orchestrator tab).
+  const here = panelId !== undefined && sender.panelId === panelId ? sender : receiver;
+  const there = here === sender ? receiver : sender;
+  return here.orchestrator && !there.orchestrator;
+}
+
+export interface RetriedAttempts {
+  folded: ReadonlySet<string>;
+  attempts: ReadonlyMap<string, AgentMessageRecord[]>;
+}
+
+/**
+ * Failed sends that this tab sent again (T-133): an undelivered message followed by a later message
+ * from this tab to the same tab with the same text. `folded` holds the failed attempts, which get no
+ * card of their own; `attempts` gives each retry the failed attempts before it, oldest first. A
+ * failed message nobody sent again keeps its card.
+ */
+export function retriedAttempts(records: readonly AgentMessageRecord[], panelId: string): RetriedAttempts {
+  const sent = records.filter(record => record.kind === 'message' && record.sender.panelId === panelId).sort((a, b) => a.number - b.number);
+  const target = (record: AgentMessageRecord) => record.receiver.panelId ?? `name:${record.receiver.name}`;
+  const folded = new Set<string>();
+  const attempts = new Map<string, AgentMessageRecord[]>();
+  sent.forEach((record, index) => {
+    if (record.state !== 'undelivered') return;
+    const retry = sent.slice(index + 1).find(later => target(later) === target(record) && sameText(later.text) === sameText(record.text));
+    if (!retry) return;
+    folded.add(record.ref);
+    // A chain (M-16 failed, M-17 failed, M-18 went) gathers under the last one.
+    attempts.set(retry.ref, [...(attempts.get(record.ref) ?? []), record]);
+    attempts.delete(record.ref);
+  });
+  return { folded, attempts };
 }

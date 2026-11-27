@@ -33,6 +33,7 @@ import type { AppConfig } from '../../types/config';
 import { PaneError } from '../../../../shared/paneError';
 import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 import { leadingQn } from '../../../../shared/autopilotDecision';
+import { answerLine, askerRef, closedLine, idTag, oneLine, picksText, replyLine } from '../../../../shared/notifyTabLines';
 import { newestFirst } from '../../../../shared/approvalOrder';
 import { connectedOf, originOf, type ApprovalStore } from '../approvals/approvalStore';
 
@@ -2586,35 +2587,9 @@ function unavailable(reason: string): NotifyResult {
   return { unavailable: reason, next: ASK_IN_TERMINAL };
 }
 
-/** How the asker recognises its question in a typed line: its Q-n, else its title. */
-/** One line: a newline in an answer would submit early, and a control character is a key press. */
-function oneLine(text: string): string {
-  return text.replace(/\p{Cc}+/gu, ' ');
-}
-
-/** A tab's close line, for one close or several waiting for the same tab: `closed: Q-1, Q-2 (by you): <reason>`. */
-function closedLine(refs: readonly string[], tail: string): string {
-  return oneLine(`closed: ${refs.join(', ')} ${tail}`);
-}
-
-function askerRef(item: NotifyItem): string {
-  return leadingQn(item.title) ?? `"${item.title.length > 80 ? `${item.title.slice(0, 79)}…` : item.title}"`;
-}
-
-/** The line a tab receives: `answer: Q-39 → Yes (by you)`. */
-function answerLine(item: NotifyItem): string {
-  const by = item.answeredBy?.by === 'autopilot' ? 'Autopilot' : item.answeredBy?.by === 'orchestrator' ? 'the orchestrator' : 'you';
-  return `answer: ${askerRef(item)} → ${item.answerSummary ?? ''}${idTag(item)} (by ${by})`;
-}
-
 /** Who asked, as a person reads it: "the Doozy orchestrator", or the asking Pane's name. */
 function askerName(item: NotifyItem): string {
   return item.source.session?.orchestrator ? `the ${item.source.session.name} orchestrator` : item.source.name;
-}
-
-/** Without a Q-n, a line names the item's id too, so its reader can pass it to --took and --update. */
-function idTag(item: NotifyItem): string {
-  return leadingQn(item.title) ? '' : ` [id ${item.id}]`;
 }
 
 /** How an approval is named in an error: its Q-n, else its title. */
@@ -2622,20 +2597,9 @@ function refOf(item: NotifyItem): string {
   return leadingQn(item.title) ?? `"${item.title}"`;
 }
 
-/** The line a reader receives: `reply: Q-20 → "…" (picked: Yes · One train) (by you)`. */
-function replyLine(item: NotifyItem, reply: NotifyReply): string {
-  const picked = reply.picks?.length ? ` (picked: ${picksText(reply.picks)})` : '';
-  return `reply: ${askerRef(item)} → "${reply.text}"${picked}${idTag(item)} (by you)`;
-}
-
 /** What a reply recorded as the answer reads as: its picks, then the person's words. */
 function replySummary(reply: NotifyReply): string {
   return reply.picks?.length ? `${picksText(reply.picks)} — "${reply.text}"` : reply.text;
-}
-
-/** Picks in question order; one left unpicked reads "—", so each pick stays beside its own question. */
-function picksText(picks: readonly string[]): string {
-  return picks.map(pick => pick || '—').join(' · ');
 }
 
 /** What a reader with an open call does if the reply was a question: it names the reply's id, which only this call was given. */

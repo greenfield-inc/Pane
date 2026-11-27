@@ -352,6 +352,25 @@ composer marks it in amber like a mode that never asks.
   no sent card in the sending tab. Where the app has no records (the PWA and phone today) the cards come from
   the text alone, without state or replies. Terminal tabs show the lines as
   typed.
+- **A Session orchestrator's own workers** (T-133): in the orchestrator's
+  chat, a message it sent to one of its own Session's workers, or one a worker
+  sent it, starts collapsed to one line (avatar, *Sent to* or *From*, the first
+  words, `M-n`, time and state). Clicking it (or Enter or Space) opens the
+  card, a chevron collapses it again, and the tab remembers each card's choice
+  across reloads. A jump up to a collapsed card opens it. The Session comes
+  from the message's record (each end's Session and whether it was the
+  orchestrator), never from the text. Messages from other Sessions, Autopilot,
+  To-dos and the person's relayed words stay open, and so does everything in
+  a worker's own chat. A send that failed and was sent again with the same
+  text to the same tab shows no card of its own: the retry's card notes
+  *1 failed attempt (M-17), sent again*, with the reason on hover. A failed
+  send nobody retried keeps its card.
+- **Pane's approval lines** (`answer: Q-4 → … (by you)`, `reply:`, `closed:`,
+  `correction:`) that Pane typed into this tab show as one quiet *Pane* line
+  with the text as typed, not the person's bubble. They count only when an
+  approval this tab asked, reads or relayed has that Q-n and, for `answer:`
+  and `reply:`, exactly that text (the line formats live in
+  `shared/notifyTabLines.ts`); anything else stays the person's own.
 - **Approvals** dock above the composer with exactly the choices the agent
   sent; keys 1 to 9 answer while the composer is empty. Typing a message
   instead sends it and, once Pane has it, declines the request. ExitPlanMode shows the

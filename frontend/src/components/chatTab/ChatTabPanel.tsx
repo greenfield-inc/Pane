@@ -46,6 +46,8 @@ import { takeLaunchDraft } from '../../utils/launchOutline';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { AgentMessagesContext, useAgentMessageRecords, useAgentMessagesView } from './agentMessagesContext';
 import { routedTexts, sentMessagesByTurn } from '../../../../shared/agentMessagePresentation';
+import { approvalsTypedInto } from '../../../../shared/notifyTabLines';
+import { selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 import { noteSendConfirmed, useControllerTarget } from '../../controller/controllerTargets';
@@ -264,7 +266,10 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const sentByTurn = useMemo(() => sentMessagesByTurn(turns, agentMessageRecords.records, panelId), [turns, agentMessageRecords, panelId]);
   const routed = useMemo(() => routedTexts(turns.flatMap(turn => [turn.user, ...turn.items.flatMap(item => item.type === 'user' ? [item.message] : [])]
     .flatMap(message => message ? [message.parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n')] : []))), [turns]);
-  const agentMessages = useAgentMessagesView(panelId, agentMessageRecords, sentByTurn, routed);
+  // T-133: the approvals whose `answer:` / `reply:` lines Pane types into this tab, so those lines show as Pane's.
+  const notifyItems = useNotifyStore(selectNotifyItems);
+  const approvals = useMemo(() => approvalsTypedInto(notifyItems, panelId), [notifyItems, panelId]);
+  const agentMessages = useAgentMessagesView(panelId, agentMessageRecords, sentByTurn, routed, approvals);
   const notes = useMemo(() => workerNotes(turns, workers ?? []), [turns, workers]);
   const agentsWorking = useMemo(() => workingOverride ?? workingAgents(workers), [workingOverride, workers]);
   const [copies, setCopies] = useState<ReadonlyMap<string, UploadProgress>>(new Map());

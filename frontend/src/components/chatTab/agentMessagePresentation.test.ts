@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkedChatLine, classifyChatLine, messageStatus, shownRefs, threadReplies, threadRoot, senderInitials, senderOfName, sentMessagesByTurn } from '../../../../shared/agentMessagePresentation';
+import { checkedChatLine, classifyChatLine, messageStatus, ownWorkerExchange, retriedAttempts, shownRefs, threadReplies, threadRoot, senderInitials, senderOfName, sentMessagesByTurn } from '../../../../shared/agentMessagePresentation';
 import type { AgentMessageParty, AgentMessageRecord } from '../../../../shared/types/agentMessages';
 
 const route = (ref: string, name: string) => `\n\nReply with runpane reply ${ref} "…": it reaches ${name}, who never sees your own chat.`;
@@ -223,5 +223,57 @@ describe('coverage of the loaded records', () => {
   it('still reads a message the records cover, and missing, as the person\'s', () => {
     expect(checkedChatLine(classifyChatLine(`Q?${ROUTE}`), partial([], 5))).toBeUndefined();
     expect(checkedChatLine(classifyChatLine(`Q?${ROUTE}`), partial([record(12, { text: 'Q?' })], 40))).toMatchObject({ type: 'message' });
+  });
+});
+
+describe('own workers and retried sends (T-133)', () => {
+  const orchestrator = (panelId: string, sessionId: string | null): AgentMessageParty => ({ panelId, paneId: 'workspace', sessionId, name: 'the "Omni Chat" Session orchestrator', orchestrator: true });
+  const worker = (panelId: string, sessionId: string | null): AgentMessageParty => ({ panelId, paneId: 'worker-pane', sessionId, name: 'T-104 worker (in the "Omni Chat" Session)', orchestrator: false });
+
+  it('collapses messages between an orchestrator and its own worker, in the orchestrator\'s chat only', () => {
+    const sent = record(1, { sender: orchestrator('orch', 'S1'), receiver: worker('w', 'S1') });
+    const received = record(2, { sender: worker('w', 'S1'), receiver: orchestrator('orch', 'S1') });
+    expect(ownWorkerExchange(sent, 'orch')).toBe(true);
+    expect(ownWorkerExchange(received, 'orch')).toBe(true);
+    // The worker's own chat keeps its orchestrator's messages open.
+    expect(ownWorkerExchange(sent, 'w')).toBe(false);
+    expect(ownWorkerExchange(received, 'w')).toBe(false);
+    // A reply that followed the Session to a newer orchestrator tab still counts.
+    expect(ownWorkerExchange(record(3, { kind: 'reply', replyTo: 'M-1', sender: worker('w', 'S1'), receiver: orchestrator('old-orch', 'S1') }), 'new-orch')).toBe(true);
+  });
+
+  it('keeps messages from other Sessions, other orchestrators and agents outside any Session open', () => {
+    expect(ownWorkerExchange(record(1, { sender: orchestrator('orch', 'S1'), receiver: worker('w', 'S2') }), 'orch')).toBe(false);
+    expect(ownWorkerExchange(record(2, { sender: orchestrator('other', 'S2'), receiver: orchestrator('orch', 'S1') }), 'orch')).toBe(false);
+    expect(ownWorkerExchange(record(3, { sender: worker('w', null), receiver: orchestrator('orch', null) }), 'orch')).toBe(false);
+    // Two workers of one Session talking: neither end is the orchestrator.
+    expect(ownWorkerExchange(record(4, { sender: worker('a', 'S1'), receiver: worker('b', 'S1') }), 'a')).toBe(false);
+  });
+
+  const sent = (number: number, overrides: Partial<AgentMessageRecord> = {}) =>
+    record(number, { sender: party('orch', 'the "Omni Chat" Session orchestrator'), receiver: party('w', 'Worker'), text: 'Read and follow plan.md', ...overrides });
+
+  it('folds a failed send into the retry with the same text to the same tab', () => {
+    const failed = sent(17, { state: 'undelivered', undeliveredReason: 'Terminal panel x is not initialized' });
+    const retry = sent(18);
+    const { folded, attempts } = retriedAttempts([retry, failed], 'orch');
+    expect([...folded]).toEqual(['M-17']);
+    expect(attempts.get('M-18')?.map(item => item.ref)).toEqual(['M-17']);
+    const turns = [{ id: 't', startedAt: '2026-11-25T09:00:00.000Z', endedAt: '2026-11-25T11:00:00.000Z' }];
+    expect(sentMessagesByTurn(turns, [failed, retry], 'orch').get('t')?.map(item => item.ref)).toEqual(['M-18']);
+  });
+
+  it('gathers a chain of failed sends under the last one, and keeps a failed send nobody retried', () => {
+    const chain = [sent(16, { state: 'undelivered' }), sent(17, { state: 'undelivered' }), sent(18)];
+    const { folded, attempts } = retriedAttempts(chain, 'orch');
+    expect([...folded].sort()).toEqual(['M-16', 'M-17']);
+    expect(attempts.get('M-18')?.map(item => item.ref)).toEqual(['M-16', 'M-17']);
+    expect(attempts.has('M-17')).toBe(false);
+    // Different text, a different tab, or a send from another tab is not a retry.
+    expect(retriedAttempts([sent(1, { state: 'undelivered' }), sent(2, { text: 'Something else' })], 'orch').folded.size).toBe(0);
+    expect(retriedAttempts([sent(1, { state: 'undelivered' }), sent(2, { receiver: party('w2', 'Other') })], 'orch').folded.size).toBe(0);
+    expect(retriedAttempts([sent(1, { state: 'undelivered' }), sent(2)], 'someone-else').folded.size).toBe(0);
+    // A delivered message sent twice stays two cards.
+    expect(retriedAttempts([sent(1), sent(2)], 'orch').folded.size).toBe(0);
   });
 });
