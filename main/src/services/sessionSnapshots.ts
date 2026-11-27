@@ -177,7 +177,7 @@ export class SessionSnapshotService implements PaneEventSink {
         tabs: this.sources.tabs(record.internalSessionId),
         layout: this.sources.layout(record.internalSessionId),
       };
-      // A chat whose agent hasn't run since this Pane started has no transcript here yet; that says nothing of its messages.
+      // A chat whose agent hasn't run since this Pane started shows the window saved beside it (recent.json); one with none says nothing of its messages.
       if (!chat.transcript) snapshot.transcriptUnknown = true;
       snapshots.push(projectSnapshot(snapshot));
     }

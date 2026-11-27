@@ -11,6 +11,9 @@ import { ChatTabManager, type ChatTabLauncher, type ChatTabManagerOptions, type 
 import { ChatTabNotifyBridge } from './notifyBridge';
 import { ChatTabRuntime } from './runtime';
 import { runpaneWaits } from '../agentStatus/midTurn';
+import { SessionSnapshotService } from '../sessionSnapshots';
+import { hostSnapshotSources } from '../sessionSnapshotSources';
+import type { OrchestrationSessionSummary } from '../../../../shared/types/orchestrationSession';
 
 const AGENT = path.join(__dirname, 'testing', 'scriptedAgent.mjs');
 const cleanup: Array<() => Promise<void> | void> = [];
@@ -888,6 +891,38 @@ describe('chat tab manager', () => {
     // Closing the tab removes it.
     await second.manager.close('p1');
     expect(existsSync(recent)).toBe(false);
+  });
+
+  it('gives a host snapshot the saved messages after a relaunch, without starting the agent (T-116 D-15)', { timeout: 30_000 }, async () => {
+    const first = harness();
+    const { store, directory } = first;
+    store.add('p1', newTab(directory));
+    await first.manager.ensure('p1');
+    first.manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => first.manager.receipt('p1', 'a')?.state).toBe('completed');
+    const spool = path.join(directory, 'spool');
+    await expect.poll(() => readdirSync(spool).some(folder => existsSync(path.join(spool, folder, 'recent.json'))), { timeout: 10_000 }).toBe(true);
+    await first.manager.stopAll();
+
+    // Pane relaunched: the owner's other machine reads this chat Session's snapshot.
+    const second = harness(store, {}, directory);
+    const chatTab: ToolPanel = { id: 'p1', sessionId: 'pane-1', type: 'chat', title: 'Claude', state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
+    const record = { id: 's1', name: 'One', internalSessionId: 'pane-1', agent: 'claude', panelIds: { claude: 'p1' }, updatedAt: '2026-11-26T00:00:00.000Z' };
+    const service = new SessionSnapshotService(hostSnapshotSources({
+      // SAFETY: the snapshot reads only the fields set here.
+      sessions: { list: async () => ({ sessions: [record as unknown as OrchestrationSessionSummary] }) },
+      panels: { getPanelsForSession: () => [chatTab], getPanel: () => chatTab },
+      chats: () => second.manager,
+      storedLayout: () => null,
+      events: () => ({ send: () => undefined }),
+    }));
+    const { snapshots: [snapshot] } = await service.snapshots({});
+    service.dispose();
+
+    expect(snapshot.transcriptUnknown).toBeUndefined();
+    expect(replyText(snapshot.chat)).toBe('You said: hello');
+    expect(snapshot.chat.messageCount).toBeGreaterThan(0);
+    expect(second.manager.isRunning('p1')).toBe(false);
   });
 
   it('says a paused tab is paused, and a read that may not start leaves it paused (T-87)', async () => {

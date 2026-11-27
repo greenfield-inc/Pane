@@ -1085,9 +1085,11 @@ changed.
 restart or with the clock set back, has `since` and `held` ignored, so every
 Session is sent whole.
 
-After a restart, a chat whose agent hasn't run yet has no transcript on the
-host: Pane reads a conversation only by starting its agent, and a snapshot
-never does. Its snapshot then has no `chat.transcript`, `messageCount` 0 and
+After a restart, a chat whose agent hasn't run yet carries the newest window
+the host saved beside the tab (`recent.json`, as a read that starts nothing
+shows it), so a cold host's snapshots have their messages without starting
+any agent. Only a chat with no saved window (never written, or saved for
+another conversation) has no `chat.transcript`, `messageCount` 0 and
 `transcriptUnknown: true`, which means "not known yet", not "empty". Once the
 chat is opened there, its snapshot's revision rises and carries its messages.
 
@@ -1158,8 +1160,8 @@ its held window is dropped and the next read lists every Session again, so
 the host sends that one whole. At start, index entries whose file is missing
 are dropped the same way.
 
-A snapshot marked `transcriptUnknown` (its host restarted and hasn't run the
-chat's agent since) keeps the messages and count the mirror already holds, in
+A snapshot marked `transcriptUnknown` (its host restarted, hasn't run the
+chat's agent since and saved no window for it) keeps the messages and count the mirror already holds, in
 any host run, until a snapshot with a transcript arrives. A machine whose Pane
 has no snapshots (`ERR_HOST_OUTDATED`, or `ERR_UNKNOWN_CHANNEL` from an older
 host) is left alone until it reconnects. Each machine's state is `live`,

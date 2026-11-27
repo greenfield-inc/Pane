@@ -47,8 +47,8 @@ export interface SessionSnapshot {
    */
   chat: ChatTabView;
   /**
-   * True when the host can't read this chat's messages yet: it restarted and the chat's agent hasn't
-   * run since, so `chat.transcript` is absent and `chat.messageCount` is 0 without meaning the chat is
+   * True when the host can't read this chat's messages yet: it restarted, the chat's agent hasn't run
+   * since, and no window was saved beside the tab (`recent.json`), so `chat.transcript` is absent and `chat.messageCount` is 0 without meaning the chat is
    * empty. The desktop keeps the messages it holds until a snapshot with a transcript arrives.
    */
   transcriptUnknown?: true;
