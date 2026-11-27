@@ -113,14 +113,18 @@ export function registerRemoteDaemonHandlers(
     }
   }
 
+  /**
+   * What a client transition writes, built from config read again once its connection work is
+   * done (F-7): a Remote Access change saved while a switch connected is kept, not overwritten
+   * by the copy the switch read when it started.
+   */
+  interface RemoteClientTransitionResult {
+    next: (latest: RemoteDaemonConfig) => RemoteDaemonConfig;
+    resyncRenderer: boolean;
+  }
+
   async function applyRemoteClientTransition(
-    transition: (current: RemoteDaemonConfig) => Promise<{
-      next: RemoteDaemonConfig;
-      resyncRenderer: boolean;
-    }> | {
-      next: RemoteDaemonConfig;
-      resyncRenderer: boolean;
-    },
+    transition: (current: RemoteDaemonConfig) => Promise<RemoteClientTransitionResult> | RemoteClientTransitionResult,
   ): Promise<RemoteDaemonConfig> {
     // A switch owns the connection until its config is written: a config write from elsewhere
     // meanwhile still names the old machine and must not close the switch's connection.
@@ -128,7 +132,7 @@ export function registerRemoteDaemonHandlers(
     try {
       const current = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
       const result = await transition(current);
-      const next = normalizeRemoteDaemonConfig(result.next);
+      const next = normalizeRemoteDaemonConfig(result.next(getRemoteDaemonConfig(configManager.getConfig().remoteDaemon)));
 
       await configManager.updateConfig({ remoteDaemon: next });
       if (result.resyncRenderer) {
@@ -407,15 +411,15 @@ export function registerRemoteDaemonHandlers(
         }
 
         return {
-          next: {
-            ...current,
+          next: (latest) => ({
+            ...latest,
             client: {
-              ...current.client,
-              computers: saveProfileRoute(current.client.computers, profile),
-              activeProfileId: connected ? profile.id : current.client.activeProfileId,
-              mode: connected ? 'remote' : current.client.mode,
+              ...latest.client,
+              computers: saveProfileRoute(latest.client.computers, profile),
+              activeProfileId: connected ? profile.id : latest.client.activeProfileId,
+              mode: connected ? 'remote' : latest.client.mode,
             },
-          },
+          }),
           resyncRenderer: connected,
         };
       });
@@ -607,15 +611,15 @@ export function registerRemoteDaemonHandlers(
         }
 
         return {
-          next: {
-            ...current,
+          next: (latest) => ({
+            ...latest,
             client: {
-              ...current.client,
-              computers: current.client.computers.filter((computer) => computer.id !== decodedProfileId),
+              ...latest.client,
+              computers: latest.client.computers.filter((computer) => computer.id !== decodedProfileId),
               activeProfileId,
               mode,
             },
-          },
+          }),
           resyncRenderer: isActiveRemoteProfile,
         };
       });
@@ -655,7 +659,8 @@ export function registerRemoteDaemonHandlers(
       }
 
       return {
-        next: candidate,
+        // The switch changes only which machine is active; everything else is as saved now.
+        next: (latest) => ({ ...latest, client: { ...latest.client, ...nextState } }),
         resyncRenderer: true,
       };
     });
