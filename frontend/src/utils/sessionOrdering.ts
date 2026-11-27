@@ -10,7 +10,8 @@ export interface PinnedSession {
   repositoryName: string;
 }
 
-function getRepositoryName(projectName: string | undefined): string {
+/** The last folder of a project's name, which is how pane rows name their repository. */
+export function getRepositoryName(projectName: string | undefined): string {
   return projectName?.split(/[\\/]/).filter(Boolean).pop() || 'Unknown';
 }
 

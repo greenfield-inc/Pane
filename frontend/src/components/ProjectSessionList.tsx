@@ -58,6 +58,7 @@ import {
   createProjectById,
   flattenSessionsByProjects,
   getPinnedSessions,
+  getRepositoryName,
   groupSessionsByProject,
 } from '../utils/sessionOrdering';
 
@@ -411,10 +412,11 @@ export function ProjectSessionList({
         onClick={() => void handleManagedPaneClick(pane.id, parentSessionId)}
         onTogglePinned={() => void handleTogglePinnedSession(pane.id)}
         onDismiss={inboxActive ? () => dismissInboxPane(pane.id) : undefined}
+        repositoryName={getRepositoryName(pane.projectId != null ? projectById.get(pane.projectId)?.name : undefined)}
         rowLayout={sidebarPaneRowLayout}
       />
     );
-  }, [activeView, sidebarNavigationScope, selectedOrchestrationSessionId, activeSessionId, globalSessionIndex, handleManagedPaneClick, handleTogglePinnedSession, paneById, sidebarPaneRowLayout, inboxActive, inboxMembers, dismissInboxPane]);
+  }, [activeView, sidebarNavigationScope, selectedOrchestrationSessionId, activeSessionId, globalSessionIndex, handleManagedPaneClick, handleTogglePinnedSession, paneById, projectById, sidebarPaneRowLayout, inboxActive, inboxMembers, dismissInboxPane]);
 
   const pinnedPaneRows = pinnedSessions.length > 0 ? (
     <div>

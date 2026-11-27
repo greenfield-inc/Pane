@@ -5,7 +5,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
 import { isAllMachinesOn, useAllMachinesStore } from '../stores/allMachinesStore';
 import type { Project } from '../types/project';
-import { APP_WINDOW_TITLE, formatPaneTitle, resolvePaneStatusPills, resolvePaneTitle } from '../utils/paneTitle';
+import { APP_WINDOW_TITLE, formatPaneTitle, formatSessionPaneTitle, resolvePaneStatusPills, resolvePaneTitle } from '../utils/paneTitle';
 import { isMac } from '../utils/platformUtils';
 import { isWindowControlsOverlayEnabled } from '../utils/titleBarOverlay';
 import { useApprovalsBackStore } from './approvals/approvalsNavigation';
@@ -157,7 +157,8 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
   const setActiveSession = useSessionStore(state => state.setActiveSession);
   const navigateToPaneChat = useNavigationStore(state => state.navigateToPaneChat);
   const selectOrchestrationSession = useOrchestrationSessionStore(state => state.select);
-  const title = activeView === 'sessions' ? resolvePaneTitle(activeSession, projects) ?? (activeSessionId ? { project: 'Pane', pane: activeSession?.name ?? activeSessionId } : null)
+  const paneTitle = activeView === 'sessions' ? resolvePaneTitle(activeSession, projects) : null;
+  const title = activeView === 'sessions' ? paneTitle ?? (activeSessionId ? { project: 'Pane', pane: activeSession?.name ?? activeSessionId } : null)
     : activeView === 'pane-chat' && orchestrationName ? { project: 'Session', pane: orchestrationName } : null;
   const windowTitle = formatPaneTitle(title);
   // In All machines every row comes from some machine, so the header names the one this is on.
@@ -181,6 +182,8 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
   if (!isMac() && !isWindowControlsOverlayEnabled()) return null;
 
   const parentSessionName = parentSession?.name ?? null;
+  // Under a parent Session the breadcrumb no longer starts with the project, so it trails the Pane instead.
+  const parentSessionProject = parentSessionName ? paneTitle?.project ?? null : null;
   // Opens the Session the way its sidebar row does.
   const openParentSession = () => {
     if (!parentSession) return;
@@ -234,11 +237,11 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
       )}
       {title && !offlineNotice && (
         <div className="relative flex min-w-0 items-center">
-          {/* The name gives way first; the project or parent Session (up to 16rem) shrinks only once the name can't. */}
+          {/* A trailing project gives way first, then the name; the project or parent Session (up to 16rem) shrinks only once the name can't. */}
           <div
             className="flex min-w-0 items-center gap-1.5 text-xs"
             data-testid="window-title-bar-label"
-            title={parentSessionName && title.pane ? `${parentSessionName} › ${title.pane}` : windowTitle}
+            title={parentSessionName ? formatSessionPaneTitle(parentSessionName, title.pane, parentSessionProject) : windowTitle}
           >
             {parentSessionName ? (
               <button
@@ -265,6 +268,14 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
                   <span style={LTR_RUN_STYLE}>{title.pane}</span>
                 </span>
               </>
+            )}
+            {parentSessionProject && (
+              <span
+                className="min-w-0 shrink-[99999] truncate text-[11px] text-text-muted"
+                data-testid="window-title-bar-project"
+              >
+                {parentSessionProject}
+              </span>
             )}
             {machineName && <span className="flex-shrink-0 text-text-tertiary" data-testid="window-title-bar-machine">on {machineName}</span>}
           </div>

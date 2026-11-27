@@ -43,6 +43,12 @@ export function formatPaneTitle(title: PaneTitle | null): string {
   return title.pane ? `${title.project} · ${title.pane}` : title.project;
 }
 
+/** Hover text for a Pane opened from a Session, which the title bar names instead of the project. */
+export function formatSessionPaneTitle(sessionName: string, pane: string, project: string | null): string {
+  const path = pane ? `${sessionName} › ${pane}` : sessionName;
+  return project ? `${path} (${project})` : path;
+}
+
 export interface PaneStatusPill {
   key: 'pr' | 'branch';
   label: string;

@@ -1106,7 +1106,7 @@ test('the Session actions menu works by keyboard, and its archive Undo survives 
   await expect(page.getByRole('heading', { name: 'Preferences', exact: true })).toHaveCount(0);
 });
 
-test('a Pane opened from a Session names it in the title bar as a way back', async ({ page }) => {
+test('a Pane opened from a Session names it in the title bar as a way back, and names the Pane\'s project', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   // The window title bar renders on macOS without the overlay flag.
   await page.addInitScript(() => {
@@ -1126,9 +1126,13 @@ test('a Pane opened from a Session names it in the title bar as a way back', asy
   await dismissStartupDialogs(page);
 
   await page.getByRole('button', { name: 'Expand Checkout launch Panes' }).click();
-  await page.getByRole('button', { name: 'checkout-redesign', exact: true }).click();
+  const paneRow = page.getByRole('button', { name: 'checkout-redesign', exact: true });
+  await expect(paneRow).toContainText('Pane fixtures');
+  await paneRow.click();
   const label = page.getByTestId('window-title-bar-label');
-  await expect(label).toHaveText('Checkout launch›checkout-redesign');
+  await expect(label).toHaveText('Checkout launch›checkout-redesignPane fixtures');
+  await expect(label).toHaveAttribute('title', 'Checkout launch › checkout-redesign (Pane fixtures)');
+  await expect(label.getByTestId('window-title-bar-project')).toHaveCSS('font-size', '11px');
   const back = label.getByRole('button', { name: 'Back to Session Checkout launch', exact: true });
   await expect(back).toHaveCSS('-webkit-app-region', 'no-drag');
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatPaneTitle, resolvePaneStatusPills, resolvePaneTitle } from './paneTitle';
+import { formatPaneTitle, formatSessionPaneTitle, resolvePaneStatusPills, resolvePaneTitle } from './paneTitle';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 
@@ -135,5 +135,20 @@ describe('formatPaneTitle', () => {
 
   it('falls back to the app name when no pane is open', () => {
     expect(formatPaneTitle(null)).toBe('Pane');
+  });
+});
+
+describe('formatSessionPaneTitle', () => {
+  it('names the Session, the pane and its project', () => {
+    expect(formatSessionPaneTitle('Checkout launch', 'checkout-redesign', 'bloomapi/bloom-mono'))
+      .toBe('Checkout launch › checkout-redesign (bloomapi/bloom-mono)');
+  });
+
+  it('names the project after the Session for the main-repo pane', () => {
+    expect(formatSessionPaneTitle('Checkout launch', '', 'bloomapi/bloom-mono')).toBe('Checkout launch (bloomapi/bloom-mono)');
+  });
+
+  it('leaves the project out when it is unknown', () => {
+    expect(formatSessionPaneTitle('Checkout launch', 'checkout-redesign', null)).toBe('Checkout launch › checkout-redesign');
   });
 });
