@@ -26,7 +26,7 @@ import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/SessionView';
 import { PaneChatIntroOffer } from './components/PaneChatIntroOffer';
 import Welcome from './components/Welcome';
-import { welcomeCheckStep } from './utils/welcomeCheck';
+import { welcomeCheckStep, windowMachineForWelcome } from './utils/welcomeCheck';
 import Help, { KeyboardShortcutSheet } from './components/Help';
 import { useCommittedRef } from './hooks/useCommittedRef';
 import { isWritableCodeEditorFocused } from './utils/hotkeyUtils';
@@ -175,7 +175,7 @@ function App() {
   const terminalShortcuts = appConfig?.terminalShortcuts ?? EMPTY_TERMINAL_SHORTCUTS;
   const { isVisible: shortcutHintsVisible } = useShortcutHintsOverlay();
   useFocusedSurfaceScrolling(activeSessionId);
-  const { connectionState } = useRemoteRuntimeState();
+  const { connectionState, connectionKnown, connectionReadFailed } = useRemoteRuntimeState();
   const shownConnectionCheck = connectionState.check?.outcome !== 'passed' ? connectionState.check ?? null : null;
   const { presence: connectionPresence } = useConnectionPresence(connectionState);
   // An engage that landed keeps the main area live until the connection says connected (T-132).
@@ -701,7 +701,7 @@ function App() {
   useEffect(() => {
     // Show the welcome screen intelligently based on user state, once, on this window's own first
     // load: never again on a host switch, and never for another machine (QA 1781 F-5).
-    const step = welcomeCheckStep({ checked: welcomeChecked.current, isLoaded, hasCheckedOnboarding, isOnboardingOpen, onOtherMachine: connectionState.mode === 'remote' });
+    const step = welcomeCheckStep({ checked: welcomeChecked.current, isLoaded, hasCheckedOnboarding, isOnboardingOpen, machine: windowMachineForWelcome(connectionKnown, connectionReadFailed, connectionState.mode) });
     if (step === 'wait') return;
     welcomeChecked.current = true;
     if (step === 'skip') {
@@ -759,7 +759,7 @@ function App() {
     // A switch while it reads (the window's data changed under it): what it read may be the other
     // machine's, so it shows nothing, and it doesn't run again.
     return () => { cancelled = true; };
-  }, [isLoaded, hasCheckedOnboarding, isOnboardingOpen, completedOnboardingThisSession, connectionState.mode]);
+  }, [isLoaded, hasCheckedOnboarding, isOnboardingOpen, completedOnboardingThisSession, connectionKnown, connectionReadFailed, connectionState.mode]);
 
   /**
    * The once-only Support Pane dialog, for users past the first screen with GitHub CLI ready.

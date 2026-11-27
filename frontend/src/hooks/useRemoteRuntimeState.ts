@@ -15,6 +15,8 @@ import {
 export function useRemoteRuntimeState() {
   const [connectionState, setConnectionState] = useState<RemotePaneConnectionState>(createDefaultRemotePaneConnectionState);
   const [connectionKnown, setConnectionKnown] = useState(false);
+  /** The first read of the connection failed, and no change has said which machine the window shows. */
+  const [connectionReadFailed, setConnectionReadFailed] = useState(false);
   const [hostState, setHostState] = useState<RemoteDaemonHostRuntimeState>(createDefaultRemoteDaemonHostRuntimeState);
 
   useEffect(() => {
@@ -31,8 +33,10 @@ export function useRemoteRuntimeState() {
       try {
         const response = await API.remoteDaemon.getConnectionState();
         if (!cancelled && !connectionUpdated && response.success && response.data) applyConnectionState(response.data);
+        else if (!cancelled && !connectionUpdated && !response.success) setConnectionReadFailed(true);
       } catch (error) {
         console.error('Failed to fetch remote connection state:', error);
+        if (!cancelled && !connectionUpdated) setConnectionReadFailed(true);
       }
     };
     const fetchHostState = async () => {
@@ -62,5 +66,5 @@ export function useRemoteRuntimeState() {
     };
   }, []);
 
-  return { connectionState, connectionKnown, hostState };
+  return { connectionState, connectionKnown, connectionReadFailed, hostState };
 }

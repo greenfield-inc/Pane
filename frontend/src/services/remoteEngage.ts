@@ -111,7 +111,7 @@ const undelivered = new Map<string, EngageTarget>();
  * held box. No key typed meanwhile is lost.
  */
 /** What the key handlers read of a keydown. */
-type KeyPress = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'isComposing' | 'preventDefault'>;
+type KeyPress = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'isComposing' | 'preventDefault'> & Partial<Pick<KeyboardEvent, 'defaultPrevented'>>;
 
 /**
  * The switch failed while the person was typing: until they move focus themselves, keys that land
@@ -127,15 +127,12 @@ function onStrayKey(event: KeyPress): void {
   const state = useRemoteEngage.getState();
   const kept = !state.engaging && keysToKept ? keptEngage(state) : undefined;
   const engaging = state.engaging ?? (kept ? { machineId: kept.machineId, sessionId: kept.sessionId } : undefined);
-  if (!engaging || event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
-  if (event.key.length !== 1 && !(kept && event.key === 'Enter')) return;
+  if (!engaging || event.key.length !== 1 || event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+  // A key something else already took, or one meant for a dialog that opened, stays theirs (R6-SF-1).
+  if (kept && (event.defaultPrevented || document.querySelector(DIALOGS))) return;
   const active = document.activeElement;
   if (active && active !== document.body && active.isConnected) return;
   event.preventDefault();
-  if (kept && event.key === 'Enter') {
-    engageRemoteSession(engaging, 'enter', { send: true });
-    return;
-  }
   holdRemoteText(engaging, (useRemoteEngage.getState().held[engageKey(engaging)]?.text ?? '') + event.key);
   const box = kept ? keptBox() : heldBox();
   if (box) {
@@ -179,6 +176,9 @@ function onFocusIn(event: FocusEvent): void {
 function onPersonMoves(event: KeyPress | MouseEvent): void {
   if ('key' in event && !(event.key === 'Tab' || event.metaKey || event.ctrlKey || event.altKey)) return;
   personMovedFocus = true;
+  // A click anywhere but the kept bar (even on something that takes no focus, such as a card's
+  // body) or Tab or a shortcut: keys go where the person put them again (review 1781 R6-SF-1).
+  if ('key' in event || !keptBox()?.contains(event.target instanceof Node ? event.target : null)) keysToKept = false;
 }
 
 function listen(): void {

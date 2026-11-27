@@ -11,6 +11,9 @@ function deferred<T>() {
 const saveNavigationMemory = vi.fn(async () => ({ success: true }));
 type KeyPress = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'isComposing' | 'preventDefault'>;
 const keyListeners: Array<(event: KeyPress) => void> = [];
+/** What the page's mousedown listeners read of a click. */
+type MousePress = Pick<MouseEvent, 'target'>;
+const mouseListeners: Array<(event: MousePress) => void> = [];
 const cancelSwitch = vi.fn(async () => ({ success: true, data: { cancelled: true } }));
 
 /**
@@ -20,7 +23,10 @@ const cancelSwitch = vi.fn(async () => ({ success: true, data: { cancelled: true
 async function setup(switchMachine: (machineId: string) => Promise<MachineSelectOutcome>, { online = true } = {}) {
   vi.resetModules();
   vi.stubGlobal('window', {
-    addEventListener: vi.fn((type: string, listener: (event: KeyPress) => void) => { if (type === 'keydown') keyListeners.push(listener); }),
+    addEventListener: vi.fn((type: string, listener: (event: KeyPress | MousePress) => void) => {
+      if (type === 'keydown') keyListeners.push(listener);
+      if (type === 'mousedown') mouseListeners.push(listener);
+    }),
     electronAPI: {
       uiState: { saveNavigationMemory, getPaneLayout: vi.fn(async () => ({ success: true, data: null })) },
       remoteDaemon: { cancelSwitch },
@@ -60,6 +66,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   keyListeners.length = 0;
+  mouseListeners.length = 0;
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -639,7 +646,7 @@ describe('an arrow stops the return\'s own switch (review 1781 round 4)', () => 
 });
 
 describe('a switch that fails while the person types keeps every key (QA 1781, M-280)', () => {
-  it('keys landing on the page after the failure go into the kept text, and Enter retries from there', async () => {
+  it('keys landing on the page after the failure go into the kept text; Enter on the page does not retry', async () => {
     const switchMachine = vi.fn(async (): Promise<MachineSelectOutcome> => ({ ok: false, error: 'Build box answered 503.' }));
     const { engage, state } = await setup(switchMachine);
     const body = {};
@@ -653,9 +660,10 @@ describe('a switch that fails while the person types keeps every key (QA 1781, M
     const press = (key: string) => { for (const listener of keyListeners) listener({ key, metaKey: false, ctrlKey: false, altKey: false, isComposing: false, preventDefault }); };
     for (const key of 'check') press(key);
     expect(state().held[engage.engageKey(target)]?.text).toBe('qa-check');
+    // Enter on the page doesn't retry (review 1781 R6-SF-1): only Enter in the focused kept bar does.
     press('Enter');
-    await vi.waitFor(() => expect(switchMachine).toHaveBeenCalledTimes(2));
-    expect(state().held[engage.engageKey(target)]).toMatchObject({ text: 'qa-check' });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(switchMachine).toHaveBeenCalledTimes(1);
   });
 
   it('a failure the person was not typing into takes no keys and no focus', async () => {
@@ -670,6 +678,27 @@ describe('a switch that fails while the person types keeps every key (QA 1781, M
     const preventDefault = vi.fn();
     for (const listener of keyListeners) listener({ key: 'x', metaKey: false, ctrlKey: false, altKey: false, isComposing: false, preventDefault });
     expect(state().held[engage.engageKey(target)]?.text).toBe('qa-');
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
+});
+
+describe('the kept bar takes keys only until the person moves on (review 1781 R6-SF-1)', () => {
+  it('a click anywhere else hands the keys back: a key and an Enter meant for a card reach the card', async () => {
+    const switchMachine = vi.fn(async (): Promise<MachineSelectOutcome> => ({ ok: false, error: 'Build box answered 503.' }));
+    const { engage, state } = await setup(switchMachine);
+    const body = {};
+    vi.stubGlobal('document', { body, activeElement: body, querySelector: () => null });
+    engage.holdRemoteText(target, 'qa-');
+    engage.engageRemoteSession(target, 'type');
+    await vi.waitFor(() => expect(state().failure).toBeDefined());
+    // A click on something that takes no focus: mousedown fires, focus stays on the page.
+    for (const listener of mouseListeners) listener({ target: null });
+    const cardTook: string[] = [];
+    keyListeners.push(event => { cardTook.push(event.key); });
+    const preventDefault = vi.fn();
+    for (const key of ['1', 'Enter']) for (const listener of [...keyListeners]) listener({ key, metaKey: false, ctrlKey: false, altKey: false, isComposing: false, preventDefault });
+    await vi.advanceTimersByTimeAsync(50);
+    expect({ cardTook, kept: state().held[engage.engageKey(target)]?.text, switches: switchMachine.mock.calls.length }).toEqual({ cardTook: ['1', 'Enter'], kept: 'qa-', switches: 1 });
     expect(preventDefault).not.toHaveBeenCalled();
   });
 });

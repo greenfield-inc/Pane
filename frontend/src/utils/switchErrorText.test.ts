@@ -19,3 +19,20 @@ describe('a failed switch says why in a short line (QA 1781 note)', () => {
     expect(reason.endsWith('…')).toBe(true);
   });
 });
+
+describe('every shape of reason becomes one plain line (review 1781 round 6)', () => {
+  const short = 'Build box answered with an error instead of opening. Try again in a moment.';
+  it.each([
+    ['Host answered 502: {"error":"bad gateway"}', 'Host answered 502.'],
+    ['Request failed\n<!DOCTYPE html>', 'Request failed'],
+    ['Error invoking remote method \'remote-daemon:update-client-state\': Error: {"code":"X"}', short],
+    ['Error invoking remote method \'x\': PaneError: Build box refused the switch.', 'Build box refused the switch.'],
+    ['line one\nline two\n    at Object.<anonymous> (file.js:1:1)', 'line one'],
+    ['[object Object]', short],
+    ['null', short],
+    ['   ', short],
+    ['Unexpected server response: 502', 'Unexpected server response: 502'],
+  ])('%j', (raw, shown) => {
+    expect(switchFailureReason(raw, 'Build box')).toBe(shown);
+  });
+});

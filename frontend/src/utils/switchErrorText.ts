@@ -7,8 +7,16 @@ const MAX_REASON = 200;
  * is shown as one plain line instead, as the connection checklist does. A readable reason stays.
  */
 export function switchFailureReason(raw: string, machineName: string): string {
-  const reason = raw.replace(/^Error invoking remote method '[^']*':\s*/, '').replace(/^Error:\s*/, '').trim();
-  const unreadable = reason === '' || /^[{[]/.test(reason) || /<\/?[a-z!][^>]*>/i.test(reason);
-  if (unreadable) return `${machineName} answered with an error instead of opening. Try again in a moment.`;
+  const generic = `${machineName} answered with an error instead of opening. Try again in a moment.`;
+  // The IPC wrapper and any error-class prefixes ("Error:", "PaneError:") say nothing to the person.
+  let reason = raw.replace(/^Error invoking remote method '[^']*':\s*/, '');
+  while (/^\w*Error:\s*/.test(reason)) reason = reason.replace(/^\w*Error:\s*/, '');
+  // One line: a body, a page or a stack after the first line is not the reason.
+  reason = (reason.split('\n')[0] ?? '').trim();
+  // Text before a JSON body or a page ("Host answered 502: {...}") is the reason; the body is not.
+  const body = reason.search(/[{[<]/);
+  if (body >= 0) reason = reason.slice(0, body).trim().replace(/[:\s]+$/, '');
+  if (reason && !/[.!?]$/.test(reason) && body > 0) reason = `${reason}.`;
+  if (!reason || /^(null|undefined|\[object \w+\])$/i.test(reason)) return generic;
   return reason.length > MAX_REASON ? `${reason.slice(0, MAX_REASON - 1).trimEnd()}…` : reason;
 }
