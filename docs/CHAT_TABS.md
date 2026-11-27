@@ -456,7 +456,9 @@ Auto-pause (Settings > Pause) stops the agent of a chat tab idle for
 Pane on screen and a tab that is working, holds a queued message or waits on the
 person. The paused tab keeps showing its conversation and controls; opening it,
 sending it a message or using its model, mode or `/resume` controls resumes the
-agent in the same conversation.
+agent in the same conversation. A Session whose chat is paused this way reads as paused
+in the sidebar once its Panes are paused too, and its **Resume** (or `runpane
+sessions resume`, `runpane panes resume`) starts the chat again.
 
 ## Cost
 

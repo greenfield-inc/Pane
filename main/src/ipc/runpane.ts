@@ -3693,15 +3693,21 @@ async function pauseTabs(services: AppServices, scope: RunpanePauseScope, panelI
   };
 }
 
-/** Resumes the paused tabs in scope through the same restart `panels resume` runs. Running tabs are left alone. */
+/**
+ * Resumes the paused tabs in scope through the same restart `panels resume` runs. Running tabs are left alone.
+ * Chat tabs count too: Pause leaves them running, but idle auto-pause pauses them, and the Session then reads
+ * as paused, so its Resume must start them again (T-134 QA F-1).
+ */
 async function resumeTabs(services: AppServices, registry: PaneCommandRegistry, scope: RunpanePauseScope, paneIds: readonly string[]): Promise<RunpanePauseResult> {
-  const panelIds = terminalPanelIdsOf(paneIds);
+  const panelIds = [...terminalPanelIdsOf(paneIds), ...chatPanelIdsOf(paneIds)];
   // Read before resuming: resume clears the marks that record which run scripts Pause stopped.
   const scripts = panesWithStoppedRunScripts(paneIds);
   const paused = panelIds.filter(isPanelPaused);
   const results = await mapWithConcurrency(paused, DEFAULT_RESUME_CONCURRENCY, async (panelId) => {
     try {
-      await resumeTerminalPanel(services, resolveTerminalPanel(panelId), {});
+      const panel = resolvePanel(panelId);
+      if (panel.type === 'chat') await resumeChatTab(panel);
+      else await resumeTerminalPanel(services, resolveTerminalPanel(panelId), {});
       return { panelId };
     } catch (error) {
       return { panelId, error: reasonOf(error) };

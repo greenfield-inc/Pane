@@ -112,6 +112,12 @@ export function getChatTabManager(): ChatTabManager {
     onStatus: event => terminalPanelManager.emit('agent-status', event),
     onView: view => notifyBridge?.observe(view),
     onClosed: panelId => { notifyBridge?.forget(panelId); forgetTab(panelId); },
+    // A chat pausing or resuming can change whether its Pane and Session read as paused (T-134 QA F-1).
+    // No tab ids: Notify withdraws cards only for terminal pauses, as before.
+    onPausedChange: (panelId, paused) => {
+      const paneId = panelManager.getPanel(panelId)?.sessionId;
+      if (paneId) terminalPanelManager.emit('pause-changed', { panelIds: [], paneIds: [paneId], paused });
+    },
     openConversations,
     agentName: chatAgentName,
     onInitialized: (agent, response) => {
