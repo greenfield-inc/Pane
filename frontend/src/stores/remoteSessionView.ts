@@ -6,7 +6,8 @@ import { boundary, decodeOptionalBoundary } from '../../../shared/validation/bou
 import type { ChatTabClient, ChatTabView } from '../../../shared/types/chatTab';
 import { decodeChatTabEvent, decodeChatTabView } from '../../../shared/types/chatTabDecoders';
 import type { OrchestrationSessionOpenResult } from '../../../shared/types/orchestrationSession';
-import { SESSION_SNAPSHOT_MESSAGE_LIMIT, type SessionSnapshot } from '../../../shared/types/sessionSnapshot';
+import type { SessionSnapshot } from '../../../shared/types/sessionSnapshot';
+import { firstPaintWindow } from '../../../shared/chatTabViewer';
 import type { Session } from '../types/session';
 
 /**
@@ -110,7 +111,7 @@ function readMirror(machineId: string, sessionId: string): void {
     .finally(() => {
       mirrorReads.delete(key);
       // A newer copy arrived while this one was read.
-      if (isTarget(machineId, sessionId)) readMirror(machineId, sessionId);
+      if (isTarget(machineId, sessionId) && mirrorListing(machineId)?.sessions[sessionId] !== revision) readMirror(machineId, sessionId);
     });
   mirrorReads.set(key, read);
 }
@@ -231,13 +232,6 @@ export function showFullRemoteChat(machineId: string, panelId: string, full: boo
   else fullChats.delete(key);
 }
 
-/** The newest messages a first paint draws: the window the mirror holds (D-3). Drawing 200 takes a long chat ~95 ms. */
-export function firstPaintWindow(chat: ChatTabView): ChatTabView {
-  const transcript = chat.transcript;
-  const extra = transcript ? transcript.messages.length - SESSION_SNAPSHOT_MESSAGE_LIMIT : 0;
-  if (!transcript || extra <= 0) return chat;
-  return { ...chat, transcript: { ...transcript, start: transcript.start + extra, messages: transcript.messages.slice(extra) } };
-}
 
 /**
  * A read-only chat client for one machine's Sessions shown under the cursor: reads answer at once

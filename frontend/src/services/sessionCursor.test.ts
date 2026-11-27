@@ -307,6 +307,33 @@ describe("another machine's Sessions under the cursor (T-116 PR 6)", () => {
     expect(machineRead).toHaveBeenCalledWith('build', 'orchestration-sessions:peek', [{ sessionId: 'c' }, { chatTabs: true, chatAgents: true }]);
   });
 
+  it('reads a Session the mirror answers it no longer holds once, not again and again', async () => {
+    const { cursor } = await setup();
+    await mirrored();
+    cursor.showSessionAtCursor('b', 'build');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(mirrorSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers a remote chat's reads with its newest 30 messages until the cursor stays on it, then everything held", async () => {
+    const { cursor } = await setup();
+    const { remote } = await mirrored();
+    const messages = Array.from({ length: 200 }, (_, index) => ({ id: `m${index}`, role: 'user', parts: [] }));
+    const chat = { panelId: 'remote-panel', generation: 1, transcript: { panelId: 'remote-panel', generation: 1, revision: 9, start: 0, messages } };
+    mirrorSession.mockResolvedValue({ sessionId: 'b', revision: 4, session: { id: 'b', name: 'b' }, chat, tabs: [], layout: null });
+    cursor.showSessionAtCursor('b', 'build');
+    await vi.advanceTimersByTimeAsync(0);
+    const client = remote.remoteChatClient('build', 'Build box');
+
+    const passing = await client.get('remote-panel');
+    expect(passing.transcript?.messages.map(message => message.id)).toEqual(messages.slice(170).map(message => message.id));
+    expect(passing.transcript?.start).toBe(170);
+    remote.showFullRemoteChat('build', 'remote-panel', true);
+    expect((await client.get('remote-panel')).transcript?.messages).toHaveLength(200);
+    remote.showFullRemoteChat('build', 'remote-panel', false);
+    expect((await client.get('remote-panel')).transcript?.messages).toHaveLength(30);
+  });
+
   it('reads nothing from a machine that is offline: it shows what the mirror last had', async () => {
     const { cursor } = await setup();
     await mirrored();
