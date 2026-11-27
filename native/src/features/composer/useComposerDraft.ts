@@ -12,8 +12,10 @@ export function useComposerDraft(key: string | null) {
   return {
     draft: draft.text,
     selection: selection.key === key ? selection.moveTo : undefined,
-    // This callback deliberately owns this snapshot, even after navigation.
-    confirmDelivery: () => composerDraftStore.confirm(draft),
+    /** The draft is on its way; Send waits until the host confirms it. */
+    sending: draft.sending === true,
+    /** Delivers the draft once; the text stays until `deliver` resolves. See DraftStore.send. */
+    send: (deliver: (text: string) => Promise<void>) => composerDraftStore.send(key, deliver),
     setDraft: (next: SetStateAction<string>) => {
       composerDraftStore.update(key, next);
       if (composerDraftStore.read(key).text === '') selection.cursor.select(null);

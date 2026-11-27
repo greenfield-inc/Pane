@@ -3,25 +3,32 @@ import { AppState } from 'react-native';
 import type { WebView, WebViewMessageEvent } from 'react-native-webview';
 
 import { CONNECTION_GRACE_MS } from '@shared/remoteClient';
+import type { MissionControlSnapshotResult } from '@shared/types/missionControl';
 
-import { invokeChannel, useDaemon, useDaemonEvent } from '@/daemon';
-import { useTheme } from '@/theme';
+import { isReadOnlyProfile } from '@/auth/access';
+import { invokeChannel, useDaemon, useDaemonEvent, useReadOnlyHost } from '@/daemon';
+import { useDisplayPreferences, useTheme } from '@/theme';
 
 import { connectionMark, perfMark } from '../perf/perfMarks';
 
 import { parsePageEvent, type TerminalCommand } from './bridge';
 import { TerminalSession, type TerminalSize } from './terminalSession';
 import { keepScreen, keptScreen as keptScreenOf } from './keptScreens';
-import { lastTerminalSize, rememberTerminalSize, TERMINAL_FONT_SIZE } from './terminalSize';
+import { lastTerminalSize, rememberTerminalSize } from './terminalSize';
 
 /** The host forgets viewers after a few minutes; the web app re-announces every minute too. */
 const VISIBILITY_REFRESH_MS = 60_000;
 /** Keyboard and rotation animations resize the view every frame; tell the PTY once it settles. */
 const RESIZE_SETTLE_MS = 150;
+/** A watched terminal's owner may resize it at any time, and nothing announces it. */
+const OWNER_SIZE_CHECK_MS = 10_000;
+/** After a fold or a turn reaches the computer, how long the screen stays covered for its redraw. */
+const REDRAW_WAIT_MS = 400;
 /** The computer says an agent is ready when it first draws, or after 10 s regardless. */
 const AGENT_READY_LIMIT_MS = 12_000;
 
-export type TerminalStatus = 'loading' | 'ready' | 'error';
+/** `stopped`: not running on the host, and this phone only watches, so it can't start it. */
+export type TerminalStatus = 'loading' | 'ready' | 'error' | 'stopped';
 
 /**
  * Connects one terminal panel to the xterm WebView. Render the WebView with
@@ -29,6 +36,7 @@ export type TerminalStatus = 'loading' | 'ready' | 'error';
  */
 export function useTerminal(panelId: string, sessionId: string) {
   const { client, connection, profile } = useDaemon();
+  const readOnly = useReadOnlyHost();
   // The rows this terminal showed last time it was open, painted until its screen is read again.
   const [keptScreen] = useState(() => keptScreenOf(profile.id, panelId));
   // Set when this screen starts the panel: its agent is launching until the computer says it's ready.
@@ -44,11 +52,19 @@ export function useTerminal(panelId: string, sessionId: string) {
   // Read by the page's messages: a screen scrolled back is not kept, since a revisit opens at the bottom.
   const scrolledBack = useRef(false);
   const [screenText, setScreenText] = useState('');
+  // A fold or a turn narrows or widens the view, and the old screen shows cut off until the computer
+  // redraws: covered from the first change until output follows the settled size, or REDRAW_WAIT_MS passes.
+  const [refitting, setRefitting] = useState(false);
+  const awaitingRedraw = useRef(false);
   // Starts from the size the last page measured, so the screen is read while this page loads.
   const [size, setSize] = useState<TerminalSize | null>(lastTerminalSize);
   // The page can take commands; until then a screen read waits here, and output after it waits in `pending`.
   const pageReady = useRef(false);
   const pageLoads = useRef(0);
+  // The last restore found the tab not running, with nothing this phone may start.
+  const notRunning = useRef(false);
+  // While this phone only watches: the size the terminal runs at on its computer.
+  const ownerSize = useRef<TerminalSize | null>(null);
   const pendingScreen = useRef<string | null>(null);
 
   // Output arrives in bursts of small events; hand it to xterm once per frame.
@@ -65,17 +81,29 @@ export function useTerminal(panelId: string, sessionId: string) {
     if (!pending.current || !pageReady.current) return;
     send({ type: 'write', data: pending.current });
     pending.current = '';
+    if (awaitingRedraw.current) {
+      awaitingRedraw.current = false;
+      setRefitting(false);
+    }
   };
 
   /** Draws a screen read from the host: the terminal now matches the computer. */
   const showScreen = (data: string) => {
+    if (ownerSize.current) send({ type: 'grid', cols: ownerSize.current.cols, rows: ownerSize.current.rows });
     send({ type: 'reset', data });
     // A screen read after a return, open or switch.
     connectionMark('terminal-screen', { repeat: true });
     perfMark('terminal', 'screen', { repeat: true });
     setHasContent(true);
-    setStatus('ready');
+    setStatus(notRunning.current ? 'stopped' : 'ready');
     setError(null);
+  };
+
+  /** The terminal's size on its computer; null when it isn't running or the computer didn't answer. */
+  const readOwnerSize = async (): Promise<TerminalSize | null> => {
+    const answer = await invokeChannel<MissionControlSnapshotResult>(client, 'mission-control:snapshots', [{ panelIds: [panelId], maxLines: 1 }]).catch(() => null);
+    const found = answer?.snapshots.find(snapshot => snapshot.panelId === panelId);
+    return found?.cols && found.rows ? { cols: found.cols, rows: found.rows } : null;
   };
 
   const [session] = useState(() => new TerminalSession({
@@ -88,6 +116,7 @@ export function useTerminal(panelId: string, sessionId: string) {
         // Output buffered for the old screen is replaced, but the host still needs its ack.
         if (pending.current) session.ack(pending.current.length);
         pending.current = '';
+        notRunning.current = false;
         if (pageReady.current) showScreen(data);
         else pendingScreen.current = data;
       },
@@ -96,7 +125,16 @@ export function useTerminal(panelId: string, sessionId: string) {
         frame.current ??= requestAnimationFrame(flush);
       },
     },
+    // The output only lines up at the owner's size, which a phone that only watches never changes.
+    beforeSnapshot: async () => {
+      if (isReadOnlyProfile(profile)) ownerSize.current = await readOwnerSize() ?? ownerSize.current;
+    },
     onStart: () => setStartedAt(Date.now()),
+    onNotRunning: () => {
+      notRunning.current = true;
+      setStartedAt(null);
+      setStatus('stopped');
+    },
     onError: cause => {
       // A restore cut short by a reconnect is retried once the connection is back.
       if (client.getState().status !== 'connected') return;
@@ -105,7 +143,14 @@ export function useTerminal(panelId: string, sessionId: string) {
     },
   }));
 
-  useDaemonEvent('terminal:output', event => session.receiveOutput(event.args[0]));
+  useDaemonEvent('terminal:output', event => {
+    session.receiveOutput(event.args[0]);
+    // Someone started the tab on its computer: read its screen.
+    if (notRunning.current && (event.args[0] as { panelId?: unknown } | undefined)?.panelId === panelId) {
+      notRunning.current = false;
+      if (size) void session.restore(size);
+    }
+  });
   useDaemonEvent('terminal:cliReady', event => {
     if ((event.args[0] as { panelId?: unknown } | undefined)?.panelId !== panelId) return;
     perfMark('terminal', 'agent-ready');
@@ -122,8 +167,14 @@ export function useTerminal(panelId: string, sessionId: string) {
   });
 
   useEffect(() => client.onRestore(async signal => {
-    if (!signal.aborted && size) await session.restore(size);
-  }, 'terminal'), [client, session, size]);
+    if (signal.aborted || !size) return;
+    if (!isReadOnlyProfile(profile)) {
+      await session.restore(size);
+      return;
+    }
+    // The owner's size can only be read once connected. A screen not drawn yet restores there anyway (below).
+    if (session.isLive) void client.whenConnected(CONNECTION_GRACE_MS).then(() => session.restore(size), () => undefined);
+  }, 'terminal'), [client, profile, session, size]);
 
   // Restore once the page has measured itself. A connection that comes back, after a drop or a
   // return to the app, restores through the listener above: the event stream does not replay
@@ -157,14 +208,42 @@ export function useTerminal(panelId: string, sessionId: string) {
     };
   }, [session]);
 
+  const checkOwnerSize = useEffectEvent(async () => {
+    const shown = ownerSize.current;
+    const now = await readOwnerSize();
+    if (now && size && session.isLive && (now.cols !== shown?.cols || now.rows !== shown.rows)) await session.restore(size);
+  });
+  const watching = readOnly && status === 'ready' && connection.status === 'connected';
+  useEffect(() => {
+    if (!watching) return undefined;
+    const timer = setInterval(() => void checkOwnerSize(), OWNER_SIZE_CHECK_MS);
+    return () => clearInterval(timer);
+  }, [watching]);
+
   // Settle resizes before telling the host.
   useEffect(() => {
     if (!size || status !== 'ready') return;
-    const timer = setTimeout(() => session.resize(size), RESIZE_SETTLE_MS);
+    const timer = setTimeout(() => {
+      session.resize(size);
+      // A fold or a turn changes the space every terminal gets, so the next one opens at this size.
+      rememberTerminalSize(size);
+      awaitingRedraw.current = true;
+    }, RESIZE_SETTLE_MS);
     return () => clearTimeout(timer);
   }, [session, size, status]);
+  useEffect(() => {
+    if (!refitting) return undefined;
+    // A shell at its prompt doesn't redraw; uncover once the redraw had its time.
+    const timer = setTimeout(() => {
+      awaitingRedraw.current = false;
+      setRefitting(false);
+    }, RESIZE_SETTLE_MS + REDRAW_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [refitting, size]);
 
-  const themeCommand: TerminalCommand = { type: 'theme', theme: theme.terminal, fontSize: TERMINAL_FONT_SIZE };
+  // Settings › Display › Terminal font size: a change refits the page, which resizes the PTY once it settles.
+  const fontSize = useDisplayPreferences(state => state.terminalFontSize);
+  const themeCommand: TerminalCommand = { type: 'theme', theme: theme.terminal, fontSize };
   const themeJson = JSON.stringify(themeCommand);
   useEffect(() => {
     webView.current?.injectJavaScript(`window.paneTerminal&&window.paneTerminal.receive(${themeJson});true;`);
@@ -205,7 +284,8 @@ export function useTerminal(panelId: string, sessionId: string) {
         // The page only generates input: replies to the agent's terminal queries and
         // scroll reports. One that cannot be sent while reconnecting is dropped; a
         // broken connection shows in the header, not over the terminal.
-        void session.sendInput(message.data).catch(() => undefined);
+        // A phone that only watches sends nothing: the computer's own screens answer the agent.
+        if (!readOnly) void session.sendInput(message.data).catch(() => undefined);
         break;
       case 'written':
         session.ack(message.units);
@@ -233,6 +313,14 @@ export function useTerminal(panelId: string, sessionId: string) {
     },
     status,
     hasContent,
+    /** The view's width changed and the computer hasn't redrawn yet. */
+    refitting,
+    /** The view's width changed: cover the screen until the computer redraws it at the new size. */
+    coverRefit: () => {
+      if (!hasContent) return;
+      awaitingRedraw.current = false;
+      setRefitting(true);
+    },
     keptScreen,
     /** This screen started an agent's panel and the agent hasn't drawn yet (up to 12 s). */
     agentStarting: startedAt !== null && !agentReady,
@@ -256,6 +344,8 @@ export function useTerminal(panelId: string, sessionId: string) {
       if (size) await session.restore(size);
     },
     scrollLines: (lines: number) => send({ type: 'scroll', lines }),
+    /** Watching: moves the view over the owner's grid. */
+    pan: (dx: number, dy: number) => send({ type: 'pan', dx, dy }),
     scrollToBottom: () => send({ type: 'scrollToBottom' }),
   };
 }

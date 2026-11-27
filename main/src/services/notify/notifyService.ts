@@ -30,6 +30,7 @@ import {
   type NotifyWindowSize,
   type NotifyTodoLink,
 } from '../../../../shared/types/notify';
+import type { CardFields } from './cardCheck';
 import { type NotifyQueueEnvironment, NotifyQueue, type NotifyAgentActed, type MoveStayed } from './notifyQueue';
 import { PaneError, paneErrorText, reasonOf } from '../../../../shared/paneError';
 import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
@@ -460,15 +461,16 @@ export class NotifyService {
 
   /** The `runpane:notify` daemon command. */
   ask(request: NotifyRequest, signal?: AbortSignal): Promise<NotifyResult> {
-    const { resume, relays, aboutSession, returnAfterMs, caller, took, tookAs, status, update, asked, whatChanged, todoRef, ...question } = request;
+    const { resume, relays, aboutSession, returnAfterMs, caller, took, tookAs, close, status, update, asked, whatChanged, todoRef, ...question } = request;
     const source = this.describeSource(caller);
-    if (!resume && took === undefined && update === undefined) {
+    if (!resume && took === undefined && update === undefined && close === undefined) {
       const todo = this.deps.todoOf?.(source.panelId, todoRef);
       if (todo) question.todo = todo;
     }
     // A reader saying how it took a reply, or updating the approval: not a new ask, so a worker may too.
     const reader = { paneId: source.paneId, panelId: source.panelId };
     if (took !== undefined) return Promise.resolve(this.queue.took(reader, took, tookAs ?? 'answer', status));
+    if (close !== undefined) return Promise.resolve(this.queue.withdrawByAsker(reader, close));
     if (update !== undefined) {
       return this.queue.update(reader, update, {
         asked: asked ?? '', whatChanged: whatChanged ?? '',
@@ -492,6 +494,15 @@ export class NotifyService {
       source,
       connected: source.autopilot ? this.aboutSession(aboutSession) : undefined,
     }, signal);
+  }
+
+  /** The card an --update or --relays request changes, as it stands; undefined for a new card. */
+  storedCard(request: NotifyRequest): CardFields | undefined {
+    if (request.update !== undefined) {
+      const source = this.describeSource(request.caller);
+      return this.queue.storedCard({ update: request.update, reader: { paneId: source.paneId, panelId: source.panelId } });
+    }
+    return request.relays ? this.queue.storedCard({ relays: request.relays }) : undefined;
   }
 
   /** Autopilot's own item links to the Session it's about, or to its chat (D-168). */

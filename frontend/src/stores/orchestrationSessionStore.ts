@@ -1,9 +1,11 @@
+import { isReadOnlyHost } from './readOnlyHostStore';
 import { create } from 'zustand';
 import { API } from '../utils/api';
 import type {
   OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
   OrchestrationSessionRecord,
+  OrchestrationSessionSummary,
   OrchestrationSessionSelector,
   OrchestrationSessionUpdateInput,
   OrchestrationSessionView,
@@ -12,14 +14,14 @@ import type { Session } from '../types/session';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import { clearSessionViewCache, openSessionView } from './sessionViewCache';
 
-export function isArchivedOrchestrationSession(session: OrchestrationSessionRecord): boolean {
+export function isArchivedOrchestrationSession(session: Pick<OrchestrationSessionSummary, 'archived'>): boolean {
   return session.archived === true;
 }
 
 export type OrchestrationSessionAvailability = 'idle' | 'loading' | 'ready' | 'unavailable' | 'error';
 
 interface OrchestrationSessionState {
-  sessions: OrchestrationSessionRecord[];
+  sessions: OrchestrationSessionSummary[];
   selectedSessionId?: string;
   availability: OrchestrationSessionAvailability;
   error: string | null;
@@ -56,7 +58,7 @@ interface OrchestrationSessionState {
    * All machines read), so a Session the list has not loaded yet still settles with one open call
    * and keeps `resume: false` instead of falling back to `select`.
    */
-  settle: (sessionId: string, hostId: string | null | undefined, options?: { resume?: boolean; record?: OrchestrationSessionRecord }) => Promise<void>;
+  settle: (sessionId: string, hostId: string | null | undefined, options?: { resume?: boolean; record?: OrchestrationSessionSummary }) => Promise<void>;
   invalidateHost: () => void;
   load: () => Promise<void>;
   refresh: (options?: { adoptServerSelection?: boolean; throwOnError?: boolean }) => Promise<void>;
@@ -95,7 +97,7 @@ function ensureSuccess<T>(response: { success: boolean; data?: T; error?: string
 }
 
 function activeSessionIdFromList(
-  sessions: OrchestrationSessionRecord[],
+  sessions: OrchestrationSessionSummary[],
   selectedSessionId: string | undefined,
 ): string | undefined {
   if (!selectedSessionId) return undefined;
@@ -115,7 +117,7 @@ function revisionAfter(state: OrchestrationSessionState, selectedSessionId: stri
   return adoptsRemembered ? state.selectionRevision + 1 : state.selectionRevision;
 }
 
-function applyList(data: OrchestrationSessionListResult, ownSelectionId?: string): void {
+function applyList(data: OrchestrationSessionListResult<OrchestrationSessionSummary>, ownSelectionId?: string): void {
   listsApplied += 1;
   useOrchestrationSessionStore.setState((state) => {
     const selectedSessionId = activeSessionIdFromList(data.sessions, ownSelectionId)
@@ -295,7 +297,8 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
         selectionVisits: { ...state.selectionVisits, [intended.id]: (state.selectionVisits[intended.id] ?? 0) + 1 } }));
     }
     try {
-      const data = ensureSuccess(await API.orchestrationSessions.select(selector), 'Failed to select Session');
+      // A read-only host keeps its own last-used Session; this window only shows another one.
+      const data = ensureSuccess(await (isReadOnlyHost() ? API.orchestrationSessions.list() : API.orchestrationSessions.select(selector)), 'Failed to select Session');
       if (generation === operationGeneration) {
         refreshSequence += 1;
         applyList(data, intended?.id);

@@ -29,6 +29,8 @@ const HISTORY_PAGE = 500;
 /** Closed chats that keep their newest messages, so reopening one paints them at once. */
 const KEPT_CLOSED = 5;
 const KEPT_MESSAGES = 200;
+/** Messages a chat passed over by the cursor draws first (see firstPaintWindow). */
+const FIRST_PAINT_MESSAGES = 30;
 /** How long a window prime() painted counts as just read (T-87): the Session's call and this mount are one switch. */
 const PRIMED_FRESH_MS = 1000;
 /** How long after a primed window paints its catch-up read runs. */
@@ -59,6 +61,7 @@ export class ChatTabViewer {
   private startOnRead = true;
   /** When the window prime() last painted was read (performance.now()); a fresh one moves the attach's read after the paint. */
   private primedAt = 0;
+  private keepOnClose = true;
 
   constructor(private chatClient: ChatTabClient, readonly panelId: string) {}
 
@@ -101,12 +104,20 @@ export class ChatTabViewer {
    * and replaces it, with any events that arrived meanwhile.
    */
   prime(view: ChatTabView, readAt: number): void {
-    if (view.panelId !== this.panelId || this.state.transcript || !view.transcript) return;
+    if (view.panelId !== this.panelId) return;
+    // About to be shown: the chat it replaces closes before this one subscribes, and must not push
+    // this one's kept messages out of the five (T-116 PR 6). Until it subscribes it waits among the
+    // few primed ones, so a render thrown away (a deferred one, at key-repeat speed) keeps nothing for long.
+    if (this.listeners.size === 0) { removeClosed(this); keepPrimed(this); }
+    if (this.state.transcript || !view.transcript) return;
     this.state = { ...this.state, view: this.state.view ?? { ...view, transcript: undefined }, transcript: view.transcript, hasNewer: false };
     // Read this instant by the Session's call: the attach that follows reads again only after it paints.
     // A starting tab reads at once.
     if (view.status !== 'starting') this.primedAt = readAt;
   }
+
+  /** Whether this chat keeps its newest messages once closed (counted among the five). Another machine's shown chat doesn't. */
+  setKeepOnClose(keep: boolean): void { this.keepOnClose = keep; }
 
   setDraft(draft: string): void { this.publish({ draft }); }
   setPendingDelivery(pendingDelivery?: ChatTabSend): void { this.publish({ pendingDelivery }); }
@@ -135,6 +146,7 @@ export class ChatTabViewer {
     this.listeners.add(listener);
     if (!this.detach) {
       removeClosed(this);
+      removePrimed(this);
       this.attach();
     }
     return () => {
@@ -146,7 +158,7 @@ export class ChatTabViewer {
         this.detach = undefined;
         // Keep the draft, an unconfirmed send and, for a reopen, the newest messages; a window
         // scrolled back from the newest would paint the wrong end, so it goes.
-        const transcript = this.state.transcript;
+        const transcript = this.keepOnClose ? this.state.transcript : undefined;
         this.state = { ...this.state, transcript: transcript && !this.state.hasNewer ? newest(transcript) : undefined, hasNewer: false };
         this.pending = [];
         if (this.state.transcript) keepClosed(this);
@@ -166,12 +178,12 @@ export class ChatTabViewer {
       }
       if (this.state.hasNewer && event.generation === transcript.generation && event.index >= transcript.start + transcript.messages.length) {
         // Past the end of a window scrolled back from the newest: keep the window, track the revision.
-        if (event.revision > transcript.revision + 1) { void this.refresh(); return; }
+        if (event.revision > transcript.revision + 1) { void this.resync(); return; }
         if (event.revision === transcript.revision + 1) this.publishLive({ transcript: { ...transcript, revision: event.revision } });
         return;
       }
       const applied = applyChatTabEvent(transcript, event);
-      if (applied.resync) { void this.refresh(); return; }
+      if (applied.resync) { void this.resync(); return; }
       this.publishLive({ transcript: this.state.hasNewer ? applied.transcript : this.bounded(applied.transcript) });
     });
     const states = client.onState(view => {
@@ -182,7 +194,7 @@ export class ChatTabViewer {
       const finishedStarting = this.state.view?.status === 'starting' && view.status !== 'starting';
       if (finishedStarting) switchMark('chat:ready', { panelId: this.panelId });
       this.publish({ view: { ...view, transcript: undefined } });
-      if ((newGeneration || finishedStarting) && view.status !== 'starting') void this.refresh();
+      if ((newGeneration || finishedStarting) && view.status !== 'starting') void this.resync();
     });
     const reconnect = client.onReconnect?.(() => { void this.refresh(); });
     this.detach = () => { events(); states(); reconnect?.(); };
@@ -196,16 +208,35 @@ export class ChatTabViewer {
     this.detach = () => { clearTimeout(later); detach(); };
   }
 
+  /** The live events showed a gap or a new conversation run: the client may fetch fresher data first (`ChatTabClient.resync`). */
+  private resync(): Promise<void> {
+    if (this.loading) return this.loading;
+    return this.refresh(this.chatClient.resync?.(this.panelId));
+  }
+
   /** A fresh snapshot of the newest window, then any events that arrived while it loaded. */
-  refresh(): Promise<void> {
+  refresh(fetching?: Promise<void> | void): Promise<void> {
     if (this.loading) return this.loading;
     const transport = this.transport;
     switchMark('chat:get:start', { panelId: this.panelId });
-    const read = this.startOnRead ? this.chatClient.get(this.panelId, PAGE * 2) : this.chatClient.get(this.panelId, PAGE * 2, { start: false });
+    // A client fetching fresher data first (`resync`): the read waits for it, and the events heard
+    // meanwhile queue and apply onto its answer, so one fetch closes a gap even while the chat streams.
+    const get = () => (this.startOnRead ? this.chatClient.get(this.panelId, PAGE * 2) : this.chatClient.get(this.panelId, PAGE * 2, { start: false }));
+    const read = fetching ? fetching.catch(() => undefined).then(get) : get();
     const loading: Promise<void> = read.then(view => {
       switchMark('chat:get:end', { panelId: this.panelId, status: view.status, start: view.transcript?.start, n: view.transcript?.messages.length });
       if (transport !== this.transport) return;
       let transcript = view.transcript;
+      // A copy older than the window shown (a held copy behind the live events, T-116 PR 6) never
+      // replaces it: the conversation would jump backwards. The events that arrived meanwhile apply to
+      // the newer window, so they are neither lost nor taken for a gap. A host's own read is never older.
+      // A window scrolled back from the newest is never kept as the newest: the older copy is taken,
+      // and read again for what it lacks.
+      const shown = this.state.transcript;
+      if (transcript && shown && transcript.generation === shown.generation && transcript.revision < shown.revision) {
+        if (this.state.hasNewer) this.resyncNeeded = true;
+        else transcript = shown;
+      }
       let gap = false;
       for (const event of this.pending) {
         if (!transcript) break;
@@ -217,7 +248,7 @@ export class ChatTabViewer {
       if (gap) this.resyncNeeded = true;
       // Closed before this read landed: it keeps what a close keeps, and counts toward the five.
       const closed = this.listeners.size === 0;
-      if (closed && transcript) transcript = newest(transcript);
+      if (closed && transcript) transcript = this.keepOnClose ? newest(transcript) : undefined;
       this.publish({ view: { ...view, transcript: undefined }, transcript, hasNewer: false, error: gap ? this.state.error : this.state.pendingDelivery ? this.state.error : undefined });
       if (closed && transcript) keepClosed(this);
     }).catch(error => {
@@ -230,7 +261,7 @@ export class ChatTabViewer {
       // Only now does refresh() start a new fetch instead of returning this one.
       if (this.resyncNeeded) {
         this.resyncNeeded = false;
-        if (this.detach) void this.refresh();
+        if (this.detach) void this.resync();
       }
     });
     this.loading = loading;
@@ -320,7 +351,10 @@ export class ChatTabViewer {
 
   /** Drops the messages kept for a reopen, once it is no longer among the chats closed most recently. */
   forgetMessages(): void {
-    if (this.listeners.size === 0) this.state = { ...this.state, transcript: undefined };
+    if (this.listeners.size > 0) return;
+    this.state = { ...this.state, transcript: undefined };
+    removeClosed(this);
+    removePrimed(this);
   }
 }
 
@@ -332,6 +366,21 @@ function newest(transcript: ChatTabTranscript): ChatTabTranscript {
 function removeClosed(viewer: ChatTabViewer): void {
   const at = closedWithMessages.indexOf(viewer);
   if (at >= 0) closedWithMessages.splice(at, 1);
+}
+
+/** Viewers primed for a render that hasn't subscribed yet, the most recent last (see prime). */
+const primedWaiting: ChatTabViewer[] = [];
+const KEPT_PRIMED = 3;
+
+function removePrimed(viewer: ChatTabViewer): void {
+  const at = primedWaiting.indexOf(viewer);
+  if (at >= 0) primedWaiting.splice(at, 1);
+}
+
+function keepPrimed(viewer: ChatTabViewer): void {
+  removePrimed(viewer);
+  primedWaiting.push(viewer);
+  while (primedWaiting.length > KEPT_PRIMED) primedWaiting.shift()?.forgetMessages();
 }
 
 function keepClosed(viewer: ChatTabViewer): void {
@@ -366,4 +415,16 @@ export class ChatTabViewerRegistry {
     else viewer.rebind(client);
     return viewer;
   }
+}
+
+/**
+ * The newest messages a first paint draws while a chat is only passed over (T-116 PR 6, D-6): 30,
+ * the window another machine's mirror holds (D-3). Drawing 200 takes a long chat ~95 ms, which a
+ * key repeat would wait behind.
+ */
+export function firstPaintWindow(chat: ChatTabView): ChatTabView {
+  const transcript = chat.transcript;
+  const extra = transcript ? transcript.messages.length - FIRST_PAINT_MESSAGES : 0;
+  if (!transcript || extra <= 0) return chat;
+  return { ...chat, transcript: { ...transcript, start: transcript.start + extra, messages: transcript.messages.slice(extra) } };
 }

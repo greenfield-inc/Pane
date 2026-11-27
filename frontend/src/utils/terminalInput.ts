@@ -1,3 +1,4 @@
+import { isReadOnlyHost } from '../stores/readOnlyHostStore';
 import { reportUnknownRemoteDelivery } from './remoteFailure';
 import { terminalTiming } from './terminalTiming';
 
@@ -9,6 +10,8 @@ import { terminalTiming } from './terminalTiming';
  * global unhandled-rejection alert, which would open a dialog per keystroke.
  */
 export function sendTerminalInput(panelId: string, data: string): void {
+  // A read-only host would refuse every key; nothing is sent.
+  if (isReadOnlyHost()) return;
   const started = terminalTiming ? performance.now() : 0;
   const delivery = window.electronAPI.invoke('terminal:input', panelId, data);
   if (terminalTiming) {

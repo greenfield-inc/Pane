@@ -36,6 +36,6 @@ export function DemoBadge() {
 
 const styles = StyleSheet.create({
   // A fixed footprint, so the header never shifts when the demo starts or ends.
-  badge: { width: 56, height: 24, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  badge: { width: 56, height: 24, flexShrink: 0, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   label: { fontWeight: '600' },
 });

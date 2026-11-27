@@ -3,39 +3,52 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 
+import { parseRelayPairingLink, type RelayPairingLink } from '@shared/remoteClient';
+
 import { Button, Icon, Text, TextField } from '@/ui';
 import { useTheme } from '@/theme';
 
 import { describeConnectionCode } from './describeCode';
+import { RelayPairPrompt } from './RelayPairPrompt';
 import { usePairing } from './usePairing';
 
 /**
  * The PWA's connection form (RemoteConnectionScreen): a "Connection Code"
  * box and one button that reads "Paste & Connect" while the box is empty.
- * Native additions: Scan QR, and a preview of the host the code points at.
+ * Native additions: Scan QR, a preview of the host the code points at, and a pairing QR's link
+ * (`https://runpane.net/pair#…`), which pairs the way scanning that QR does.
  */
 export function ConnectForm({ initialCode = '', onPaired }: { initialCode?: string; onPaired?: () => void }) {
   const theme = useTheme();
   const [code, setCode] = useState(initialCode);
   const [clipboardError, setClipboardError] = useState<string | null>(null);
+  const [relay, setRelay] = useState<{ code: string; link: RelayPairingLink } | null>(null);
   const pairing = usePairing(onPaired);
   const host = describeConnectionCode(code);
   const trimmed = code.trim();
 
+  const connect = (input: string) => {
+    const link = parseRelayPairingLink(input);
+    if (link) setRelay({ code: input, link });
+    else pairing.mutate({ code: input });
+  };
+
   const submit = async () => {
     setClipboardError(null);
     if (trimmed) {
-      pairing.mutate(trimmed);
+      connect(trimmed);
       return;
     }
     const pasted = (await Clipboard.getStringAsync()).trim();
     if (!pasted) {
-      setClipboardError('The clipboard is empty. Copy a pane-remote:// code first.');
+      setClipboardError('The clipboard is empty. Copy a pairing link or a pane-remote:// code first.');
       return;
     }
     setCode(pasted);
-    pairing.mutate(pasted);
+    connect(pasted);
   };
+
+  if (relay) return <RelayPairPrompt code={relay.code} link={relay.link} onPaired={onPaired} />;
 
   const error = pairing.error?.message ?? clipboardError;
 
@@ -44,7 +57,7 @@ export function ConnectForm({ initialCode = '', onPaired }: { initialCode?: stri
       <TextField
         testID="connect-code-input"
         label="Connection Code"
-        placeholder="pane-remote://..."
+        placeholder="https://runpane.net/pair#... or pane-remote://..."
         value={code}
         onChangeText={setCode}
         autoCapitalize="none"

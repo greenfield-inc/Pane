@@ -10,6 +10,7 @@ import { Icon, Text } from '@/ui';
 
 import { PausedBadge } from '../panes/StatusBadge';
 import { tabView } from './panels';
+import { Focusable } from '../controller/Focusable';
 
 /** Each tab type's icon and the word VoiceOver reads after its title. */
 export const TAB_TYPES: Record<ToolPanelType, { ios: SFSymbol; android: AndroidSymbol; label: string }> = {
@@ -28,24 +29,35 @@ export const TAB_TYPES: Record<ToolPanelType, { ios: SFSymbol; android: AndroidS
 const CHAT = { ios: 'bubble.left', android: 'chat_bubble', label: 'chat' } as const;
 
 /** A long press's menu for tab `title`: View live (a page tab an agent used), Close or Cancel. */
-export function offerClose(title: string, close: () => void, viewLive?: () => void) {
+export function offerClose(title: string, close: () => void, viewLive?: () => void, extra?: TabMenuAction) {
+  const actions = [
+    ...(extra ? [extra] : []),
+    ...(viewLive ? [{ label: 'View live', onPress: viewLive }] : []),
+  ];
   if (Platform.OS === 'ios') {
-    const options = viewLive ? ['View live', 'Close', 'Cancel'] : ['Close', 'Cancel'];
-    const closeIndex = viewLive ? 1 : 0;
+    const options = [...actions.map(action => action.label), 'Close', 'Cancel'];
+    const closeIndex = actions.length;
     ActionSheetIOS.showActionSheetWithOptions(
       { title, options, destructiveButtonIndex: closeIndex, cancelButtonIndex: closeIndex + 1 },
       index => {
         if (index === closeIndex) close();
-        else if (viewLive && index === 0) viewLive();
+        else actions[index]?.onPress();
       },
     );
   } else {
+    // Android shows three buttons at most; with two actions, a tap outside the dialog cancels.
     Alert.alert(title, undefined, [
-      { text: 'Cancel', style: 'cancel' },
-      ...(viewLive ? [{ text: 'View live', onPress: viewLive }] : []),
+      ...(actions.length < 2 ? [{ text: 'Cancel', style: 'cancel' as const }] : []),
+      ...actions.map(action => ({ text: action.label, onPress: action.onPress })),
       { text: 'Close', style: 'destructive', onPress: close },
-    ]);
+    ], { cancelable: true });
   }
+}
+
+/** A tab menu's action beside Close, such as Open beside. */
+export interface TabMenuAction {
+  label: string;
+  onPress: () => void;
 }
 
 /** A tab the screen draws itself, ahead of the Pane's tabs (an approval and what it links). */
@@ -88,12 +100,18 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId
   const strip = useRef<ScrollView>(null);
   const tabFrames = useRef(new Map<string, { x: number; width: number }>());
   const view = useRef({ offset: 0, width: 0 });
+  // Noted at once: a fold lays the strip out several times before its scroll event arrives.
+  const scrollTo = (x: number) => {
+    view.current.offset = x;
+    strip.current?.scrollTo({ x, animated: true });
+  };
   const revealSelected = () => {
     const frame = selectedId ? tabFrames.current.get(selectedId) : undefined;
     const { offset, width } = view.current;
     if (!frame || width === 0) return;
-    if (frame.x < offset) strip.current?.scrollTo({ x: Math.max(0, frame.x - 8), animated: true });
-    else if (frame.x + frame.width > offset + width) strip.current?.scrollTo({ x: frame.x + frame.width - width + 8, animated: true });
+    // A tab wider than the window shows its start.
+    if (frame.x < offset) scrollTo(Math.max(0, frame.x - 8));
+    else if (frame.x + frame.width > offset + width) scrollTo(Math.max(0, Math.min(frame.x - 8, frame.x + frame.width - width + 8)));
   };
   // A tab opened from a link, a notification or the computer can sit outside the strip's window.
   useEffect(revealSelected, [selectedId]);
@@ -105,7 +123,11 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId
     <View style={[styles.bar, { borderBottomColor: colors.border, backgroundColor: colors.surfaceRaised }]}>
       <ScrollView
         ref={strip}
-        onLayout={event => { view.current.width = event.nativeEvent.layout.width; }}
+        onLayout={event => {
+          view.current.width = event.nativeEvent.layout.width;
+          // A narrower window (a fold, a turn) can push the open tab out of view.
+          revealSelected();
+        }}
         onScroll={event => { view.current.offset = event.nativeEvent.contentOffset.x; }}
         scrollEventThrottle={64}
         horizontal
@@ -189,6 +211,7 @@ function StripTab({ id, title, icon, accessibilityLabel, accessibilityHint, sele
   const { colors } = theme;
   const tint = selected ? colors.text : dimmed ? colors.textMuted : colors.textSecondary;
   return (
+    <Focusable onActivate={onSelect}>
     <Pressable
       testID={`panel-tab-${id}`}
       onLayout={event => {
@@ -226,6 +249,7 @@ function StripTab({ id, title, icon, accessibilityLabel, accessibilityHint, sele
         {title}
       </Text>
     </Pressable>
+    </Focusable>
   );
 }
 

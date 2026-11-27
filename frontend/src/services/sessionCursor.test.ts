@@ -6,6 +6,11 @@ import type { TerminalPausedMark, ToolPanel } from '../../../shared/types/panels
 
 const peek = vi.fn();
 const getPaneLayout = vi.fn();
+/** The mirror's one-Session read, and another machine's reads (T-116 PR 6). */
+const mirrorSession = vi.fn();
+const machineRead = vi.fn();
+const machineRun = vi.fn();
+const followChat = vi.fn();
 
 const records = ['a', 'b', 'c'].map(id => {
   // SAFETY: the cursor reads only these record fields.
@@ -27,7 +32,12 @@ function heldView(sessionId: string, type: 'chat' | 'terminal') {
 
 async function setup(config: Partial<AppConfig> = {}) {
   vi.resetModules();
-  vi.stubGlobal('window', { addEventListener: vi.fn(), electronAPI: { orchestrationSessions: { peek }, uiState: { getPaneLayout } } });
+  vi.stubGlobal('window', { addEventListener: vi.fn(), electronAPI: {
+    orchestrationSessions: { peek },
+    uiState: { getPaneLayout },
+    machineMirror: { list: vi.fn(async () => []), session: mirrorSession, onChanged: vi.fn(() => () => undefined), followChat, onChatEvent: vi.fn(() => () => undefined) },
+    machines: { read: machineRead, run: machineRun },
+  } });
   const cursor = await import('./sessionCursor');
   const { useOrchestrationSessionStore } = await import('../stores/orchestrationSessionStore');
   const { useConfigStore } = await import('../stores/configStore');
@@ -49,6 +59,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   peek.mockResolvedValue({ success: true, data: { view: null, panels: [], layout: null } });
+  mirrorSession.mockResolvedValue(null);
+  machineRead.mockReturnValue(new Promise(() => undefined));
   getPaneLayout.mockResolvedValue({ success: true, data: null });
 });
 afterEach(() => { vi.useRealTimers(); });
@@ -256,5 +268,136 @@ describe('a load never holds the cursor (D-6)', () => {
     expect(store.getState().cursorSessionId).toBe('b');
     // b's first peek is still in flight: one peek per Session, not one per press.
     expect(peek.mock.calls.filter(([request]) => request.sessionId === 'b')).toHaveLength(1);
+  });
+});
+
+/** The owner's machine `build`, mirrored with Sessions `b` and `c` (the same ids as this computer's). */
+async function mirrored() {
+  const { useMachineMirrorStore } = await import('../stores/machineMirrorStore');
+  useMachineMirrorStore.setState({ listings: { build: { state: { machineId: 'build', sync: 'live', lastSeenAt: '2026-11-26T12:00:00.000Z', sessionCount: 2 }, sessions: { b: 4, c: 9 } } } });
+  const { useAllMachinesStore } = await import('../stores/allMachinesStore');
+  useAllMachinesStore.setState({ machines: [{ id: 'build', label: 'Build box', kind: 'remote', status: 'online', offlineSince: null, mine: true }] });
+  const remote = await import('../stores/remoteSessionView');
+  return { remote, target: () => remote.useRemoteSessionView.getState().target };
+}
+
+describe("another machine's Sessions under the cursor (T-116 PR 6)", () => {
+  it("a mirrored machine's rows show at once; one not mirrored keeps Enter, and so does the setting off", async () => {
+    const { cursor, appConfig } = await setup();
+    await mirrored();
+    expect(cursor.rowShowsInstantly('build')).toBe(true);
+    expect(cursor.rowShowsInstantly('teammate')).toBe(false);
+    expect(cursor.rowShowsInstantly('build', { ...appConfig, arrowKeysOpenSessions: false })).toBe(false);
+  });
+
+  it('shows the Session from the mirror by machine and id, reads nothing of this computer, and a 1 s rest does nothing more', async () => {
+    const { cursor, store, settle } = await setup();
+    const { target } = await mirrored();
+    cursor.showSessionAtCursor('b');
+    cursor.showSessionAtCursor('b', 'build');
+
+    expect(target()).toEqual({ machineId: 'build', sessionId: 'b' });
+    // This computer's own `b` is not what the cursor shows any more.
+    expect(store.getState().cursorSessionId).toBeUndefined();
+    expect(mirrorSession).toHaveBeenCalledWith('build', 'b');
+    vi.advanceTimersByTime(5000);
+    expect(settle).not.toHaveBeenCalled();
+    expect(machineRun).not.toHaveBeenCalled();
+    expect(target()).toEqual({ machineId: 'build', sessionId: 'b' });
+  });
+
+  it('moving back to a row of this computer shows it there, and the remote one goes', async () => {
+    const { cursor, store } = await setup();
+    const { target } = await mirrored();
+    cursor.showSessionAtCursor('b', 'build');
+    cursor.showSessionAtCursor('c');
+    expect(target()).toBeUndefined();
+    expect(store.getState().cursorSessionId).toBe('c');
+  });
+
+  it('a mirror read and a host read that never answer delay no move, and the cursor ends where it was moved (D-6)', async () => {
+    const { cursor, store } = await setup();
+    const { target } = await mirrored();
+    mirrorSession.mockReturnValue(new Promise(() => undefined));
+    for (const id of ['b', 'c', 'x', 'b']) cursor.showSessionAtCursor(id, 'build');
+    expect(target()).toEqual({ machineId: 'build', sessionId: 'b' });
+    vi.advanceTimersByTime(1000);
+    cursor.showSessionAtCursor('c');
+    expect(target()).toBeUndefined();
+    expect(store.getState().cursorSessionId).toBe('c');
+  });
+
+  it("reads a Session the mirror lacks with one call, only for the row the cursor stays on (alternative b)", async () => {
+    const { cursor } = await setup();
+    await mirrored();
+    cursor.showSessionAtCursor('x', 'build');
+    vi.advanceTimersByTime(50);
+    cursor.showSessionAtCursor('y', 'build');
+    vi.advanceTimersByTime(1000);
+    expect(machineRead).toHaveBeenCalledTimes(1);
+    expect(machineRead).toHaveBeenCalledWith('build', 'orchestration-sessions:peek', [{ sessionId: 'y' }, { chatTabs: true, chatAgents: true }]);
+  });
+
+  it("fills a mirrored Session's newest 200 messages with one host read once the cursor rests, and none for rows passed over", async () => {
+    const { cursor } = await setup();
+    await mirrored();
+    cursor.showSessionAtCursor('b', 'build');
+    vi.advanceTimersByTime(30);
+    cursor.showSessionAtCursor('c', 'build');
+    vi.advanceTimersByTime(1000);
+    expect(machineRead).toHaveBeenCalledTimes(1);
+    expect(machineRead).toHaveBeenCalledWith('build', 'orchestration-sessions:peek', [{ sessionId: 'c' }, { chatTabs: true, chatAgents: true }]);
+  });
+
+  it('reads a Session the mirror answers it no longer holds once, not again and again', async () => {
+    const { cursor } = await setup();
+    await mirrored();
+    cursor.showSessionAtCursor('b', 'build');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(mirrorSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers a remote chat's reads with its newest 30 messages until the cursor stays on it, then everything held", async () => {
+    const { cursor } = await setup();
+    const { remote } = await mirrored();
+    const messages = Array.from({ length: 200 }, (_, index) => ({ id: `m${index}`, role: 'user', parts: [] }));
+    const chat = { panelId: 'remote-panel', generation: 1, transcript: { panelId: 'remote-panel', generation: 1, revision: 9, start: 0, messages } };
+    mirrorSession.mockResolvedValue({ sessionId: 'b', revision: 4, session: { id: 'b', name: 'b' }, chat, tabs: [], layout: null });
+    cursor.showSessionAtCursor('b', 'build');
+    await vi.advanceTimersByTimeAsync(0);
+    const client = remote.remoteChatClient('build', 'Build box');
+
+    const passing = await client.get('remote-panel');
+    expect(passing.transcript?.messages.map(message => message.id)).toEqual(messages.slice(170).map(message => message.id));
+    expect(passing.transcript?.start).toBe(170);
+    remote.showFullRemoteChat('build', 'remote-panel', true);
+    expect((await client.get('remote-panel')).transcript?.messages).toHaveLength(200);
+    remote.showFullRemoteChat('build', 'remote-panel', false);
+    expect((await client.get('remote-panel')).transcript?.messages).toHaveLength(30);
+  });
+
+  it('reads nothing from a machine that is offline: it shows what the mirror last had', async () => {
+    const { cursor } = await setup();
+    await mirrored();
+    const { useAllMachinesStore } = await import('../stores/allMachinesStore');
+    useAllMachinesStore.setState({ machines: [{ id: 'build', label: 'Build box', kind: 'remote', status: 'offline', offlineSince: '2026-11-26T12:00:00.000Z', mine: true }] });
+    cursor.showSessionAtCursor('x', 'build');
+    cursor.showSessionAtCursor('b', 'build');
+    vi.advanceTimersByTime(1000);
+    expect(machineRead).not.toHaveBeenCalled();
+    expect(mirrorSession).toHaveBeenCalledWith('build', 'b');
+  });
+
+  it('keeps one remote Session apart from this computer\'s Session of the same id', async () => {
+    const { cursor, cache } = await setup();
+    const { remote } = await mirrored();
+    cache.setState({ entries: { b: heldView('b', 'chat') } });
+    const snapshot = { sessionId: 'b', revision: 4, session: { id: 'b', name: 'Remote b' }, chat: { panelId: 'remote-panel' }, tabs: [], layout: null };
+    mirrorSession.mockResolvedValue(snapshot);
+    cursor.showSessionAtCursor('b', 'build');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(remote.cachedRemoteSession('build', 'b')?.snapshot).toEqual(snapshot);
+    expect(remote.cachedRemoteSession('local', 'b')).toBeUndefined();
+    expect(cache.getState().entries.b?.view.panel.id).toBe('panel-b');
   });
 });

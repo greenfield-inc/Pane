@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { BrowserFrame, BrowserInput, BrowserInputResult, BrowserTabView } from '@shared/types/browserStream';
 import { decodeBoundary } from '@shared/validation/boundaryDecoder';
+import { framePace } from '@shared/utils/browserFramePace';
 import { browserFrameAnswerSchema, browserInputResultSchema, browserTabViewSchema } from '@shared/validation/browserStreamSchemas';
 
 import { invokeChannel, useDaemon } from '@/daemon';
@@ -49,13 +50,18 @@ export function browserChannels(client: DaemonClient) {
 
 /**
  * A browser tab streamed from its host while `on` (the tab shown and the app active): the newest
- * frame, one read on its way at a time, and the tab's state. It reports the stream's `space` to
- * the host every 5 s and says when it stops. A failed read keeps the last frame and says why.
+ * frame, one read on its way at a time and slower while the page stays still (framePace), and the
+ * tab's state. It reports the stream's `space` to the host every 5 s and says when it stops. Off,
+ * it sends nothing, and answers to reads still on their way are dropped. A failed read keeps the
+ * last frame and says why. `hurry()` reads at once, for the person's input.
  */
-export function useBrowserStream(panelId: string, on: boolean, space: { width: number; height: number; scale: number } | undefined): BrowserStream & { wake(): void } {
+export function useBrowserStream(panelId: string, on: boolean, space: { width: number; height: number; scale: number } | undefined): BrowserStream & { wake(): void; hurry(): void } {
   const { client } = useDaemon();
   const [stream, setStream] = useState<BrowserStream>({});
   const wakeRef = useRef<() => void>(() => undefined);
+  const hurryRef = useRef<() => void>(() => undefined);
+  // Stable, so callbacks can hold it.
+  const [hurry] = useState(() => () => hurryRef.current());
   // Bumped by a wake, so the watch report goes again at once and the host remounts the page.
   const [wakes, setWakes] = useState(0);
 
@@ -81,6 +87,7 @@ export function useBrowserStream(panelId: string, on: boolean, space: { width: n
     let page: string | undefined;
     let frameRetry = RETRY_MIN_MS;
     let viewRetry = RETRY_MIN_MS;
+    const pace = framePace();
     const timers = new Set<ReturnType<typeof setTimeout>>();
     const sleep = (ms: number) => new Promise<void>(resolve => {
       const timer = setTimeout(() => { timers.delete(timer); resolve(); }, ms);
@@ -95,11 +102,13 @@ export function useBrowserStream(panelId: string, on: boolean, space: { width: n
           if ('frame' in answer) {
             seq = answer.frame.seq;
             setStream(current => ({ ...current, frame: answer.frame, stop: undefined }));
+            await pace.next(true);
           } else if ('stopped' in answer) {
             setStream(current => ({ ...current, stop: answer.stopped }));
             await sleep(2_000);
           } else {
             setStream(current => (current.stop === 'unreachable' ? { ...current, stop: undefined } : current));
+            await pace.next(false);
           }
         } catch (cause) {
           if (cancelled) return;
@@ -117,6 +126,8 @@ export function useBrowserStream(panelId: string, on: boolean, space: { width: n
           const view = decodeBoundary(await invokeChannel(client, 'browser:view', [panelId, version]), browserTabViewSchema);
           if (cancelled) return;
           viewRetry = RETRY_MIN_MS;
+          // The tab changed (the agent clicked or navigated): its page likely repaints, so read frames at once.
+          if (view.version !== version) pace.hurry();
           version = view.version;
           // A different page than before means the host loaded it again from its URL.
           const reloaded = page !== undefined && view.page !== undefined && view.page !== page;
@@ -135,15 +146,19 @@ export function useBrowserStream(panelId: string, on: boolean, space: { width: n
     wakeRef.current = () => {
       seq = 0;
       setStream(current => ({ ...current, stop: undefined }));
+      pace.hurry();
     };
+    hurryRef.current = pace.hurry;
     void frames();
     void views();
     return () => {
       cancelled = true;
+      pace.stop();
       for (const timer of timers) clearTimeout(timer);
       wakeRef.current = () => undefined;
+      hurryRef.current = () => undefined;
     };
   }, [client, panelId, on]);
 
-  return { ...stream, wake: () => { setWakes(count => count + 1); wakeRef.current(); } };
+  return { ...stream, wake: () => { setWakes(count => count + 1); wakeRef.current(); }, hurry };
 }

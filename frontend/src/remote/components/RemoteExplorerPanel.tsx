@@ -25,6 +25,8 @@ const MAX_EDIT_BYTES = 1024 * 1024;
 // Switching tabs or panes unmounts the Explorer. These keep its open file, by panel, and its
 // unsaved drafts and in-flight saves, by pane and path, until the app closes.
 const openFiles = new Map<string, RemoteFileEntry>();
+/** Shows `file` in an Explorer tab the next time it opens. */
+export function showInExplorer(panelId: string, file: RemoteFileEntry): void { openFiles.set(panelId, file); }
 const unsavedDrafts = new Map<string, TextState>();
 /** Resolves to null once `content` is on the host, or to the reason it is not. */
 const pendingSaves = new Map<string, { content: string; done: Promise<string | null> }>();

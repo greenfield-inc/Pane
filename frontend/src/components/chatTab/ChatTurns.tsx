@@ -9,6 +9,7 @@ import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { AgentChatMessage } from '../../../../shared/types/agentChat';
 import { imageOf, messageTime, planEntryKeys, stoppedText, turnDisplay, type WorkerNote, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
 import { responseText, userMarkdown } from '../../../../shared/chatTabMarkdown';
+import { ReferencedText } from './ReferencedText';
 import { ChatCopyButton } from './ChatCopyButton';
 import { DeviceCard, type ChatDeviceActions } from './DeviceCard';
 import { deviceMarkerOf } from '../../../../shared/deviceMarker';
@@ -16,6 +17,8 @@ import { deviceMarkerOf } from '../../../../shared/deviceMarker';
 export interface ChatTurnActions {
   /** Opens the file's diff in Pane's diff view. A diff never renders in the thread by itself. */
   onViewDiff?: (path: string) => void;
+  /** Opens a file a message names, relative to the tab's folder; false when it is not there. Without it file references are not clickable. */
+  onOpenFile?: (path: string) => Promise<boolean>;
   /** Opens a Session worker's Pane, at the given tab when one is named. */
   onOpenWorker?: (paneId: string, panelId?: string) => void;
   /** Device cards at device_open steps; without it, the step is a plain row. */
@@ -186,7 +189,7 @@ function UserImage({ content }: { content: JsonValue }) {
 
 function UserParts({ message }: { message: AgentChatMessage }) {
   return <>{message.parts.map((part, index) => part.type === 'text'
-    ? <span key={`${message.id}:${index}`} className="whitespace-pre-wrap">{part.text}</span>
+    ? <ReferencedText key={`${message.id}:${index}`} text={part.text} />
     : part.type === 'content' ? <UserImage key={`${message.id}:${index}`} content={part.content} /> : null)}</>;
 }
 

@@ -1,3 +1,5 @@
+import { ReadOnlyPill } from '../../components/machines/ReadOnlyPill';
+import { useReadOnlyHost } from '../../stores/readOnlyHostStore';
 import { ListTodo, LogOut, Menu } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus } from '../../../../shared/types/remoteDaemon';
@@ -29,6 +31,7 @@ export function RemoteStatusBar({
   onOpenSidebar,
   todos,
 }: RemoteStatusBarProps) {
+  const readOnly = useReadOnlyHost();
   const connected = status === 'connected';
   // Through Pane's servers, the connection bar under this header says what is wrong in plain words;
   // the client's own reason (a dropped stream, a refused token) stays out of the header.
@@ -86,7 +89,10 @@ export function RemoteStatusBar({
           <span className={`relative h-2.5 w-2.5 rounded-full transition-colors duration-normal ease-out-strong ${dotColor}`} />
         </span>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-text-primary">{title}</p>
+          <p className="flex min-w-0 items-center gap-2 text-sm font-semibold text-text-primary">
+            <span className="truncate">{title}</span>
+            {readOnly && <ReadOnlyPill />}
+          </p>
           <p className="truncate text-xs text-text-tertiary">
             {lastError || (updateIntent ? `Updating remote Pane. Session saved; reconnecting automatically. Operation ${updateIntent.id}, checkpoint confirmed.` : hostDetail)}
             {lastSeenAt ? ` · seen ${formatLastSeen(lastSeenAt)}` : ''}

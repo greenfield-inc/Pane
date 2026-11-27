@@ -58,8 +58,10 @@ export function MachineSwitcher({ machineId, hostname, onSelect, all, describe }
 
   useEffect(() => {
     let live = true;
-    void window.electronAPI.machines.list().then(list => { if (live) setMachines(list); }).catch(() => undefined);
-    const off = window.electronAPI.machines.onEvent(event => { if (event.type === 'machines') setMachines(event.machines); });
+    // A machine this computer only watches shares neither its health nor its usage.
+    const show = (list: MachineState[]) => setMachines(list.filter(machine => machine.access !== 'read'));
+    void window.electronAPI.machines.list().then(list => { if (live) show(list); }).catch(() => undefined);
+    const off = window.electronAPI.machines.onEvent(event => { if (event.type === 'machines') show(event.machines); });
     return () => { live = false; off(); };
   }, []);
 

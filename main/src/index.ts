@@ -139,8 +139,12 @@ import { usageManager } from './services/usage/usageManager';
 import { SharedCredentialSync } from './services/sharedCredentialSync';
 import { startSecretLeases } from './services/secretLeaseRuntime';
 import { MachineConnections, remoteMachineAccess } from './services/machineConnections';
+import { MachineMirror } from './services/machineMirror';
+import { readTailscaleStatus, tailnetLoginMatches, tailnetRelayKey } from './services/tailnetMachines';
+import { MACHINE_MIRROR_FOLDER } from '../../shared/types/machineMirror';
 import { RemoteMemberEvents } from './services/remoteMemberEvents';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
+import { registerMachineMirrorHandlers, type MachineMirrorHandlers } from './ipc/machineMirror';
 import { followSavedMachines, prepareNotifyForQuit } from './ipc/notify';
 import { LeaderboardService } from './services/leaderboardService';
 import { registerLeaderboardHandlers } from './ipc/leaderboard';
@@ -285,6 +289,10 @@ function setAppTitle() {
 // Service instances (configManager exported for shell preference access)
 export let configManager: ConfigManager;
 let sharedCredentialSync: SharedCredentialSync | null = null;
+/** This computer's copy of the chat Sessions on the owner's other machines (T-116 PR 5). */
+let machineMirror: MachineMirror | null = null;
+/** Told once the mirror exists, so windows that subscribed earlier hear it (review SF-2). */
+let machineMirrorHandlers: MachineMirrorHandlers | null = null;
 let machineConnections: MachineConnections | null = null;
 let logger: Logger;
 export let sessionManager: SessionManager;
@@ -1297,8 +1305,15 @@ async function initializeServices() {
       prepare: (route) => remotePaneClientController.prepareRoute(route),
       saveReport: (computerId, routeId, report) => remotePaneClientController.saveRoutesReport(computerId, routeId, report),
     },
+    // D-500: a saved computer is yours when its Tailscale owner is this computer's Tailscale login.
+    ownership: {
+      check: (tailnet) => tailnetLoginMatches(tailnet, readTailscaleStatus),
+      save: (computerId, mine, relay) => remotePaneClientController.saveOwnership(computerId, mine, relay),
+      relayKey: (tailnet, secret) => tailnetRelayKey(tailnet, secret, readTailscaleStatus),
+    },
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
+  machineMirrorHandlers = registerMachineMirrorHandlers(ipcMain, () => machineMirror, machineConnections);
   setDeviceMachines(machineConnections);
   const machines = machineConnections;
   powerMonitor.on('suspend', () => machines.suspend());
@@ -1680,6 +1695,17 @@ if (launchRemoteSetup) {
   // Share integration keys with the hosts this desktop has paired with.
   if (machineConnections) {
     machineConnections.start();
+    const connections = machineConnections;
+    machineMirror = new MachineMirror({
+      directory: join(getAppDirectory(), MACHINE_MIRROR_FOLDER),
+      machines: {
+        list: () => connections.list(),
+        subscribe: listener => connections.subscribe(listener),
+        read: (machineId, channel, args) => connections.read(machineId, channel, args),
+      },
+    });
+    machineMirrorHandlers?.mirrorReady();
+    void machineMirror.start().catch(error => console.warn('[Machine mirror] Could not start:', error));
     sharedCredentialSync = new SharedCredentialSync(configManager, machineConnections);
     sharedCredentialSync.start();
     // Secret leases: renewal reminders, and pushing a lease again to a machine that lost it.
@@ -1728,6 +1754,7 @@ if (launchRemoteSetup) {
 
   usageManager.stop();
   void sharedCredentialSync?.stop();
+  void machineMirror?.stop();
   void machineConnections?.stop();
 
   // Guard against multiple shutdown attempts

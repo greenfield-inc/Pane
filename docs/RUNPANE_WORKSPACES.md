@@ -1,6 +1,6 @@
 # Workspaces: reach all your machines with runpane
 
-`runpane workspace` lets your Macs, Windows PCs, and Linux machines read files, write files, run commands, and drive each other's Pane over the Tailscale network you already use, or over any route of a computer saved in Pane, such as one linked with a [one-time link](QR_PAIRING.md#link-another-computer). On Tailscale each request is trusted because Tailscale says which login it comes from, and a linked computer is trusted by the token it got when the two were linked. Your own login is always let in; a teammate's machine lets you in when its owner shares it with everyone on the tailnet.
+`runpane workspace` lets your Macs, Windows PCs, and Linux machines read files, write files, run commands, and drive each other's Pane over the Tailscale network you already use, or over any route of a computer saved in Pane, such as one linked with a [one-time link](QR_PAIRING.md#link-another-computer). On Tailscale each request is trusted because Tailscale says which login it comes from, and a linked computer is trusted by the token it got when the two were linked, at the access that link gave. Your own login is always let in; a teammate's machine lets you in when its owner shares it with everyone on the tailnet.
 
 The same listener powers codeless desktop remote mode: the sidebar's machine menu and Settings › Remote Access › **Computers** list the machines on your tailnet, including ones you have never connected to (a teammate's machine that accepts only its owner shows as "Owner only" and can't be picked), and picking one switches the desktop app to that machine with no `pane-remote://` code. A computer that is both on your tailnet and saved in Pane shows once, with a pill for each route. `runpane workspace` reaches the same machines. Who may connect is set under Settings › Remote Access › **Tailscale** › **Who can connect** (see [Who is trusted](#who-is-trusted)).
 
@@ -24,11 +24,27 @@ Agents can call them as MCP tools too: `workspace_list`, `workspace_read`, `work
 
 ## Link a computer from the command line
 
-`runpane link '<link>'` links this computer with the one that made a [one-time link](QR_PAIRING.md#link-another-computer), for a computer with no screen. Copy the link on the other computer (**Add a device › Computer**). Pane must be running here with phone access on. When both computers already have linked computers, it names both groups and asks before joining them; in a script or with `--json`, pass `--yes`, or it exits with `ERR_LINK_NEEDS_CONFIRM` and leaves the link unused. Then `runpane workspace list` shows the new computer.
+`runpane link '<link>'` links this computer with the one that made a [one-time link](QR_PAIRING.md#link-another-computer), for a computer with no screen. Copy the link on the other computer (**Add a device › Computer**). Pane must be running here with phone access on. It asks first, naming the computers on both sides. For a [read-only link](QR_PAIRING.md#full-access-or-read-only) it says **Read only** and what that means, before and after linking. It links at the level it showed, or fails with `ERR_LINK_LEVEL_CHANGED` and links nothing. In a script or with `--json`, pass `--yes`, or it exits with `ERR_LINK_NEEDS_CONFIRM` and leaves the link unused. Then `runpane workspace list` shows the new computer.
 
 These commands ship in the npm CLI (`npm i -g runpane`, or `npx --yes runpane@latest workspace list`). The Python package prints the workspaces status block but does not run them.
 
 `workspace <machine> <runpane command>` runs any command that talks to Pane, such as `sessions list`, `panes list`, or `workspace state`, against that machine's Pane. Commands that only make sense on the machine you type them on (`doctor`, `agent-context`, `mcp`, `docs`, `install`) are refused with the alternative: run them there with `runpane workspace <machine> exec -- 'runpane doctor'`.
+
+The MCP tools that look (`workspace_state`, `sessions_list`, `sessions_get`, `sessions_overview`, `panes_list`, `panels_list`, `panels_screen`, `panels_output`, `panels_last_message`, `agents_status`, `repos_list`, `todos_list`, `todos_show`, `loops_list`) take a `machine` input that does the same.
+
+## A read-only computer
+
+`runpane workspace list` marks a computer that shared itself [Read only](QR_PAIRING.md#full-access-or-read-only): `tylers-mac-mini (macOS, online, read only) [Pane relay]: joined through Pane relay`. In `--json`, its `access` is `"read"`, and so is each read-only route's. The level is part of the token each route holds. A computer is read only when every route saved for it is. A route your Tailscale login signs in to (see [Who is trusted](#who-is-trusted)) has full access: runpane tries full-access routes first, and the mark goes away when one answers.
+
+| It answers | Commands |
+|---|---|
+| What its agents are doing | `sessions list`, `sessions get`, `sessions overview`, `agents status`, `workspace state` |
+| Panes, tabs and what they print | `repos list`, `panes list`, `panels list`, `panels screen`, `panels output`, `panels last-message` |
+| Work lists | `todos list`, `todos show`, `loops list` |
+
+Every other command, such as `exec`, `read`, `write`, `panes create`, `panels submit` and `ask --machine`, exits 1 with `ERR_READ_ONLY_ACCESS`, says nothing was run or changed, and gives the next step: ask its owner for full access. Their Pane refuses it, so the MCP tools get the same error. `watch` prints it as a `WATCH ERROR` line, with no next step, and exits 2: to follow a read-only computer, poll `workspace state` or `agents status`.
+
+Answers leave out launch commands and the settings of repositories, Sessions and loops; see [Full access or Read only](QR_PAIRING.md#full-access-or-read-only). Follow-up commands in an answer (`nextCommand`, `next`) name the computer you asked.
 
 ## Turning it on
 
@@ -154,7 +170,7 @@ Workspaces and the [self-hosted remote daemon](SELF_HOSTED_REMOTE_DAEMON.md) bot
 | Port | 8443 | 443 |
 | Setup | None | `runpane setup` on the host, then paste the code |
 
-On the workspace listener (port 8443), machine commands (`read`, `write`, `exec`) run for every request Pane admits there. On the other listeners they run only for a linked computer's token, never for a phone's or a `pane-remote://` code's token. On Pane relay and same-network routes, `runpane workspace` checks the computer's key before it sends the token.
+On the workspace listener (port 8443), machine commands (`read`, `write`, `exec`) run for every request Pane admits there. On the other listeners they run only for the token of a computer linked with full access, never for a phone's or a `pane-remote://` code's token. A read-only device's token runs none of them, on any listener. On Pane relay and same-network routes, `runpane workspace` checks the computer's key before it sends the token.
 
 ## Troubleshooting
 

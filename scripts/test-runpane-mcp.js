@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { spawn } = require('node:child_process');
 const { test } = require('./runpane-test-shard');
 const { after } = require('node:test');
@@ -122,6 +123,11 @@ async function withStubDaemon(paneDir, results, action) {
         // the command traffic, so keep that handshake off the recorded list.
         if (answer === undefined && frame.channel === 'daemon:events') {
           socket.write(`${JSON.stringify({ type: 'response', id: frame.id, ok: true, result: { included: frame.args?.[0]?.include ?? [] } })}\n`);
+          continue;
+        }
+        // notify checks each card before it waits; unless a test answers it, Pane passes it unchanged.
+        if (answer === undefined && frame.channel === 'runpane:notify:check') {
+          socket.write(`${JSON.stringify({ type: 'response', id: frame.id, ok: true, result: { check: true, card: frame.args?.[0] ?? {}, warnings: [] } })}\n`);
           continue;
         }
         requests.push({ channel: frame.channel, args: frame.args, socket });
@@ -526,6 +532,17 @@ test('workspace tools place the machine and path in the command line and the com
   assert.deepEqual(buildToolArgv(tool('workspace_read'), { path: '~/notes.md' }), ['workspace', 'read', '~/notes.md', '--json']);
 });
 
+test('a look tool with a machine asks that machine, and only a machine name fits there', () => {
+  const { buildMcpTools, buildToolArgv } = require(dist('mcpTools.js'));
+  const tool = (name) => buildMcpTools().find((item) => item.name === name);
+  assert.deepEqual(buildToolArgv(tool('agents_status'), { machine: 'tylers-mac', panel: 'p1' }), ['workspace', 'tylers-mac', 'agents', 'status', '--panel=p1', '--json']);
+  assert.deepEqual(buildToolArgv(tool('sessions_overview'), { session: 's1' }), ['sessions', 'overview', '--session=s1', '--json']);
+  for (const machine of ['write', 'list', '--help', '']) {
+    assert.throws(() => buildToolArgv(tool('sessions_list'), { machine }), /machine must be a computer's name/);
+  }
+  assert.equal(tool('panels_submit').inputSchema.properties.machine, undefined);
+});
+
 test('workspace write needs yes from the server, then writes the content it was given', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
   const target = path.join(paneDir, 'prompt.md');
@@ -902,7 +919,7 @@ test('serves the core toolset by default, and named toolsets or read-only on req
   const core = await names([]);
   assert.deepEqual(core.map((tool) => tool.name).sort(), [
     'agents_ask', 'agents_send', 'agents_start', 'agents_status',
-    'browser_click', 'browser_close', 'browser_dialog', 'browser_evaluate', 'browser_navigate', 'browser_open', 'browser_press',
+    'browser_click', 'browser_close', 'browser_dialog', 'browser_evaluate', 'browser_fill', 'browser_navigate', 'browser_open', 'browser_press',
     'browser_screenshot', 'browser_scroll', 'browser_select', 'browser_snapshot', 'browser_tabs', 'browser_type', 'browser_upload', 'browser_wait',
     'device_act', 'device_close', 'device_list', 'device_open', 'device_run', 'device_screenshot',
     'docs_read', 'docs_search', 'doctor', 'links_create',
@@ -920,7 +937,7 @@ test('serves the core toolset by default, and named toolsets or read-only on req
   ]);
   const browser = await names(['--toolsets', 'browser']);
   assert.deepEqual(browser.map((tool) => tool.name).sort(), [
-    'browser_click', 'browser_close', 'browser_dialog', 'browser_evaluate', 'browser_navigate', 'browser_open', 'browser_press',
+    'browser_click', 'browser_close', 'browser_dialog', 'browser_evaluate', 'browser_fill', 'browser_navigate', 'browser_open', 'browser_press',
     'browser_screenshot', 'browser_scroll', 'browser_select', 'browser_snapshot', 'browser_tabs', 'browser_type', 'browser_upload', 'browser_wait',
   ]);
   const git = await names(['--toolsets', 'git']);
@@ -1515,6 +1532,13 @@ test("Pane's HTTP endpoint serves the same instructions, tools and docs as stdio
   const handler = createPaneMcpHttpHandler({
     runCli: (argv, signal, env, auth) => {
       calls.push({ argv, client: auth?.clientId });
+      if (argv[0] === 'workspace') {
+        return Promise.resolve({ code: 1, stderr: '', stdout: JSON.stringify({ ok: false, error: {
+          code: 'ERR_READ_ONLY_ACCESS',
+          message: 'Use `runpane workspace tylers-mac panels screen --panel p1`, not `runpane workspace tylers-mac panels submit --panel p1`.',
+          next: 'Ask the owner.',
+        } }) });
+      }
       return runCliProcess(process.execPath, [dist('cli.js'), ...argv], { env: { ...process.env, ...env }, signal });
     },
   });
@@ -1541,6 +1565,10 @@ test("Pane's HTTP endpoint serves the same instructions, tools and docs as stdio
     const result = await overHttp.callTool({ name: 'docs_search', arguments: { query: 'notify' } });
     assert.equal(result.isError, undefined);
     assert.deepEqual(calls, [{ argv: ['docs', 'search', '--query=notify', '--json'], client: 'tab-1' }]);
+    const refused = await overHttp.callTool({ name: 'agents_status', arguments: { machine: 'tylers-mac', panel: 'p1' } });
+    assert.equal(refused.isError, true);
+    assert.match(refused.content[0].text, /^Use `panels_screen` with machine: tylers-mac, panel: p1/);
+    assert.match(refused.content[0].text, /not `runpane workspace tylers-mac panels submit --panel p1`\.\nNext: Ask the owner\.\nCode: ERR_READ_ONLY_ACCESS$/);
   } finally {
     await overHttp.close();
     server.close();
@@ -1615,6 +1643,33 @@ test('with To-dos off, notify --todo still asks the person, without the to-do', 
       assert.equal(asked.length, 1);
       assert.equal(asked[0].args[0].title, 'Which way?');
       assert.equal(asked[0].args[0].todo, undefined);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('the notify tool\'s check is a switch: it returns the card as Pane would post it and posts nothing', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-notify-check-'));
+  const warning = 'Attached /tmp/mock/index.html as a link: the card names it but --links didn\'t.';
+  try {
+    await withStubDaemon(paneDir, {
+      'runpane:notify:check': (args) => ({ check: true, card: { ui: args[0].ui, title: args[0].title, links: args[0].links }, warnings: [warning] }),
+      'runpane:notify': { approved: true },
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const notify = (await client.listTools()).tools.find((tool) => tool.name === 'notify');
+        assert.equal(notify.inputSchema.properties.check.type, 'boolean');
+        const checked = await client.callTool({ name: 'notify', arguments: {
+          ui: 'approve', title: 'Ship the mock-ups?', check: true, paneDir,
+          links: [{ label: 'Mock-ups', url: pathToFileURL(path.resolve('/tmp/mock/index.html')).href }],
+        } });
+        assert.notEqual(checked.isError, true, checked.content[0].text);
+        assert.deepEqual(checked.structuredContent, {
+          check: true, card: { ui: 'approve', title: 'Ship the mock-ups?', links: [{ label: 'Mock-ups', path: path.resolve('/tmp/mock/index.html') }] }, warnings: [warning],
+        });
+      });
+      assert.deepEqual(requests.map((request) => request.channel), ['runpane:notify:check']);
     });
   } finally {
     fs.rmSync(paneDir, { recursive: true, force: true });

@@ -1,4 +1,6 @@
-import { boundary, decodeBoundary, type BoundarySchema, type JsonValue } from './boundaryDecoder';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { boundary, decodeBoundary, type BoundarySchema, type JsonObject, type JsonValue } from './boundaryDecoder';
 import type { ParsedArgs } from './commands';
 import { invokeDaemon, PaneDaemonClientError } from './daemonClient';
 import { RunpaneError } from './errors';
@@ -70,6 +72,8 @@ export interface NotifyRequest extends Partial<Omit<NotifyQuestion, 'ui'>> {
   took?: string;
   tookAs?: NotifyTookAs;
   status?: string;
+  /** `--close`: a waiting card the calling tab asked, withdrawn. */
+  close?: string;
   /** `--update`: the approval to save a new version of, the person's question, and what changed. */
   update?: string;
   asked?: string;
@@ -92,6 +96,8 @@ type NotifyResultBody =
   /** The person typed a reply: an answer or a question. Say which with `--took`. */
   | { reply: string; picks?: string[]; id: string; replyId: string; next: string }
   | { took: NotifyTookAs; id: string; next?: string }
+  /** `--close`: the card closed, and nothing was sent. */
+  | { closed: true; id: string }
   | { approved: boolean; note?: string }
   | { delivered: 'screen' | 'inbox' }
   | { status: 'saved'; project: string; name: string }
@@ -140,6 +146,7 @@ const notifyResultBodySchema: BoundarySchema<NotifyResultBody> = boundary.union(
   boundary.object({ waiting: boundary.literal(true), id: boundary.nonEmptyString, next: boundary.string }),
   boundary.object({ unavailable: boundary.string, next: boundary.string }),
   boundary.object({ took: boundary.enumeration('answer', 'question'), id: boundary.nonEmptyString, next: boundary.optional(boundary.string) }),
+  boundary.object({ closed: boundary.literal(true), id: boundary.nonEmptyString }),
   boundary.object({ reply: boundary.string, picks: boundary.optional(boundary.array(boundary.string)), id: boundary.nonEmptyString, replyId: boundary.nonEmptyString, next: boundary.string }),
   boundary.object({ approved: boundary.boolean, note }),
   boundary.object({ answer: boundary.string, note, answers: boundary.optional(boundary.array(boundary.string)) }),
@@ -195,8 +202,12 @@ function buildNotifyRequest(parsed: ParsedArgs, env: NodeJS.ProcessEnv, cwd: str
     update: parsed.notifyUpdate,
     asked: parsed.notifyAsked,
     whatChanged: parsed.notifyWhatChanged,
+    close: parsed.notifyClose,
   };
   const { caller, timing } = notifyCallerFields(env, cwd);
+  if (parsed.notifyCheck && (parsed.resume !== undefined || others.took !== undefined || others.tookAs !== undefined || others.close !== undefined)) {
+    throw invalid('check', 'check shows a new card or an --update without posting it, so it does not go with --resume, --took or --close.');
+  }
 
   if (parsed.resume !== undefined) {
     if (!parsed.resume.trim()) throw invalid('resume', 'resume must be the id from a waiting result.');
@@ -205,6 +216,12 @@ function buildNotifyRequest(parsed: ParsedArgs, env: NodeJS.ProcessEnv, cwd: str
       throw invalid('resume', `resume keeps waiting on an earlier question, so it takes no other fields; remove ${extra.join(', ')}.`, 'Call notify again with only resume.');
     }
     return { resume: parsed.resume, ...timing, caller };
+  }
+  if (others.close !== undefined) {
+    if (!others.close.trim()) throw invalid('close', "close must be the approval's id or Q-n, such as --close Q-20.");
+    const extra = givenFields({ ...given, ...others }, (field) => field === 'close');
+    if (extra.length > 0) throw invalid('close', `close withdraws a card you asked, so it takes no other fields; remove ${extra.join(', ')}.`);
+    return { close: others.close, caller };
   }
   if (others.took !== undefined || others.tookAs !== undefined) return buildTookRequest(given, others, caller);
   if (others.status !== undefined) throw invalid('status', 'status goes with --took <id|Q-n> question.');
@@ -235,6 +252,7 @@ interface NotifyOtherFlags {
   update?: string;
   asked?: string;
   whatChanged?: string;
+  close?: string;
 }
 
 /** The fields given, in order, leaving out those `keep` accepts. */
@@ -379,9 +397,42 @@ function parseLinks(text: string): NotifyLink[] {
       return { label: link.label, approval: link.approval };
     }
     if (link.url === undefined) throw invalid('links', `links[${index}] needs one of "path" (a file), "url" (a web page) or "approval" (another approval's id or Q-n).`);
-    if (!LINK_URL.test(link.url)) throw invalid('links', `links[${index}] url must start with http:// or https://.`);
+    const local = localFileUrl(link.url);
+    if (local === null) throw invalid('links', `links[${index}] url is a file:// URL that names no file on this computer (it needs file:///abs/path or file://localhost/abs/path); ${PATH_FORM}.`);
+    if (local !== undefined) return { label: link.label, path: local };
+    if (!LINK_URL.test(link.url)) throw invalid('links', `links[${index}] url must start with http:// or https://; ${PATH_FORM}; url is only for http(s) pages.`);
     return { label: link.label, url: link.url };
   });
+}
+
+const PATH_FORM = 'for a local file use {"label":…,"path":"/abs/path"}';
+
+/** file:///abs/path or file://localhost/abs/path: the only file URLs that name a file on this computer. */
+const LOCAL_FILE_URL = /^file:\/\/(?:localhost)?(\/[^?#]*)(?:[?#].*)?$/iu;
+
+/**
+ * A link url that names a local file (file://, an absolute path, ~/ or a Windows drive path) as
+ * that file's path, so a card asked with url still opens the file. Undefined for any other url;
+ * null for a file: URL that names no file here: another host (never a network share), a relative
+ * one, a bad escape, or on Windows no drive. Pane (main/src/ipc/notify.ts) and Python's wrapper reads them the same way.
+ */
+function localFileUrl(url: string): string | null | undefined {
+  if (/^file:/iu.test(url)) {
+    const match = LOCAL_FILE_URL.exec(url);
+    if (!match || /%(?:2f|5c)/iu.test(match[1])) return null;
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(match[1]);
+    } catch {
+      return null;
+    }
+    if (process.platform !== 'win32') return decoded;
+    return /^\/[A-Za-z]:\//u.test(decoded) ? decoded.slice(1).replace(/\//gu, '\\') : null;
+  }
+  if (url.startsWith('~/')) return path.join(os.homedir(), url.slice(2));
+  if (/^[A-Za-z]:[\\/]/u.test(url)) return url;
+  if (url.startsWith('/') && !url.startsWith('//')) return url;
+  return undefined;
 }
 
 /**
@@ -458,6 +509,7 @@ function describeNotifyOutcome(result: NotifyResult): string {
     const picked = picks.some(Boolean) ? ` (picked: ${picks.map(pick => pick || '—').join(' · ')})` : '';
     return `Reply ${result.replyId} on ${result.id}: "${result.reply}"${picked}. ${result.next}`;
   }
+  if ('closed' in result) return `Closed ${result.id}. Nothing was sent.`;
   if ('took' in result) return `Taken as ${result.took === 'answer' ? 'the answer' : 'a question'} (id ${result.id}).${result.next ? ` ${result.next}` : ''}`;
   if ('unavailable' in result) return `Unavailable: ${result.unavailable} ${result.next}`;
   if ('approved' in result) return withNote(result.approved ? 'Approved' : 'Denied', result.note);
@@ -478,6 +530,16 @@ function describeNotifyOutcome(result: NotifyResult): string {
 export async function runNotify(parsed: ParsedArgs, env: NodeJS.ProcessEnv = process.env): Promise<number> {
   const request = buildNotifyRequest(parsed, env, process.cwd());
   if (parsed.todo !== undefined) request.todo = parsed.todo;
+  const asks = request.resume === undefined && request.took === undefined && request.close === undefined;
+  if (parsed.notifyCheck) {
+    const checked = await checkNotifyCard(request, parsed.paneDir);
+    if (!checked) throw new RunpaneError('ERR_NOTIFY_CHECK_UNAVAILABLE', 'This Pane can\'t check a card without posting it (it is not running, or is older than this runpane). Nothing was shown to the person.', 'Start or update Pane (runpane update), then run runpane notify --check again.');
+    console.log(parsed.json ? JSON.stringify(checked, null, 2) : describeNotifyCheck(checked));
+    return 0;
+  }
+  // The call waits on the person, often in the background: say what Pane changed or would warn
+  // about now, on stderr, rather than after they answer.
+  if (asks) for (const warning of (await checkNotifyCard(request, parsed.paneDir))?.warnings ?? []) process.stderr.write(`Warning: ${warning}\n`);
   let result: NotifyResult;
   try {
     result = await invokeDaemon('runpane:notify', [request], notifyResultSchema, { paneDir: parsed.paneDir, timeoutMs: Infinity });
@@ -494,4 +556,51 @@ export async function runNotify(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
   }
   console.log(parsed.json ? JSON.stringify(result, null, 2) : describeNotifyResult(result));
   return 0;
+}
+
+/** `runpane notify --check`, and what every card runs before it waits: the card as Pane would post it. */
+interface NotifyCheckResult {
+  check: true;
+  /** Pane's normalized request, without the caller: printed as Pane returned it. */
+  card: JsonObject;
+  warnings: string[];
+}
+
+const notifyCheckSchema: BoundarySchema<NotifyCheckResult> = boundary.object({
+  check: boundary.literal(true),
+  card: boundary.jsonObject,
+  warnings: boundary.array(boundary.string),
+});
+
+/** The parts of a checked card its one-screen summary shows. */
+const checkedCardSchema = boundary.object({
+  title: boundary.optional(boundary.string),
+  update: boundary.optional(boundary.string),
+  context: boundary.optional(boundary.string),
+  links: boundary.optional(boundary.array(linkSchema)),
+});
+
+/**
+ * Pane's card check without posting: a refusal throws before anything is shown. Undefined when no
+ * Pane is listening or it is older than the check, so asking goes on as before.
+ */
+async function checkNotifyCard(request: NotifyRequest, paneDir: string | undefined): Promise<NotifyCheckResult | undefined> {
+  try {
+    return await invokeDaemon('runpane:notify:check', [request], notifyCheckSchema, { paneDir });
+  } catch (error) {
+    if (error instanceof PaneDaemonClientError && (error.connectionFailure || error.code === 'ERR_UNKNOWN_CHANNEL')) return undefined;
+    throw error;
+  }
+}
+
+function describeNotifyCheck(checked: NotifyCheckResult): string {
+  const { warnings } = checked;
+  const card = decodeBoundary(checked.card, checkedCardSchema);
+  const links = (card.links ?? []).map(link => `  ${link.label}: ${link.path ?? link.url ?? link.approval ?? ''}`);
+  return [
+    `Checked, not posted: ${card.title ?? card.update ?? ''}`,
+    ...(card.context ? [`Context: ${card.context}`] : []),
+    ...(links.length ? ['Links:', ...links] : []),
+    ...(warnings.length ? warnings.map(warning => `Warning: ${warning}`) : ['No warnings.']),
+  ].join('\n');
 }

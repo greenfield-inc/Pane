@@ -15,6 +15,7 @@ import { CreatePaneForm } from '@/features/panes/CreatePaneSheet';
 import { CreateSessionForm } from '@/features/sessions/CreateSessionSheet';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
+import { FocusScope, ScopeRing } from '@/features/controller/FocusScope';
 
 type Kind = 'session' | 'pane';
 
@@ -24,21 +25,22 @@ type Kind = 'session' | 'pane';
  * is that machine's. Create goes straight to the picked machine; then the phone switches there and
  * opens what it made.
  */
-export default function NewSheet() {
+function NewSheet() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ kind?: Kind; projectId?: string }>();
   const machines = useMachines();
   const lastNew = useMachinePrefs(state => state.lastNew);
   const setLastNew = useMachinePrefs(state => state.setLastNew);
-  const saved = machines.filter(machine => machine.profile);
+  // A machine this phone only watches takes no new Session or Pane.
+  const saved = machines.filter(machine => machine.profile && !machine.readOnly);
   const current = saved.find(machine => machine.current);
   // A repository's own + names a repository on the machine the phone is on.
   const projectId = params.projectId ? Number(params.projectId) : undefined;
   const last = saved.find(machine => machine.key === lastNew);
-  const [pickedKey, setPickedKey] = useState(() => (projectId === undefined && last && reachable(last) ? last.key : current?.key));
+  const [pickedKey, setPickedKey] = useState(() => (projectId === undefined && last && reachable(last) ? last.key : (current ?? saved[0])?.key));
   const [kind, setKind] = useState<Kind>(params.kind ?? 'session');
-  const machine = saved.find(candidate => candidate.key === pickedKey) ?? current;
+  const machine = saved.find(candidate => candidate.key === pickedKey) ?? current ?? saved[0];
   // While a create is in flight the sheet stays open (no Cancel, no swipe down) and the form stays
   // mounted, so its answer still opens what it made.
   const creating = useIsMutating({ mutationKey: CREATE_ON_MACHINE }) > 0;
@@ -126,6 +128,7 @@ export default function NewSheet() {
             />
           )
       ) : null}
+      <ScopeRing />
     </ScrollView>
   );
 }
@@ -202,3 +205,8 @@ const styles = StyleSheet.create({
   machines: { gap: 8, paddingHorizontal: 16 },
   machine: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 34, borderRadius: 17, paddingHorizontal: 13, paddingVertical: 6 },
 });
+
+/** A controller stays inside this sheet while it is open; B closes it. */
+export default function NewSheetRoute() {
+  return <FocusScope bare onBack={() => router.back()}><NewSheet /></FocusScope>;
+}

@@ -1,12 +1,13 @@
 import { useEffect } from 'react';
 import { Inbox } from 'lucide-react';
-import { notifyItem, useNotifyStore } from '../../stores/notifyStore';
-import { sessionTodoMachine, useShownHostId } from '../../stores/todosStore';
+import { notifyItem, selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
+import { sessionTodoMachine, sessionTodoScope, useShownHostId } from '../../stores/todosStore';
 import { openSessionApproval, useApprovalColumnStore } from '../../stores/approvalColumnStore';
 import { ApprovalColumn } from './ApprovalColumn';
 import { ApprovalOrigin } from './ApprovalOrigin';
-import { firstToOpen, readyCount, sessionColumnNext } from './approvalCard';
+import { firstToOpen, readyCount, sessionApprovals, sessionColumnNext } from './approvalCard';
 import { useSessionApprovals } from './useSessionApprovals';
+import { advanceApproval } from './approvalAdvance';
 
 /**
  * The Session header's count (P4): "Approvals 3 · 1 ready". Opens the column on the newest
@@ -64,6 +65,7 @@ export function SessionApprovalColumn({ sessionId, sessionName, inChat, closeLab
   const surface = `session:${sessionId}` as const;
   const open = useApprovalColumnStore((state) => state.open[surface]);
   const close = useApprovalColumnStore((state) => state.close);
+  const showCaughtUp = useApprovalColumnStore((state) => state.showCaughtUp);
   const waiting = useSessionApprovals(sessionId);
   const machine = sessionTodoMachine(undefined, useShownHostId());
   const selected = useNotifyStore((state) => notifyItem(state.snapshot, open?.itemId));
@@ -88,8 +90,25 @@ export function SessionApprovalColumn({ sessionId, sessionName, inChat, closeLab
       inChat={inChat}
       focused={focused}
       renderOrigin={(item) => <ApprovalOrigin item={item} />}
-      // Send closes the column; the chat's status line names who reads the reply (P7).
-      onSent={() => close(surface)}
+      // Send moves on to the Session's next approval, or says all caught up (T-88); the chat's
+      // status line still names who reads the reply (P7).
+      onSent={() => {
+        const fromId = open.itemId;
+        // The person opened another card while it was sending: leave their pick alone.
+        if (useApprovalColumnStore.getState().open[surface]?.itemId !== fromId) return;
+        // The Session's list as it is now (review S-2), with this card's place from when it was sent.
+        const items = selectNotifyItems(useNotifyStore.getState());
+        advanceApproval({
+          surface,
+          order: sessionApprovals(items, sessionId, sessionTodoScope(sessionId)).map((item) => item.id),
+          before: waiting.map((item) => item.id),
+          fromId,
+          items,
+          sent: true,
+          open: (id) => openSessionApproval(sessionId, id),
+          caughtUp: () => showCaughtUp(surface, fromId),
+        });
+      }}
     />
   );
 }

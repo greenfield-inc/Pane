@@ -32,8 +32,13 @@ when it starts with `[` or `{`. A card shows up to 6 links; when a status file's
 last line names the rest (`More links: …`). Any card also
 takes up to 6 `links` (`--links`), related files and pages shown as chips:
 `{label, path}` for a file on the asking machine (relative to its working
-directory), `{label, url}` for an http or https page, or `{label, approval}`
-for another approval (its id or Q-n). Older Panes ignore them.
+directory, `~/` for the home folder), `{label, url}` for an http or https
+page, or `{label, approval}` for another approval (its id or Q-n). A `url`
+that is `file:///abs/path` (or `file://localhost/…`), an absolute path or a
+Windows drive path is taken as the file's `path`. A `file:` URL naming another
+host (never a network share), a relative or badly escaped one, and any other
+non-http(s) `url` is refused with the `path` form in the error. Older Panes
+ignore links.
 In Approvals, clicking a chip opens it as a tab beside the card: a file in an
 editor tab, a page in a browser tab, another approval in place, with **Back**.
 A Q-n names an approval from the same Session (or, outside one, the same Pane
@@ -52,7 +57,20 @@ PRs and other approvals. Every way of asking goes through one check
 (`main/src/services/notify/cardCheck.ts`): Pane refuses a title over 160
 characters or with a line break, and two recommended options in one question,
 and returns a warning for each softer miss, which `runpane notify` and
-`runpane report` print. An old paragraph card (the whole question in its title,
+`runpane report` print. A file the title, context, a question or an option
+names by absolute, `~/` or drive path (whole when it is in backticks or
+quotes, so spaces are fine) but no link opens is attached as a link, with a
+warning; when the card's 6 links are full it is refused instead
+(`ERR_NOTIFY_LINKS_FULL`). A path with a file extension that isn't on the disk
+is refused (`ERR_NOTIFY_UNLINKED_PATH`) when its top folder is, and warned
+about when it isn't. Folders, routes and other paths without an extension stay
+plain text (`cardAdmit.ts`). An `--update` or a relay is checked as the card
+it leaves, and only for paths it adds; files it names join the card's links,
+and without `--links` it keeps the card's own. Because a card's
+call waits on the person, often in the background, `runpane notify` first
+runs the same check without posting (`runpane:notify:check`) and prints its
+warnings on stderr before it waits; `runpane notify --check` prints the
+checked card and posts nothing. An old paragraph card (the whole question in its title,
 with no buttons) is first split by fixed rules into a title, options and
 links (`cardTidy.ts`); the card reads "Tidied by Pane" and **Show as sent**
 shows what the agent sent.
@@ -221,15 +239,42 @@ client:
   Codex using a 24-hour tool timeout.
 - **Cursor's CLI** ends every tool call after 60 seconds. About every 50
   seconds `notify` returns `{waiting: true, id, next}`, and the agent calls
-  `notify` again with `resume: <id>`. The card doesn't change. After 15
-  minutes without an answer the call returns `unavailable`. Cursor asks
+  `notify` again with `resume: <id>`. The card doesn't change. Asked from
+  outside Pane, the loop ends after 15 minutes without an answer and the call
+  returns `unavailable`; asked from a Pane tab, it keeps going. Cursor asks
   "Run this MCP tool?" before every call, resumes included; pick **Allowlist
   MCP Tool** once so a waiting agent doesn't stop at that prompt.
 
-If the agent stops waiting (you interrupt it, it exits, or its call times out)
-and doesn't resume within 30 seconds, the item closes ("closed: the asker stopped
-waiting"; see [When an approval goes away](#when-an-approval-goes-away)). Codex 0.164 doesn't tell Pane when you press Esc, so a question from a
-Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
+A question asked from a Pane tab doesn't depend on the call waiting on it. If
+that call ends (you interrupt the agent, a background command hits its time
+limit or is stopped, the agent restarts, or it doesn't resume within 30
+seconds), the card stays open. Whenever no call is waiting at the moment it is
+answered (that call ended, or the agent is between `--resume` rounds), the
+answer, yours or Autopilot's, is typed into the asking tab as
+`answer: Q-n → <answer> (by you)`, the way a worker's answer reaches it; a typed
+reply arrives as a `reply:` line, and a close as `closed: Q-n (by you)`. A later
+`runpane notify --resume <id>` still gets the answer; if that resume comes
+while the line is still waiting for a busy tab, the line isn't typed. The card
+closes only when you answer or close it, its asker withdraws it with
+`runpane notify --close <id|Q-n>` ("closed: its asker withdrew it"), or its
+tab, Pane or Session is gone (see
+[When an approval goes away](#when-an-approval-goes-away)). Codex 0.164 doesn't
+tell Pane when you press Esc, so Pane lets go of the call when a Codex panel
+sits idle at its prompt for 10 seconds; the card waits on the same way.
+
+`--close` withdraws only a card that is still waiting. A reply still waiting
+for the asking tab to be free is dropped with the card. While your reply is
+being typed into that tab, `--close` is refused (`ERR_NOTIFY_ANSWERED`): the
+reply becomes the answer once it lands. Only the tab that asked a card can
+withdraw it, and Pane decides which tab that is from the tab identity the
+caller sends (`PANE_SESSION_ID` and `PANE_PANEL_ID`), as it does for every
+`runpane` call. This stops ordinary tabs closing each other's cards. It isn't
+a security boundary: a program that can already call Pane's daemon can name
+any tab.
+
+A question asked from outside Pane has no tab to take a late answer, so it
+closes when its call ends and isn't resumed within 30 seconds ("closed: the
+asker stopped waiting").
 
 ## Where questions show
 
@@ -305,7 +350,12 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   accent only while it has focus, as a split's does. By keyboard, each
   question is one Tab stop: ↑ ↓ move and pick, Space picks the focused
   option, Tab goes to the next question and then the reply box, and ⌘↩ sends
-  from anywhere in the approval. ⌥⌘A (Ctrl+K Ctrl+A on Windows and Linux)
+  from anywhere in the approval. With nothing picked or typed, ⇧↩ sends each
+  question's recommended option (its chip reads "Recommended · ⇧↩ sends");
+  nothing starts picked, so it is the person's own key. When a question has no
+  recommendation it sends nothing and says which. It never fires in a text
+  field or while the Close form is open, and holding it answers one card: the
+  next one needs a fresh press. ⌥⌘A (Ctrl+K Ctrl+A on Windows and Linux)
   opens it from the chat and goes back again; ⇧⌘A opens or closes Approvals
   while Pane is in front. ⌘F finds text in Decide, the Summary (the frame
   shares Pane's origin so it can be searched, with scripts still off) and
@@ -518,7 +568,9 @@ An approval exists only while you can act on it and someone can take the answer
 | Situation | What happens |
 | --- | --- |
 | Its Session is closed or archived | Closes within 5 s: "closed: Session closed", "closed: Session archived". |
-| Its asker is gone: its Pane archived or deleted, its tab closed, the worker sent a newer report, or a `notify` caller stopped waiting | Closes within 5 s of Pane learning it, with the reason: "closed: the asking tab was closed", "closed: the worker moved on", "closed: the asker stopped waiting". A sweep every 60 seconds catches anything missed. One exception: when only its tab closed and the orchestrator that relayed it, or Autopilot, can still read a reply for it, it stays open. |
+| Its asker is gone: its Pane archived or deleted, its tab closed, the worker sent a newer report, or a `notify` caller from outside Pane stopped waiting | Closes within 5 s of Pane learning it, with the reason: "closed: the asking tab was closed", "closed: the worker moved on", "closed: the asker stopped waiting". A sweep every 60 seconds catches anything missed. One exception: when only its tab closed and the orchestrator that relayed it, or Autopilot, can still read a reply for it, it stays open. |
+| The call waiting on a question asked from a Pane tab ends (killed, timed out, stopped, the agent restarted) | Nothing: it stays open while its tab lives, and its answer is typed into that tab. |
+| Its asker withdraws it (`runpane notify --close <id\|Q-n>`, from the tab that asked) | Closes at once: "closed: its asker withdrew it". Nothing is sent to anyone. |
 | Pane restarts | Items whose asking tab still exists stay waiting. |
 | Unanswered for 3 days | Stale: moved to a collapsed **Stale** group at the bottom of Waiting. It never rings or pushes again. |
 | You close one | One action on any card, with an optional reason. Its asker's open call returns "The person closed this question.", or `closed: Q-n (by you)` is typed into its tab; several closes waiting for the same tab go as one line, `closed: Q-1, Q-2, Q-3 (by you)`. **Reopen** puts it back. |
@@ -583,7 +635,8 @@ Alerts interrupt you on the device you're using (D-144):
   answer-all shortcut. A computer the picked one can't read (it's off, asleep
   or disconnected, or it hasn't saved this computer) rings as if nothing were
   picked, and its Settings row says why. "Reading" means the picked computer
-  holds a live connection to this one, as its owner or a paired device, naming
+  holds a live connection to this one, as its owner or a device with full
+  access, naming
   itself by its install id (`machineId` in `config.json`; a `config.json`
   copied to another computer carries the same id, so delete the key there).
   A computer that has saved the picked one also checks its own connection:

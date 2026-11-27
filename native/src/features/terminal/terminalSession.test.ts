@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+import { RemoteInputQueue } from '@shared/remoteInputQueue';
 
 import { TerminalSession } from './terminalSession';
 
@@ -126,6 +128,42 @@ describe('TerminalSession.restore', () => {
     expect(starts).toEqual(['unstarted']);
   });
 
+  it('learns the size to draw at before it reads the screen, so a watched screen never draws at another', async () => {
+    const order: string[] = [];
+    const session = new TerminalSession({
+      invoke: async channel => {
+        order.push(channel);
+        return channel === 'panels:checkInitialized' ? true : null;
+      },
+      panelId: 'panel-1',
+      sessionId: 'pane-1',
+      viewerId: 'viewer-1',
+      beforeSnapshot: async () => {
+        await tick();
+        order.push('size learned');
+      },
+      sink: { reset: () => order.push('screen drawn'), write: () => undefined },
+    });
+    await session.restore({ cols: 48, rows: 30 });
+    expect(order.slice(-3)).toEqual(['size learned', 'terminal:getState', 'screen drawn']);
+  });
+
+  it('says a stopped panel is not running when the host does not start it for a read-only phone', async () => {
+    const notRunning: boolean[] = [];
+    for (const started of [false, true]) {
+      const session = new TerminalSession({
+        invoke: async channel => (channel === 'panels:initialize' ? started : false),
+        panelId: 'panel-1',
+        sessionId: 'pane-1',
+        viewerId: 'viewer-1',
+        sink: { reset: () => undefined, write: () => undefined },
+        onNotRunning: () => notRunning.push(started),
+      });
+      await session.restore({ cols: 48, rows: 30 });
+    }
+    expect(notRunning).toEqual([false]);
+  });
+
   it('shows the serialized frame of a full-screen app and forces it to repaint', async () => {
     const host = fakeHost({
       'panels:checkInitialized': () => true,
@@ -250,36 +288,38 @@ describe('TerminalSession output', () => {
 });
 
 describe('TerminalSession.sendInput', () => {
-  it('delivers keystrokes in the order they were typed even when a request is slow', async () => {
-    const delivered: string[] = [];
-    let releaseFirst: () => void = () => undefined;
-    const host = fakeHost({
-      'terminal:input': ([, data]) => {
-        if (data === 'first') return new Promise<void>(resolve => { releaseFirst = () => { delivered.push('first'); resolve(); }; });
-        delivered.push(data as string);
-      },
+  // Through the client's real input queue, with a host that answers each request in 100 ms.
+  function slowHost() {
+    const writes: string[] = [];
+    const queue = new RemoteInputQueue<void>(async (_channel, args) => {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      writes.push(args[1] as string);
     });
-
-    const first = host.session.sendInput('first');
-    const second = host.session.sendInput('\r');
-    await tick();
-    expect(delivered).toEqual([]);
-    releaseFirst();
-    await Promise.all([first, second]);
-
-    expect(delivered).toEqual(['first', '\r']);
-  });
-
-  it('keeps sending after one keystroke fails', async () => {
-    const host = fakeHost({
-      'terminal:input': ([, data]) => {
-        if (data === 'bad') throw new Error('offline');
-      },
+    const session = new TerminalSession({
+      invoke: (channel, args) => queue.invoke(channel, args),
+      panelId: 'panel-1',
+      sessionId: 'pane-1',
+      viewerId: 'viewer-1',
+      sink: { reset: () => undefined, write: () => undefined },
     });
+    return { session, writes };
+  }
 
-    await expect(host.session.sendInput('bad')).rejects.toThrow('offline');
-    await host.session.sendInput('good');
+  it('sends a message within two round trips of a scroll, however many wheel reports it made', async () => {
+    vi.useFakeTimers();
+    try {
+      const { session, writes } = slowHost();
+      // A one-second joystick scroll in Claude Code's full screen: 72 one-line wheel reports.
+      for (let line = 0; line < 72; line++) void session.sendInput('\x1b[<65;40;12M');
+      let delivered = false;
+      void session.sendInput('fix it\r').then(() => { delivered = true; });
 
-    expect(host.calls.map(call => call.args[1])).toEqual(['bad', 'good']);
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(delivered).toBe(true);
+      expect(writes.join('')).toBe(`${'\x1b[<65;40;12M'.repeat(72)}fix it\r`);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

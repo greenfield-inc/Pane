@@ -1,30 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { isResumeCommand, matchingCommands, RESUME_COMMAND } from './chatCommands';
+import { isClearCommand, isResumeCommand, menuCommands, RESUME_COMMAND } from './chatCommands';
 
 describe('composer commands', () => {
-  it('offers Pane\'s /resume, labelled Pane, beside the agent\'s commands', () => {
-    expect(RESUME_COMMAND).toEqual({ name: 'resume', description: 'Continue a past conversation in this folder', source: 'pane' });
-    const found = matchingCommands('/re', [{ name: 'review', description: 'Review a PR' }]);
-    expect(found.map(command => command.name)).toEqual(['resume', 'review']);
-    expect(found[0].source).toBe('pane');
-    expect(found[1].source).toBeUndefined();
+  it('offers Pane\'s own commands beside the agent\'s, once each', () => {
+    const found = menuCommands([{ name: 'resume', description: 'Agent resume' }, { name: 'clear' }, { name: 'review' }], true);
+    expect(found.map(command => command.description ?? command.name)).toEqual(['Start a fresh conversation in this tab', 'Continue a past conversation in this folder', 'review']);
+    expect(found[1]).toEqual(RESUME_COMMAND);
   });
 
-  it('lists /resume once even when the agent offers one too, as Pane\'s', () => {
-    const found = matchingCommands('/resume', [{ name: 'resume', description: 'Agent resume' }]);
-    expect(found).toEqual([RESUME_COMMAND]);
+  it('leaves the agent\'s /clear alone where Pane offers none', () => {
+    expect(menuCommands([{ name: 'clear', description: 'agent clear' }], false).map(command => command.name)).toEqual(['resume', 'clear']);
   });
 
-  it('shows nothing once the draft is more than a command name', () => {
-    expect(matchingCommands('/resume now', [])).toEqual([]);
-    expect(matchingCommands('hello', [])).toEqual([]);
-  });
-
-  it('intercepts exactly /resume, never a message that only mentions it', () => {
+  it('intercepts exactly /resume and /clear, never a message that only mentions one', () => {
     expect(isResumeCommand('/resume')).toBe(true);
     expect(isResumeCommand('  /resume \n')).toBe(true);
     expect(isResumeCommand('/resume abc')).toBe(false);
     expect(isResumeCommand('please /resume')).toBe(false);
     expect(isResumeCommand('/resumes')).toBe(false);
+    expect(isClearCommand(' /clear ')).toBe(true);
+    expect(isClearCommand('/clear the cache')).toBe(false);
   });
 });

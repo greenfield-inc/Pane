@@ -5,6 +5,7 @@ import { useErrorStore } from './errorStore';
 import { seedArrangement, type MachineRef, type MachineSnapshot, type MachineView, type SeededArrangement } from '../utils/allMachinesTree';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { machineLetter } from '../../../shared/utils/machineMarks';
+import { SESSION_LIST_SUMMARY } from '../../../shared/types/orchestrationSession';
 import type { MachineSelectOutcome } from '../hooks/useMachines';
 import {
   type MachineConnectionsEvent,
@@ -34,7 +35,8 @@ function answered<T>(response: IPCResponse<T>): T | undefined {
 /** Each list of a machine and the `machines:read` that fills it. */
 const READERS = {
   projects: async (id: string) => answered((await window.electronAPI.machines.read(id, 'sessions:get-all-with-projects')).data) ?? [],
-  sessions: async (id: string) => answered((await window.electronAPI.machines.read(id, 'orchestration-sessions:list')).data)?.sessions ?? [],
+  // Summaries (T-127): the feed shows no activity log or profile, and refetches on every Session change.
+  sessions: async (id: string) => answered((await window.electronAPI.machines.read(id, 'orchestration-sessions:list', [SESSION_LIST_SUMMARY])).data)?.sessions ?? [],
   statuses: async (id: string) => answered((await window.electronAPI.machines.read(id, 'panels:agent-statuses')).data) ?? [],
   // A host too old to have Session activity shows its Sessions idle.
   activity: async (id: string) => {
@@ -71,6 +73,8 @@ const READS_FOR_EVENT = {
   // Machine health is read by the Resources page itself; the sidebar lists need nothing.
   'resource-monitor:machine-health-changed': [],
   'resource-monitor:machine-inventory-changed': [],
+  // A host snapshot changed; the mirror in the main process reads it, and the sidebar lists need nothing.
+  'session-snapshot:changed': [],
 } satisfies Record<MachineEventChannel, ReadKey[]>;
 
 /** A machine as the pill menu knows it, plus whether the app is on it. */
@@ -363,7 +367,10 @@ export function machineViews(state: Pick<AllMachinesState, 'machines' | 'snapsho
   const menuPlace = new Map(state.entries.map((entry, index) => [entry.id, index]));
   const place = (id: string) => menuPlace.get(id) ?? state.entries.length;
   return [...state.machines].sort((a, b) => place(a.id) - place(b.id)).map((machine) => ({
-    machine: entries.get(machine.id) ?? { id: machine.id, name: machine.label, os: null, slot: 0, letters: machineLetter(machine.label) },
+    machine: {
+      ...(entries.get(machine.id) ?? { id: machine.id, name: machine.label, os: null, slot: 0, letters: machineLetter(machine.label) }),
+      ...(machine.access === 'read' && { readOnly: true }),
+    },
     snapshot: state.snapshots[machine.id] ?? null,
     offline: isMachineDimmed(machine, now),
   }));

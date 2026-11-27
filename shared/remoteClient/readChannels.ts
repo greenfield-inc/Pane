@@ -11,6 +11,7 @@ export const REMOTE_READ_CHANNELS = new Set([
   'chat-tab:agents',
   // Lists the folder's past conversations for the picker; nothing on the host changes.
   'chat-tab:conversations',
+  'chat-tab:files',
   // Autopilot's state and its documents; nothing on the host changes.
   'autopilot:snapshot',
   'autopilot:read-doc',
@@ -61,6 +62,10 @@ export const REMOTE_READ_CHANNELS = new Set([
   'orchestration-sessions:overview',
   'orchestration-sessions:runtimes',
   'orchestration-sessions:archive-preview',
+  // Host snapshots: reads only, creates no tab and starts no agent.
+  'orchestration-sessions:snapshots',
+  // Reads a Session's view, tabs, layout and chat; creates no tab and starts no agent.
+  'orchestration-sessions:peek',
   'projects:get-all',
   'projects:get-running-script',
   'terminal:getAltScreenState',
@@ -69,6 +74,8 @@ export const REMOTE_READ_CHANNELS = new Set([
   'panels:list',
   'panels:getActive',
   'panels:agent-statuses',
+  // Every agent's screen as text; a read-only viewer reads a terminal's size from it.
+  'mission-control:snapshots',
   'orchestration-sessions:activity-list',
   'panels:checkInitialized',
   'panels:get-output',

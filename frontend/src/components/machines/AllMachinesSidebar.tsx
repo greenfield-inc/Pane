@@ -31,8 +31,10 @@ import { useNavigationStore } from '../../stores/navigationStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { commandOnMachine, openOnMachine, runOnMachine } from '../../utils/machineRowActions';
-import { SESSION_CURSOR_ATTRIBUTE, useRowShowsInstantly } from '../../services/sessionCursor';
+import { sessionCursorAttributes, useRowShowsInstantly } from '../../services/sessionCursor';
+import { followMachineMirror } from '../../stores/machineMirrorStore';
 import { confirmMachineArchive } from '../archiveConfirm';
+import { ReadOnlyPill } from './ReadOnlyPill';
 import { savedOrderAfterMove, type AllMachinesPane, type AllMachinesSession, type MachineRef } from '../../utils/allMachinesTree';
 import { DropLine, useRowReorder, type ReorderList, type RowReorder } from '../../hooks/useRowReorder';
 import { cn } from '../../utils/cn';
@@ -170,6 +172,12 @@ function PinnedMark() {
  * so neither shifts the row. Hovering or focusing the box names the machine and its OS.
  */
 function MarkSlot({ machine, label, onMenu }: { machine: MachineRef; label: string; onMenu: (x: number, y: number) => void }) {
+  if (machine.readOnly) return (
+    <>
+      <ReadOnlyPill className="relative z-10" />
+      <span className="relative z-10 flex h-[18px] w-[18px] flex-none items-center"><MachineRowMark machine={machine} /></span>
+    </>
+  );
   return (
     <span data-testid="all-machines-mark-slot" className="group/slot relative z-10 flex h-[18px] w-[18px] flex-none items-center">
       <MachineRowMark machine={machine} className="group-hover/row:invisible group-has-[:focus-visible]/slot:invisible" />
@@ -191,7 +199,7 @@ function MarkSlot({ machine, label, onMenu }: { machine: MachineRef; label: stri
 function PaneRow({ row, active, nested, onMenu, reorder }: { row: AllMachinesPane; active: boolean; nested: boolean; onMenu: (menu: RowMenu) => void; reorder?: RowReorder }) {
   const { pane, machine } = row;
   const label = pane.gitStatus?.prTitle || pane.name || 'Untitled';
-  const openMenu = (x: number, y: number) => onMenu({ x, y, machine, target: { kind: 'pane', row } });
+  const openMenu = (x: number, y: number) => { if (!machine.readOnly) onMenu({ x, y, machine, target: { kind: 'pane', row } }); };
   return (
     <div
       data-testid="all-machines-pane-row"
@@ -250,7 +258,7 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
   renderPane: (row: AllMachinesPane) => React.ReactNode;
 }) {
   const { session, machine } = row;
-  const openMenu = (x: number, y: number) => onMenu({ x, y, machine, target: { kind: 'session', row } });
+  const openMenu = (x: number, y: number) => { if (!machine.readOnly) onMenu({ x, y, machine, target: { kind: 'session', row } }); };
   // Moving and arriving Sessions say so in place of their counts; an arriving one opens once it has arrived.
   const moveLabel = session.move && session.move.state !== 'moved' ? moveMarkLabel(session.move) : null;
   const arriving = session.move?.state === 'arriving';
@@ -275,7 +283,7 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
           data-row-open
           data-sidebar-item
           data-sidebar-key={`machine-session-${row.key}`}
-          {...{ [SESSION_CURSOR_ATTRIBUTE]: instant ? session.id : undefined }}
+          {...sessionCursorAttributes(machine.id, instant ? session.id : undefined)}
           onClick={() => { if (!arriving) void openOnMachine(machine.id, { kind: 'session', id: session.id, name: session.name }); }}
           aria-current={active ? 'page' : undefined}
           aria-disabled={arriving || undefined}
@@ -373,6 +381,8 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
   const isOpen = (key: string) => layout.open.includes(key);
   const [announcement, setAnnouncement] = useState('');
   const reorderRow = useRowReorder(setAnnouncement);
+  // The owner's mirrored machines' rows show at once under the cursor (T-116 PR 6).
+  useEffect(() => { followMachineMirror(); }, []);
   const [menu, setMenu] = useState<RowMenu | null>(null);
   const [renaming, setRenaming] = useState<RowMenu | null>(null);
   const [reviewing, setReviewing] = useState<RowMenu | null>(null);

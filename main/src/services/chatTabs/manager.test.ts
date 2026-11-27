@@ -6,11 +6,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import { applyChatTabEvent, CHAT_FULL_ACCESS_CONTROL, type ChatPanelState, type ChatTabEvent, type ChatTabView } from '../../../../shared/types/chatTab';
 import { PaneError } from '../../../../shared/paneError';
+import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
 import { ChatTabManager, type ChatTabLauncher, type ChatTabManagerOptions, type ChatTabStore } from './manager';
 import { ChatTabNotifyBridge } from './notifyBridge';
 import { ChatTabRuntime } from './runtime';
 import { runpaneWaits } from '../agentStatus/midTurn';
+import { SessionSnapshotService } from '../sessionSnapshots';
+import { hostSnapshotSources } from '../sessionSnapshotSources';
+import type { OrchestrationSessionSummary } from '../../../../shared/types/orchestrationSession';
 
 const AGENT = path.join(__dirname, 'testing', 'scriptedAgent.mjs');
 const cleanup: Array<() => Promise<void> | void> = [];
@@ -151,6 +155,26 @@ describe('chat tab manager', () => {
     expect(manager.isMidTurn('p1')).toBe(true);
     expect(manager.isMidTurn('p1', Date.now() + 5 * 60_000 + 1)).toBe(false);
     await manager.cancel('p1');
+  });
+
+  it('starts a new conversation when the one it would reopen never had a message, so the agent never saved it', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', { ...newTab(directory), acpSessionId: 'never-saved' });
+    await manager.ensure('p1');
+    await expect.poll(() => manager.view('p1').status, { timeout: 10_000 }).toBe('idle');
+    expect(manager.view('p1').problem).toBeUndefined();
+    expect(store.state('p1')?.acpSessionId).not.toBe('never-saved');
+    manager.send('p1', { operationId: 'op-1', text: 'hello' });
+    await expect.poll(() => manager.receipt('p1', 'op-1')?.state, { timeout: 10_000 }).toBe('completed');
+  });
+
+  it('keeps saying the conversation is missing when it had turns, rather than starting another', async () => {
+    const { manager, store, directory } = harness();
+    const turn = { after: 'op-0', stopReason: 'end_turn', startedAt: '2026-11-25T00:00:00.000Z', endedAt: '2026-11-25T00:00:01.000Z' };
+    store.add('p1', { ...newTab(directory), acpSessionId: 'deleted', turnTimes: { sessionId: 'deleted', turns: [turn] } });
+    await expect(manager.ensure('p1')).rejects.toThrow(/Resource not found/);
+    expect(manager.view('p1')).toMatchObject({ status: 'stopped', problem: { action: 'restart' } });
+    expect(store.state('p1')?.acpSessionId).toBe('deleted');
   });
 
   it('forgets the tool calls of an agent that exited mid-call in a turn of its own, so the next agent\'s silent turn of its own still stalls', { timeout: 30_000 }, async () => {
@@ -589,6 +613,31 @@ describe('chat tab manager', () => {
     expect(turnEnds(manager.view('p1'))).toEqual(['end_turn', 'end_turn']);
   });
 
+  it('sends a skill as its own part, and shows the message as typed, also after a restart', { timeout: 60_000 }, async () => {
+    const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_SKILLS: '1' });
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    await expect.poll(() => manager.view('p1').commands).toContainEqual({ name: 'simplify', description: 'The simplify skill', skill: true });
+    expect(manager.view('p1').mentions).toEqual({ files: true, skills: true });
+    const texts = ['/simplify two', 'First this, then $simplify two', 'Then that: $simplify\ntwo'];
+    for (const [index, text] of texts.entries()) {
+      manager.send('p1', { operationId: `op-${index}`, text });
+      await expect.poll(() => manager.receipt('p1', `op-${index}`)?.state, { timeout: 10_000 }).toBe('completed');
+    }
+    expect(replyText(manager.view('p1'))).toBe([
+      'Parts: ["/simplify two"]', 'Parts: ["First this, then /simplify two","/simplify two"]', 'Parts: ["Then that: /simplify\\ntwo","/simplify two"]',
+    ].join('|'));
+    expect(userTexts(manager.view('p1'))).toEqual(texts);
+    await manager.restart('p1');
+    expect(userTexts(manager.view('p1'))).toEqual(texts);
+    // Another tab that opens the same conversation shows it as typed too.
+    const sessionId = store.state('p1')!.acpSessionId!;
+    await manager.close('p1');
+    store.add('p2', { ...newTab(directory), acpSessionId: sessionId });
+    await manager.ensure('p2');
+    expect(userTexts(manager.view('p2'))).toEqual(texts);
+  });
+
   it('Send now keeps the message queued, with a notice, when the agent refuses the steer', { timeout: 30_000 }, async () => {
     const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_STEER_FAILS: '1' });
     store.add('p1', newTab(directory));
@@ -843,6 +892,89 @@ describe('chat tab manager', () => {
     // Closing the tab removes it.
     await second.manager.close('p1');
     expect(existsSync(recent)).toBe(false);
+  });
+
+  it('gives a host snapshot the saved messages after a relaunch, without starting the agent (T-116 D-15)', { timeout: 30_000 }, async () => {
+    const first = harness();
+    const { store, directory } = first;
+    store.add('p1', newTab(directory));
+    await first.manager.ensure('p1');
+    first.manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => first.manager.receipt('p1', 'a')?.state).toBe('completed');
+    const spool = path.join(directory, 'spool');
+    await expect.poll(() => readdirSync(spool).some(folder => existsSync(path.join(spool, folder, 'recent.json'))), { timeout: 10_000 }).toBe(true);
+    await first.manager.stopAll();
+
+    // Pane relaunched: the owner's other machine reads this chat Session's snapshot.
+    const second = harness(store, {}, directory);
+    const chatTab: ToolPanel = { id: 'p1', sessionId: 'pane-1', type: 'chat', title: 'Claude', state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
+    // SAFETY: the snapshot reads only the fields set here.
+    const record = { id: 's1', name: 'One', internalSessionId: 'pane-1', agent: 'claude', panelIds: { claude: 'p1' }, updatedAt: '2026-11-26T00:00:00.000Z' } as OrchestrationSessionSummary;
+    const service = new SessionSnapshotService(hostSnapshotSources({
+      sessions: { list: async () => ({ sessions: [record] }) },
+      panels: { getPanelsForSession: () => [chatTab], getPanel: () => chatTab },
+      chats: () => second.manager,
+      storedLayout: () => null,
+      events: () => ({ send: () => undefined }),
+    }));
+    const { snapshots: [snapshot] } = await service.snapshots({});
+    service.dispose();
+
+    expect(snapshot.transcriptUnknown).toBeUndefined();
+    expect(replyText(snapshot.chat)).toBe('You said: hello');
+    expect(snapshot.chat.messageCount).toBeGreaterThan(0);
+    expect(second.manager.isRunning('p1')).toBe(false);
+  });
+
+  it("says earlier messages aren't available until the chat runs, rather than that there are none (T-116 D-19, QA F-2)", { timeout: 30_000 }, async () => {
+    const first = harness();
+    const { store, directory } = first;
+    store.add('p1', newTab(directory));
+    await first.manager.ensure('p1');
+    first.manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => first.manager.receipt('p1', 'a')?.state).toBe('completed');
+    const spool = path.join(directory, 'spool');
+    await expect.poll(() => readdirSync(spool).some(folder => existsSync(path.join(spool, folder, 'recent.json'))), { timeout: 10_000 }).toBe(true);
+    await first.manager.stopAll();
+
+    // Relaunched: only the saved window is held, so what came before it can't be read without starting the agent.
+    const second = harness(store, {}, directory);
+    expect(second.manager.view('p1', 200, false).transcript?.messages.length).toBeGreaterThan(1);
+    expect(second.manager.historyRead('p1', 1, 50)).toEqual({ messages: [], unavailable: true });
+    expect(second.manager.isRunning('p1')).toBe(false);
+
+    // Once the chat runs, its history reads as before; the start of the conversation is just "no more".
+    await second.manager.ensure('p1');
+    await expect.poll(() => second.manager.historyRead('p1', 1, 50).messages.length, { timeout: 10_000 }).toBe(1);
+    expect(second.manager.historyRead('p1', 1, 50).unavailable).toBeUndefined();
+    expect(second.manager.historyRead('p1', 0, 50)).toEqual({ messages: [] });
+  });
+
+  it('never says earlier messages are unavailable while the chat is starting and replaying them (review of da3ce7c, D-19)', { timeout: 30_000 }, async () => {
+    const first = harness();
+    const { store, directory } = first;
+    store.add('p1', newTab(directory));
+    await first.manager.ensure('p1');
+    first.manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => first.manager.receipt('p1', 'a')?.state).toBe('completed');
+    const spool = path.join(directory, 'spool');
+    await expect.poll(() => readdirSync(spool).some(folder => existsSync(path.join(spool, folder, 'recent.json'))), { timeout: 10_000 }).toBe(true);
+    await first.manager.stopAll();
+    // The saved window is the newest of a longer chat: it starts at message 5.
+    const folder = readdirSync(spool).find(name => existsSync(path.join(spool, name, 'recent.json')));
+    if (!folder) throw new Error('No saved window');
+    const file = path.join(spool, folder, 'recent.json');
+    const saved = decodeBoundary(JSON.parse(readFileSync(file, 'utf8')), boundary.jsonObject);
+    const held = decodeBoundary(saved.held, boundary.jsonObject);
+    writeFileSync(file, JSON.stringify({ ...saved, held: { ...held, start: 5 } }));
+
+    const second = harness(store, {}, directory);
+    expect(second.manager.view('p1', 200, false).transcript?.start).toBe(5);
+    const starting = second.manager.ensure('p1');
+    // Asked while the chat starts there: nothing yet, but not "unavailable", which a desktop would keep for the run.
+    expect(second.manager.historyRead('p1', 1, 50).unavailable).toBeUndefined();
+    await starting;
+    await expect.poll(() => second.manager.historyRead('p1', 1, 50).messages.length, { timeout: 10_000 }).toBe(1);
   });
 
   it('says a paused tab is paused, and a read that may not start leaves it paused (T-87)', async () => {

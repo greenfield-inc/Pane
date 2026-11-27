@@ -1,14 +1,19 @@
+import type { MissionControlSnapshotRequest, MissionControlSnapshotResult } from '../../../../shared/types/missionControl';
+import { READ_ONLY_HOST_ANSWERS } from '../../../../shared/remoteClient/readOnlyHost';
+import { tokenAccess, type ReadOnlyMark } from '../../../../shared/types/accessLevel';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { ChatTabClient, ChatTabCreate, ChatTabView } from '../../../../shared/types/chatTab';
-import { decodeChatAgents, decodeChatConversations, decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
+import { decodeChatAgents, decodeChatConversations, decodeChatFiles, decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
 import type {
   OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
   OrchestrationSessionOverview,
   OrchestrationSessionRecord,
+  OrchestrationSessionSummary,
   OrchestrationSessionUpdateInput,
   OrchestrationSessionView,
 } from '../../../../shared/types/orchestrationSession';
+import { SESSION_LIST_SUMMARY } from '../../../../shared/types/orchestrationSession';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { FileDiffRequest } from '../../../../shared/types/gitDiff';
 import { BRANCH_SCOPE, decodeFileDiff, decodeManifest, type ChangeList } from '../../../../shared/gitDiffClient';
@@ -70,8 +75,12 @@ export class RemoteRuntimeAdapter {
   private readonly client: RemoteDaemonBrowserClient;
 
   constructor(readonly profile: RemotePaneConnectionProfile) {
+    this.access = tokenAccess(profile.token);
     this.client = new RemoteDaemonBrowserClient(profile);
   }
+
+  /** What this browser's pairing gives, which its token says. */
+  readonly access: ReadOnlyMark | undefined;
 
   connect(): Promise<void> {
     return this.client.connect();
@@ -119,7 +128,9 @@ export class RemoteRuntimeAdapter {
   }
 
   async invoke<T>(channel: string, args: unknown[] = []): Promise<T> {
-    const response = await this.client.invoke<IpcLikeResponse<T> | T>(channel, args);
+    // SAFETY: each answer holds what its channel's readers use when there is nothing to show.
+    const answer = this.access === 'read' ? READ_ONLY_HOST_ANSWERS.get(channel) as IpcLikeResponse<T> | T | undefined : undefined;
+    const response = answer !== undefined ? answer : await this.client.invoke<IpcLikeResponse<T> | T>(channel, args);
     if (isIpcResponse<T>(response)) {
       if (response.success === false) {
         throw new Error(response.error ?? `${channel} failed`);
@@ -130,6 +141,9 @@ export class RemoteRuntimeAdapter {
     // SAFETY: The adapter method selects T from the invoked channel contract.
     return response as T;
   }
+
+  /** Terminals' sizes on the host, for a read-only viewer to draw at. */
+  readonly terminalSnapshots = (request: MissionControlSnapshotRequest): Promise<MissionControlSnapshotResult> => this.invoke('mission-control:snapshots', [request]);
 
   /** Chat tabs on the connected host: the agent runs there, under that machine's own sign-in. */
   readonly chatTab: ChatTabClient & { create(request: ChatTabCreate): Promise<{ panelId: string }> } = {
@@ -155,6 +169,7 @@ export class RemoteRuntimeAdapter {
     conversations: async panelId => decodeChatConversations(await this.invoke('chat-tab:conversations', [panelId])),
     resume: (panelId, sessionId) => this.invoke('chat-tab:resume', [panelId, sessionId]),
     dismissBanner: panelId => this.invoke('chat-tab:dismiss-banner', [panelId]),
+    files: async (panelId, query) => decodeChatFiles(await this.invoke('chat-tab:files', [panelId, query])),
     signIn: panelId => this.invoke('chat-tab:sign-in', [panelId]),
     agents: async () => decodeChatAgents(await this.invoke('chat-tab:agents')),
     onEvent: callback => this.onEvent(event => { if (event.channel === 'chat-tab:event') callback(decodeChatTabEvent(event.args[0])); }),
@@ -258,8 +273,9 @@ export class RemoteRuntimeAdapter {
     return this.invoke<void>('sessions:restore', [sessionId]);
   }
 
-  listOrchestrationSessions(): Promise<OrchestrationSessionListResult> {
-    return this.invoke<OrchestrationSessionListResult>('orchestration-sessions:list');
+  /** Summaries (T-127): no Session's activity log or profile; `openOrchestrationSession` reads the full record. */
+  listOrchestrationSessions(): Promise<OrchestrationSessionListResult<OrchestrationSessionSummary>> {
+    return this.invoke<OrchestrationSessionListResult<OrchestrationSessionSummary>>('orchestration-sessions:list', [SESSION_LIST_SUMMARY]);
   }
 
   /**

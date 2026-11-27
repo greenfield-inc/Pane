@@ -4,6 +4,7 @@ import { decisionLine, originLine, receiptLine } from '../../../../shared/approv
 import { countsAsWaiting } from '../../stores/notifyStore';
 import { approvalHolder, type ApprovalHolder } from '../../../../shared/approvalStatus';
 import { todoPlace } from './approvalCard';
+import { approvalListedAt, newestFirst } from '../../../../shared/approvalOrder';
 
 export type ApprovalsTab = 'waiting' | 'answered';
 
@@ -77,7 +78,7 @@ export interface ApprovalQueue {
   list: NotifyItem[];
   /** The list's groups; none under Most recent, which has no headers. */
   groups: ApprovalGroup[];
-  /** Waiting only: items 3 days unanswered, oldest first, for the collapsed Stale group at the bottom. */
+  /** Waiting only: items 3 days unanswered, newest first, for the collapsed Stale group at the bottom. */
   stale: NotifyItem[];
   /** Waiting only: one row per machine that can't be reached, in place of its items. */
   offline: OfflineRow[];
@@ -97,7 +98,6 @@ const isStale = (item: NotifyItem) => item.state === 'waiting' && !item.unreacha
 /** Answered also keeps today's updates: with no strip inside Pane, they'd otherwise show nowhere there. */
 const isAnswered = (item: NotifyItem) => item.state === 'answered' || item.state === 'expired' || item.state === 'info';
 const resolved = (item: NotifyItem) => item.resolvedAt ?? item.createdAt;
-const oldestFirst = (a: NotifyItem, b: NotifyItem) => a.createdAt - b.createdAt;
 
 /** The open items that can't be reached, as one row per machine. */
 export function offlineRows(items: readonly NotifyItem[]): OfflineRow[] {
@@ -125,8 +125,8 @@ interface WaitingSplit {
 
 export function splitWaiting(items: readonly NotifyItem[]): WaitingSplit {
   return {
-    live: items.filter((item) => isWaiting(item) && !isOffline(item) && !isStale(item)).sort(oldestFirst),
-    stale: items.filter(isStale).sort(oldestFirst),
+    live: items.filter((item) => isWaiting(item) && !isOffline(item) && !isStale(item)).sort(newestFirst),
+    stale: items.filter(isStale).sort(newestFirst),
     offline: offlineRows(items),
   };
 }
@@ -185,8 +185,8 @@ function inSidebarOrder(groups: ApprovalGroup[], sidebarOrder: readonly string[]
 }
 
 /**
- * The Approvals queue for one tab: newest first, by when it was asked on Waiting and when it was
- * answered on Answered. Most recent lists them flat; By Session and By project group them, with each
+ * The Approvals queue for one tab: newest first, by when it was asked (or last updated or reopened,
+ * `approvalListedAt`) on Waiting and when it was answered on Answered. Most recent lists them flat; By Session and By project group them, with each
  * group placed by its newest item; Sidebar order groups by Session in `sidebarOrder` (the keys of
  * the Sessions the sidebar shows, top first; see `inSidebarOrder`). Stale and offline machines stay
  * apart from the sort.
@@ -194,7 +194,7 @@ function inSidebarOrder(groups: ApprovalGroup[], sidebarOrder: readonly string[]
 export function groupApprovals(items: NotifyItem[], tab: ApprovalsTab, sort: ApprovalsSort, sidebarOrder: readonly string[] = []): ApprovalQueue {
   const answeredItems = items.filter(isAnswered);
   const { live, stale, offline } = splitWaiting(items);
-  const listedAt = tab === 'waiting' ? (item: NotifyItem) => item.createdAt : resolved;
+  const listedAt = tab === 'waiting' ? approvalListedAt : resolved;
   // By id on a tie, so items of the same millisecond don't swap as snapshots arrive.
   const newestFirst = [...(tab === 'waiting' ? live : answeredItems)].sort((a, b) => listedAt(b) - listedAt(a) || a.id.localeCompare(b.id));
   const groups = sort === 'recent' ? (tab === 'waiting' ? byHolder(newestFirst) : [])
@@ -229,8 +229,8 @@ function byHolder(items: NotifyItem[]): ApprovalGroup[] {
 
 /**
  * The ids of the items a queue lists, top to bottom: the order the pager steps through, grouped as
- * the list shows them under every sort. `withStale` adds the Stale group's items after them, in
- * their own oldest-first order, for a pager that also steps into it.
+ * the list shows them under every sort. `withStale` adds the Stale group's items after them, newest
+ * first, for a pager that also steps into it.
  */
 export function approvalIdsInListOrder(queue: Pick<ApprovalQueue, 'list' | 'stale'>, { withStale = false }: { withStale?: boolean } = {}): string[] {
   const ids = queue.list.map((item) => item.id);

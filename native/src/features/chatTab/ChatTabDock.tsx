@@ -9,7 +9,7 @@ import type { AgentChatPermission } from '@shared/types/agentChat';
 import type { ChatTabAnswer, ChatTabProblem, ChatTabQuestion, ChatTabQueuedPrompt } from '@shared/types/chatTab';
 import type { JsonValue } from '@shared/validation/boundaryDecoder';
 
-import { monoFontFamily, useTheme } from '@/theme';
+import { monoFontFamily, scaleType, useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
 import { useLinkRenderer } from '../links/LinkMenu';
@@ -30,23 +30,23 @@ export function DockButton({ title, onPress, disabled, busy, primary, testID, st
   </Pressable>;
 }
 
-export function ProblemBanner({ problem, agent, busy, onRestart, onSignIn }: { problem: ChatTabProblem; agent: string; busy: boolean; onRestart: () => void; onSignIn: () => void }) {
+export function ProblemBanner({ problem, agent, busy, readOnly, onRestart, onSignIn }: { problem: ChatTabProblem; agent: string; busy: boolean; /** Says what's wrong, with nothing to press. */ readOnly?: boolean; onRestart: () => void; onSignIn: () => void }) {
   const theme = useTheme();
   return <View testID="chat-problem" accessibilityLiveRegion="polite" style={[styles.card, { backgroundColor: theme.chat.dangerSoft, borderColor: theme.chat.border }]}>
     <Text variant="headline" style={{ color: theme.chat.foreground }}>{problem.message}</Text>
     <Text variant="subhead" style={{ color: theme.chat.mutedForeground }}>{problem.next}</Text>
-    <View style={styles.row}>
+    {readOnly ? null : <View style={styles.row}>
       {problem.action === 'sign-in' && <DockButton testID="chat-sign-in" title="Sign in on the computer" primary disabled={busy} onPress={onSignIn} />}
       {problem.action === 'install' && problem.url && <DockButton testID="chat-install" title={`Install ${agent}`} primary onPress={() => void Linking.openURL(problem.url!)} />}
       {problem.code !== 'unsupported-host' && <DockButton testID="chat-restart" title={problem.action === 'restart' ? 'Restart' : 'Retry'} primary={problem.action === 'restart'} disabled={busy} onPress={onRestart} />}
-    </View>
+    </View>}
   </View>;
 }
 
 function Plan({ text }: { text: string }) {
   const theme = useTheme();
   const renderer = useLinkRenderer();
-  const content = useMarkdown(text, { colorScheme: theme.scheme, renderer, styles: { text: { color: theme.chat.foreground, fontSize: 14, lineHeight: 20 } } });
+  const content = useMarkdown(text, { colorScheme: theme.scheme, renderer, styles: { text: { color: theme.chat.foreground, fontSize: 14 * theme.uiScale, lineHeight: 20 * theme.uiScale } } });
   return <View style={[styles.detail, { borderColor: theme.chat.border, backgroundColor: theme.chat.background }]}>{content}</View>;
 }
 
@@ -77,7 +77,7 @@ function QuestionInput({ field, value, disabled, heading, onChange }: { field: Q
         }} />;
       })}</View>
       : <TextInput testID={`chat-field-${field.key}`} accessibilityLabel={field.title} placeholder={field.required ? 'Your answer' : 'Your own answer (optional)'} placeholderTextColor={theme.chat.mutedForeground} editable={!disabled}
-        value={typeof value === 'string' ? value : ''} onChangeText={onChange} style={[styles.input, { color: theme.chat.foreground, borderColor: theme.chat.border }]} />}
+        value={typeof value === 'string' ? value : ''} onChangeText={onChange} style={[scaleType(styles.input, theme.uiScale), { color: theme.chat.foreground, borderColor: theme.chat.border }]} />}
   </View>;
 }
 

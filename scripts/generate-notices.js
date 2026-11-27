@@ -360,6 +360,16 @@ function generateNotices() {
     totalPackages += packages.length;
   }
   
+  // Code copied into Pane's source, which no package manifest lists
+  notices += `================================================================================\n`;
+  notices += `## COPIED SOURCE CODE\n`;
+  notices += `================================================================================\n\n`;
+  notices += `Name: T3 Code\n`;
+  notices += `License: MIT\n`;
+  notices += `Repository: https://github.com/pingdotgg/t3code\n`;
+  notices += `Files: each one adapted from it says so at its top\n`;
+  notices += `\n${fs.readFileSync(path.join(__dirname, 'license-texts', 't3code.txt'), 'utf8').trim()}\n\n`;
+
   // Add Pane's own license
   const panePackageJson = require('../package.json');
   notices += `================================================================================\n`;

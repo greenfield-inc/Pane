@@ -105,6 +105,7 @@ const ORCHESTRATION_SESSION_CHANNELS = [
   'orchestration-sessions:detach',
   'orchestration-sessions:activity-list',
   'orchestration-sessions:overview',
+  'orchestration-sessions:snapshots',
 ] as const;
 
 const PERMISSION_CHANNELS = [

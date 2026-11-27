@@ -1,3 +1,4 @@
+import type { ReadOnlyMark } from './accessLevel';
 import type { JsonObject } from '../validation/boundaryDecoder';
 import type { TodoAction, TodoCreateInput } from './todos';
 import type { NotifyRemoteCommand } from './notify';
@@ -30,6 +31,14 @@ export interface MachineState {
   routeId?: string;
   /** Whether the machine's Pane sends its Session members' reports; absent until it first answers. */
   workspaceEntries?: boolean;
+  /** "read" when this computer only watches the machine (its saved token says so); absent for full access. */
+  access?: ReadOnlyMark;
+  /**
+   * True when the saved machine is the person's own (D-500): its "This is my computer" switch is on,
+   * or, with the switch never set, its Tailscale owner is this computer's Tailscale login. Only these
+   * machines are mirrored. Absent for this computer and for every other machine.
+   */
+  mine?: true;
 }
 
 /** A saved machine's round trip: `ms` null when it did not answer; `routeId` the route it was measured over (`ComputerRoute.id`). */
@@ -52,6 +61,13 @@ export const MACHINE_READ_CHANNELS = [
   'notify:summary-page',
   'panels:agent-statuses',
   'orchestration-sessions:activity-list',
+  // Host snapshots (T-116): the owner's other machines keep each chat Session ready ahead of opening.
+  'orchestration-sessions:snapshots',
+  // One Session's view, tabs, layout and newest 200 messages, read-only (T-87): the arrow keys show a
+  // Session the mirror lacks, and fill a mirrored one's full window behind its first paint (T-116 PR 6).
+  'orchestration-sessions:peek',
+  // A chat's earlier messages, read only (D-19): "Earlier messages" on another machine's shown chat.
+  'chat-tab:history',
   'projects:get-all',
   'projects:list-branches',
   'projects:detect-branch',
@@ -68,6 +84,12 @@ export const MACHINE_READ_CHANNELS = [
 ] as const;
 export type MachineReadChannel = typeof MACHINE_READ_CHANNELS[number];
 
+/**
+ * Reads that copy a chat's content ahead of opening it (T-116 PR 6): served only from the person's own
+ * machines (`MachineState.mine`), as the mirror is. A teammate's machine is refused before anything is sent.
+ */
+export const OWNER_ONLY_MACHINE_READS: ReadonlySet<string> = new Set<MachineReadChannel>(['orchestration-sessions:peek', 'chat-tab:history']);
+
 /** The events forwarded on `machines:event`: lists, statuses, permissions, Notify and settings, never terminal output. */
 export const MACHINE_EVENT_CHANNELS = [
   'session:created',
@@ -81,6 +103,8 @@ export const MACHINE_EVENT_CHANNELS = [
   'panel:activityStatus',
   'orchestration-sessions:changed',
   'orchestration-sessions:activity',
+  // A chat Session's host snapshot changed: `{ sessionId, revision }`, at most once a second per Session.
+  'session-snapshot:changed',
   'project:updated',
   'project:list-changed',
   'permission:request',

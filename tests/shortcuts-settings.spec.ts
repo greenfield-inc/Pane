@@ -48,7 +48,7 @@ const panels = ['Bottom Terminal', 'Tab Terminal'].map((title, index) => ({
 }));
 const terminalStates = Object.fromEntries(panels.map((panel) => [panel.id, { scrollbackBuffer: 'ready\r\n' }]));
 
-const REFERENCE_ROW_COUNT = 17;
+const REFERENCE_ROW_COUNT = 18;
 const SNIPPET = { id: 'snip', label: 'Lint snippet', key: 'l', text: 'pnpm lint', enabled: true };
 const CUSTOM = { name: 'Deploy', command: 'pnpm deploy' };
 

@@ -5,6 +5,7 @@ const fs = require('fs');
 const net = require('net');
 const os = require('os');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const { inShard } = require('./runpane-test-shard');
 
 const rootDir = path.resolve(__dirname, '..');
@@ -4821,7 +4822,7 @@ async function checkSecretsParity() {
   assert.deepStrictEqual(JSON.parse(declined.stdout), { status: 'declined' });
   assert.deepStrictEqual(leased, {
     code: 0,
-    stdout: 'Leased stripe/STRIPE_LIVE_KEY, STRIPE_RESTRICTED_KEY until 2026-11-05T12:00:00.000Z on studio, devbox. Lease lease-a. Use them with `runpane secrets exec --project stripe -- <command>`.\n',
+    stdout: 'Leased stripe/STRIPE_LIVE_KEY, STRIPE_RESTRICTED_KEY until 2026-11-05T12:00:00.000Z on studio, devbox. Lease lease-a. Use them with `runpane secrets exec --project stripe -- <command>`, and logins with `runpane browser fill`.\n',
   });
   assert.deepStrictEqual(leaseDeclined, { code: 0, stdout: 'The person declined the lease.\n' });
   assert.deepStrictEqual(ended, { code: 0, stdout: 'Ended lease lease-a.\n' });
@@ -6931,6 +6932,75 @@ async function checkDryRunMessages() {
   }
 }
 
+/**
+ * Pane's card check before a card waits: its warnings reach stderr before the answer, --check
+ * prints the checked card and posts nothing, and a local file given as url is sent as its path.
+ */
+async function checkNotifyCardCheck() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-notify-check-'));
+  const outsidePane = { PANE_SESSION_ID: '', PANE_PANEL_ID: '', RUNPANE_NOTIFY_AGENT: '', RUNPANE_NOTIFY_RETURN_AFTER_MS: '' };
+  const warning = 'Attached /tmp/mock/index.html as a link: the card names it but --links didn\'t.';
+  const mockUps = path.resolve('/tmp/mock ups/index.html');
+  const notes = path.resolve('/tmp/notes.md');
+  const links = JSON.stringify([{ label: 'Mock-ups', url: pathToFileURL(mockUps).href }, { label: 'Plan', url: '/tmp/plan.md' }, { label: 'PR #1611', url: 'https://github.com/org/repo/pull/1611' }, { label: 'Notes', url: pathToFileURL(notes).href.replace('file://', 'file://LOCALHOST') }, { label: 'Spec', url: 'C:\\specs\\a.md' }]);
+  const card = ['notify', '--ui', 'approve', '--title', 'Ship the mock-ups?', '--links', links];
+  const sentLinks = [{ label: 'Mock-ups', path: mockUps }, { label: 'Plan', path: '/tmp/plan.md' }, { label: 'PR #1611', url: 'https://github.com/org/repo/pull/1611' }, { label: 'Notes', path: notes }, { label: 'Spec', path: 'C:\\specs\\a.md' }];
+  const sent = { npm: [], pip: [] };
+  try {
+    for (const runtime of ['npm', 'pip']) {
+      const run = await withFakeDaemon(paneDir, (frame) => {
+        sent[runtime].push(frame);
+        if (frame.channel === 'runpane:notify:check') return { result: { check: true, card: frame.args[0], warnings: [warning] } };
+        return { result: { approved: true, warnings: [warning] } };
+      }, () => runCliOnce(runtime, [...card, '--json'], paneDir, 20_000, outsidePane));
+      assert.strictEqual(run.code, 0, `${runtime} notify: ${run.stderr}`);
+      assert.strictEqual(run.stderr.trim(), `Warning: ${warning}`, `${runtime} notify prints the check's warnings on stderr`);
+      assert.deepStrictEqual(JSON.parse(run.stdout), { approved: true, warnings: [warning] });
+      assert.deepStrictEqual(sent[runtime].map((frame) => frame.channel), ['runpane:notify:check', 'runpane:notify']);
+      assert.deepStrictEqual(sent[runtime][0].args[0].links, sentLinks, `${runtime} notify sends a local file url as its path`);
+
+      // --check: the checked card, and nothing posted.
+      const checked = await withFakeDaemon(paneDir, (frame) => {
+        sent[runtime].push(frame);
+        return { result: { check: true, card: { ui: 'approve', title: 'Ship the mock-ups?', links: sentLinks }, warnings: [warning] } };
+      }, () => runCliOnce(runtime, [...card, '--check', '--json'], paneDir, 20_000, outsidePane));
+      assert.strictEqual(checked.code, 0, `${runtime} notify --check: ${checked.stderr}`);
+      assert.deepStrictEqual(JSON.parse(checked.stdout), { check: true, card: { ui: 'approve', title: 'Ship the mock-ups?', links: sentLinks }, warnings: [warning] });
+      assert.strictEqual(sent[runtime].at(-1).channel, 'runpane:notify:check');
+      assert.strictEqual(sent[runtime].length, 3, `${runtime} notify --check posts nothing`);
+      const text = await withFakeDaemon(paneDir, () => ({ result: { check: true, card: { ui: 'approve', title: 'Ship the mock-ups?', links: sentLinks }, warnings: [] } }),
+        () => runCliOnce(runtime, [...card, '--check'], paneDir, 20_000, outsidePane));
+      assert.strictEqual(text.stdout.replace(/\r\n/g, '\n').trim(), [
+        'Checked, not posted: Ship the mock-ups?',
+        'Links:',
+        `  Mock-ups: ${mockUps}`,
+        '  Plan: /tmp/plan.md',
+        '  PR #1611: https://github.com/org/repo/pull/1611',
+        `  Notes: ${notes}`,
+        '  Spec: C:\\specs\\a.md',
+        'No warnings.',
+      ].join('\n'), `${runtime} notify --check text`);
+
+      // A refusal from the check ends the call before the card is posted.
+      const refusedFrames = [];
+      const refused = await withFakeDaemon(paneDir, (frame) => {
+        refusedFrames.push(frame.channel);
+        return { error: { message: 'The card names a file that isn\'t on this computer.', code: 'ERR_NOTIFY_UNLINKED_PATH', next: 'Pass it in --links.' } };
+      }, () => runCliOnce(runtime, ['notify', '--ui', 'approve', '--title', 'Ship /tmp/nope/x.md?', '--json'], paneDir, 20_000, outsidePane));
+      assert.notStrictEqual(refused.code, 0, `${runtime} notify refused by its check`);
+      assert.match(refused.stderr, /ERR_NOTIFY_UNLINKED_PATH|isn't on this computer/u);
+      assert.deepStrictEqual(refusedFrames, ['runpane:notify:check'], `${runtime} notify posts nothing its check refused`);
+
+      // No Pane: --check is unavailable, and says so.
+      const offline = await runCliOnce(runtime, [...card, '--check', '--json'], paneDir, 20_000, outsidePane);
+      assert.notStrictEqual(offline.code, 0);
+      assert.match(offline.stderr, /can't check a card without posting it/u, `${runtime} notify --check without Pane: ${offline.stderr}`);
+    }
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+}
+
 async function checkNotifyParity() {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-notify-'));
   const insidePane = {
@@ -6958,6 +7028,7 @@ async function checkNotifyParity() {
       'Reply r-2 on n-1: "Only the train" (picked: — · One train). Run `runpane notify --took r-2 answer` if this answers it.'],
     [{ answer: 'Yes · One train', answers: ['Yes', 'One train'] }, 'Answer: Yes · One train'],
     [{ took: 'question', id: 'n-1' }, 'Taken as a question (id n-1).'],
+    [{ closed: true, id: 'n-1' }, 'Closed n-1. Nothing was sent.'],
   ];
   const links = [{ label: 'Notes', path: 'docs/RELEASE.md' }, { label: 'PR #812', url: 'https://github.com/org/repo/pull/812' }];
   const notifyLinks = JSON.stringify(links);
@@ -6967,59 +7038,48 @@ async function checkNotifyParity() {
   ];
   const notifyQuestions = JSON.stringify(questions);
   const frames = { npm: [], pip: [] };
+  const checks = { npm: [], pip: [] };
+  // Every card runs Pane's check before it waits; its frames are kept apart from the notify ones.
+  const notifyReply = (runtime, result, warnings = []) => (frame) => {
+    if (frame.channel === 'runpane:notify:check') {
+      checks[runtime].push(frame);
+      return { result: { check: true, card: frame.args[0], warnings } };
+    }
+    frames[runtime].push(frame);
+    return { result };
+  };
   try {
     for (const runtime of ['npm', 'pip']) {
       for (const [result, line] of results) {
         for (const json of [true, false]) {
-          const run = await withFakeDaemon(paneDir, (frame) => {
-            frames[runtime].push(frame);
-            return { result };
-          }, () => runCliOnce(runtime, json ? [...ask, '--json'] : ask, paneDir, 20_000, insidePane));
+          const run = await withFakeDaemon(paneDir, notifyReply(runtime, result), () => runCliOnce(runtime, json ? [...ask, '--json'] : ask, paneDir, 20_000, insidePane));
           assert.strictEqual(run.code, 0, `${runtime} notify exited ${run.code}. stdout=${run.stdout} stderr=${run.stderr}`);
           if (json) assert.deepStrictEqual(JSON.parse(run.stdout), result, `${runtime} notify --json printed the wrong result`);
           else assert.strictEqual(run.stdout.trim(), line, `${runtime} notify printed the wrong line`);
         }
       }
       // links go with any ui, and reach Pane as given.
-      const linked = await withFakeDaemon(paneDir, (frame) => {
-        frames[runtime].push(frame);
-        return { result: { delivered: 'screen' } };
-      }, () => runCliOnce(runtime, ['notify', '--ui', 'info', '--title', 'Notes are ready', '--links', notifyLinks, '--json'], paneDir, 20_000, outsidePane));
+      const linked = await withFakeDaemon(paneDir, notifyReply(runtime, { delivered: 'screen' }), () => runCliOnce(runtime, ['notify', '--ui', 'info', '--title', 'Notes are ready', '--links', notifyLinks, '--json'], paneDir, 20_000, outsidePane));
       assert.deepStrictEqual(JSON.parse(linked.stdout), { delivered: 'screen' }, `${runtime} notify --links: ${linked.stderr}`);
-      const approval = await withFakeDaemon(paneDir, (frame) => {
-        frames[runtime].push(frame);
-        return { result: { approved: true } };
-      }, () => runCliOnce(runtime, [
+      const approval = await withFakeDaemon(paneDir, notifyReply(runtime, { approved: true }), () => runCliOnce(runtime, [
         'notify', '--ui', 'approve', '--title', 'Drop the table?', '--detail', 'DROP TABLE t;', '--detail-label', 'Show the SQL', '--json',
       ], paneDir, 20_000, outsidePane));
       assert.deepStrictEqual(JSON.parse(approval.stdout), { approved: true });
-      const resumed = await withFakeDaemon(paneDir, (frame) => {
-        frames[runtime].push(frame);
-        return { result: { approved: true } };
-      }, () => runCliOnce(runtime, ['notify', '--resume', 'n-1', '--json'], paneDir, 20_000, outsidePane));
+      const resumed = await withFakeDaemon(paneDir, notifyReply(runtime, { approved: true }), () => runCliOnce(runtime, ['notify', '--resume', 'n-1', '--json'], paneDir, 20_000, outsidePane));
       assert.deepStrictEqual(JSON.parse(resumed.stdout), { approved: true });
       // --took takes its id and then answer or question; --update needs whatChanged, and asked when it answers a typed question.
-      const took = await withFakeDaemon(paneDir, (frame) => {
-        frames[runtime].push(frame);
-        return { result: { took: 'answer', id: 'n-1' } };
-      }, () => runCliOnce(runtime, ['notify', '--took', 'Q-20', 'answer'], paneDir, 20_000, outsidePane));
+      const took = await withFakeDaemon(paneDir, notifyReply(runtime, { took: 'answer', id: 'n-1' }), () => runCliOnce(runtime, ['notify', '--took', 'Q-20', 'answer'], paneDir, 20_000, outsidePane));
       assert.strictEqual(took.stdout.trim(), 'Taken as the answer (id n-1).', `${runtime} notify --took: ${took.stderr}`);
-      await withFakeDaemon(paneDir, (frame) => {
-        frames[runtime].push(frame);
-        return { result: { took: 'question', id: 'n-1' } };
-      }, () => runCliOnce(runtime, ['notify', '--took=Q-20', 'question', '--status', 'Checking the logs', '--json'], paneDir, 20_000, outsidePane));
-      const updated = await withFakeDaemon(paneDir, (frame) => {
-        frames[runtime].push(frame);
-        return { result: { answer: 'Turn it on' } };
-      }, () => runCliOnce(runtime, [
+      await withFakeDaemon(paneDir, notifyReply(runtime, { took: 'question', id: 'n-1' }), () => runCliOnce(runtime, ['notify', '--took=Q-20', 'question', '--status', 'Checking the logs', '--json'], paneDir, 20_000, outsidePane));
+      const updated = await withFakeDaemon(paneDir, notifyReply(runtime, { answer: 'Turn it on' }), () => runCliOnce(runtime, [
         'notify', '--update', 'Q-20', '--asked', 'Can it be undone?', '--what-changed', 'Added: Settings turns it off',
         '--context', 'It can be undone.', '--choices', '[{"label":"Turn it on","was":"Yes"},{"label":"Wait"}]', '--links', '[{"label":"Q-19","approval":"Q-19"}]', '--json',
       ], paneDir, 20_000, insidePane));
       assert.deepStrictEqual(JSON.parse(updated.stdout), { answer: 'Turn it on' }, `${runtime} notify --update: ${updated.stderr}`);
-      await withFakeDaemon(paneDir, (frame) => {
-        frames[runtime].push(frame);
-        return { result: { answer: 'Ship · Skip', answers: ['Ship', 'Skip'] } };
-      }, () => runCliOnce(runtime, ['notify', '--ui', 'options', '--title', 'Ship 2.5?', '--questions', notifyQuestions, '--json'], paneDir, 20_000, outsidePane));
+      await withFakeDaemon(paneDir, notifyReply(runtime, { answer: 'Ship · Skip', answers: ['Ship', 'Skip'] }), () => runCliOnce(runtime, ['notify', '--ui', 'options', '--title', 'Ship 2.5?', '--questions', notifyQuestions, '--json'], paneDir, 20_000, outsidePane));
+      // --close withdraws the caller's own card and sends nothing else.
+      const closed = await withFakeDaemon(paneDir, notifyReply(runtime, { closed: true, id: 'n-1' }), () => runCliOnce(runtime, ['notify', '--close', 'Q-20', '--json'], paneDir, 20_000, outsidePane));
+      assert.deepStrictEqual(JSON.parse(closed.stdout), { closed: true, id: 'n-1' }, `${runtime} notify --close: ${closed.stderr}`);
 
       // No Pane is listening: an unavailable result, not an error, so the agent asks in its terminal.
       const offline = await runCliOnce(runtime, [...ask, '--json'], paneDir, 20_000, insidePane);
@@ -7035,21 +7095,22 @@ async function checkNotifyParity() {
     returnAfterMs: 50000,
     caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir, agent: 'Cursor' },
   };
-  assert.deepStrictEqual(frames.npm.map((frame) => frame.channel), Array(results.length * 2 + 7).fill('runpane:notify'));
+  assert.deepStrictEqual(frames.npm.map((frame) => frame.channel), Array(results.length * 2 + 8).fill('runpane:notify'));
   assert.deepStrictEqual(frames.npm[0].args, [question]);
-  assert.deepStrictEqual(frames.npm.at(-7).args, [{ ui: 'info', title: 'Notes are ready', links, caller: { cwd: rootDir } }]);
-  assert.deepStrictEqual(frames.npm.at(-6).args, [{
+  assert.deepStrictEqual(frames.npm.at(-8).args, [{ ui: 'info', title: 'Notes are ready', links, caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-7).args, [{
     ui: 'approve', title: 'Drop the table?', detail: 'DROP TABLE t;', detailLabel: 'Show the SQL', caller: { cwd: rootDir },
   }]);
-  assert.deepStrictEqual(frames.npm.at(-5).args, [{ resume: 'n-1', caller: { cwd: rootDir } }]);
-  assert.deepStrictEqual(frames.npm.at(-4).args, [{ took: 'Q-20', tookAs: 'answer', caller: { cwd: rootDir } }]);
-  assert.deepStrictEqual(frames.npm.at(-3).args, [{ took: 'Q-20', tookAs: 'question', status: 'Checking the logs', caller: { cwd: rootDir } }]);
-  assert.deepStrictEqual(frames.npm.at(-2).args, [{
+  assert.deepStrictEqual(frames.npm.at(-6).args, [{ resume: 'n-1', caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-5).args, [{ took: 'Q-20', tookAs: 'answer', caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-4).args, [{ took: 'Q-20', tookAs: 'question', status: 'Checking the logs', caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-3).args, [{
     update: 'Q-20', asked: 'Can it be undone?', whatChanged: 'Added: Settings turns it off', context: 'It can be undone.',
     choices: [{ label: 'Turn it on', was: 'Yes' }, { label: 'Wait' }], links: [{ label: 'Q-19', approval: 'Q-19' }],
     returnAfterMs: 50000, caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir, agent: 'Cursor' },
   }]);
-  assert.deepStrictEqual(frames.npm.at(-1).args, [{ ui: 'options', title: 'Ship 2.5?', questions, caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-2).args, [{ ui: 'options', title: 'Ship 2.5?', questions, caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-1).args, [{ close: 'Q-20', caller: { cwd: rootDir } }]);
   const Ajv = require(require.resolve('ajv', { paths: [rootDir] }));
   const ajv = new Ajv({ allErrors: true });
   const { $schema: _metaSchema, ...contractDocument } = contract;
@@ -7063,6 +7124,11 @@ async function checkNotifyParity() {
     assert.ok(valid(result), `notifyResult covers ${JSON.stringify(result)}: ${ajv.errorsText(valid.errors)}`);
   }
   assert.deepStrictEqual(frames.pip.map((frame) => frame.args), frames.npm.map((frame) => frame.args), 'Python and Node notify sent different requests');
+  // Each card was checked first with the request it then sent; --resume, --took and --close ask nothing new.
+  const asked = frames.npm.filter((frame) => frame.args[0].resume === undefined && frame.args[0].took === undefined && frame.args[0].close === undefined);
+  assert.deepStrictEqual(checks.npm.map((frame) => frame.args), asked.map((frame) => frame.args), 'notify checks each card with the request it sends');
+  assert.deepStrictEqual(checks.pip.map((frame) => frame.args), checks.npm.map((frame) => frame.args), 'Python and Node checked different cards');
+  await checkNotifyCardCheck();
 
   // Invalid input fails before any request, naming the field, the same way in both wrappers.
   const sevenLinks = JSON.stringify(Array.from({ length: 7 }, (_, index) => ({ label: `l${index}`, path: `f${index}.md` })));
@@ -7096,7 +7162,13 @@ async function checkNotifyParity() {
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes"}]'], 'links[0] needs one of "path" (a file), "url" (a web page) or "approval" (another approval\'s id or Q-n).'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Q-1","approval":" "}]'], 'links[0] approval must be another approval\'s id or Q-n.'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes","path":" "}]'], 'links[0] path must be non-empty text.'],
-    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"PR","url":"https://example.com"},{"label":"Files","url":"file:///etc/hosts"}]'], 'links[1] url must start with http:// or https://.'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"PR","url":"https://example.com"},{"label":"Files","url":"ftp://files.example/a.md"}]'], 'links[1] url must start with http:// or https://; for a local file use {"label":…,"path":"/abs/path"}; url is only for http(s) pages.'],
+    // On Windows another host's file:// URL is a UNC path, which both wrappers take as the path.
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Share","url":"file://server/share/a.md"}]'], 'links[0] url is a file:// URL that names no file on this computer (it needs file:///abs/path or file://localhost/abs/path); for a local file use {"label":…,"path":"/abs/path"}.'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Docs","url":"file:docs/a.md"}]'], 'links[0] url is a file:// URL that names no file on this computer (it needs file:///abs/path or file://localhost/abs/path); for a local file use {"label":…,"path":"/abs/path"}.'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Bad","url":"file:///tmp/a%ZZ.md"}]'], 'links[0] url is a file:// URL that names no file on this computer (it needs file:///abs/path or file://localhost/abs/path); for a local file use {"label":…,"path":"/abs/path"}.'],
+    ['check', ['--check', '--resume', 'n-1'], 'check shows a new card or an --update without posting it, so it does not go with --resume, --took or --close.'],
+    ['check', ['--check', '--close', 'Q-20'], 'check shows a new card or an --update without posting it, so it does not go with --resume, --took or --close.'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"","url":"https://example.com"}]'], 'links[0] must be an object with a non-empty "label" and one of "path", "url" or "approval".'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', `[{"label":"${'x'.repeat(81)}","path":"a.md"}]`], 'links[0] label takes up to 80 characters; got 81.'],
     ['questions', ['--ui', 'ask', '--title', 'x', '--questions', twoQuestions], 'questions is only for ui options; this call is ui ask.'],
@@ -7115,6 +7187,8 @@ async function checkNotifyParity() {
     ['took', ['--took', 'Q-20', 'answer', '--ui', 'ask', '--title', 'x'], 'took records how a reply was taken, so it takes no other fields; remove ui, title.'],
     ['took', ['--took', 'Q-20', 'answer', '--update', 'Q-20'], 'took records how a reply was taken, so it takes no other fields; remove update.'],
     ['tookAs', ['--took-as', 'answer'], 'tookAs goes with took: --took <id|Q-n> answer|question.'],
+    ['close', ['--close', ' '], "close must be the approval's id or Q-n, such as --close Q-20."],
+    ['close', ['--close', 'Q-20', '--ui', 'ask', '--title', 'x'], 'close withdraws a card you asked, so it takes no other fields; remove ui, title.'],
     ['status', ['--took', 'Q-20', 'answer', '--status', 'Checking'], 'status says what you are doing about a question, so it goes with --took <id> question.'],
     ['status', ['--took', 'Q-20', 'question', '--status', ' '], 'status must be non-empty text, such as "Checking the logs".'],
     ['status', ['--ui', 'ask', '--title', 'x', '--status', 'Checking'], 'status goes with --took <id|Q-n> question.'],

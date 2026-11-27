@@ -5,6 +5,7 @@ import type { RemoteDaemonEventEnvelope } from '@shared/types/remoteDaemon';
 
 import { useDaemon } from './DaemonProvider';
 import { invokeChannel } from './invoke';
+import { readUnlessRefused } from './readOnlyReads';
 import { useScreenReads } from './screenFocus';
 
 /**
@@ -21,10 +22,10 @@ export function useInvokeQuery<T>(
   args: unknown[] = [],
   options?: Omit<UseQueryOptions<T>, 'queryKey' | 'queryFn'>,
 ) {
-  const { client } = useDaemon();
+  const { client, profile } = useDaemon();
   const queryKey = useDaemonQueryKey(channel, args);
   const screen = useScreenReads(queryKey);
-  return useQuery<T>({ ...screen, ...options, queryKey, queryFn: () => invokeChannel<T>(client, channel, args) });
+  return useQuery<T>({ ...screen, ...options, queryKey, queryFn: () => readUnlessRefused<T>(profile, channel, () => invokeChannel<T>(client, channel, args)) });
 }
 
 /**

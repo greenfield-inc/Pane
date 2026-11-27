@@ -23,10 +23,14 @@ export interface TerminalSessionOptions {
   /** Identifies this viewer to the host's visibility tracking. */
   viewerId: string;
   sink: TerminalSink;
+  /** Runs before a restore reads the host's screen: learns the size to draw it at. */
+  beforeSnapshot?: () => Promise<void>;
   /** A restore failed; the screen shows stale or no output until the next one. */
   onError?: (error: unknown) => void;
   /** This screen is starting the panel: its shell, and any agent in it, are only now launching. */
   onStart?: () => void;
+  /** The panel isn't running and the host didn't start it: this phone only watches. */
+  onNotRunning?: () => void;
 }
 
 export interface TerminalSize {
@@ -43,7 +47,6 @@ export class TerminalSession {
   private live = false;
   private pendingAck = 0;
   private ackInFlight = false;
-  private inputQueue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly options: TerminalSessionOptions) {}
 
@@ -73,6 +76,7 @@ export class TerminalSession {
         // An unstarted panel ignores it and starts at the size below instead.
         this.sizeHostAt(cols(), rows()),
         invoke('terminal:setVisibility', [panelId, true, viewerId]),
+        this.options.beforeSnapshot?.(),
       ]);
       if (generation !== this.generation) return;
       if (initialized !== true) {
@@ -81,7 +85,8 @@ export class TerminalSession {
         sink.reset('');
         this.live = true;
         this.options.onStart?.();
-        await invoke('panels:initialize', [panelId, { sessionId, cols: cols(), rows: rows() }]);
+        const started = await invoke('panels:initialize', [panelId, { sessionId, cols: cols(), rows: rows() }]);
+        if (started === false && generation === this.generation) this.options.onNotRunning?.();
         return;
       }
       // The screen resized while the first trip was out.
@@ -143,12 +148,13 @@ export class TerminalSession {
       });
   }
 
-  /** Sends keystrokes in order: each waits for the previous one to reach the host. */
-  sendInput(data: string): Promise<void> {
-    const { invoke, panelId } = this.options;
-    const sent = this.inputQueue.then(() => invoke('terminal:input', [panelId, data]));
-    this.inputQueue = sent.catch(() => undefined);
-    return sent.then(() => undefined);
+  /**
+   * Sends keystrokes at once. The client keeps them in order and batches what
+   * piles up behind a request in flight, so a scroll's wheel reports cost one
+   * round trip, not one each, and a message sent after them is not held back.
+   */
+  async sendInput(data: string): Promise<void> {
+    await this.options.invoke('terminal:input', [this.options.panelId, data]);
   }
 
   resize(size: TerminalSize): void {

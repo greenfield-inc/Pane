@@ -399,6 +399,10 @@
           "description": "The command can reach services outside the local Pane app (MCP openWorldHint).",
           "type": "boolean"
         },
+        "otherMachines": {
+          "description": "The MCP tool takes a `machine` input and runs as `runpane workspace <machine> <command>`: a read that a computer with read-only access answers too.",
+          "type": "boolean"
+        },
         "cliOnlyFlags": {
           "description": "Flags the CLI accepts that the command's MCP tool leaves out, such as a mode that changes state on a command otherwise read-only.",
           "$ref": "#/$defs/stringList"
@@ -880,6 +884,10 @@
             "minLength": 1
           }
         },
+        "skills": {
+          "description": "How the agent's command list marks a skill, and how a message runs one. meta: an _meta kind; Pane sends the skill as a `/name` message part of its own. dollar: a `$name` command name; the agent reads `$name` in the text. Absent: skills are not marked.",
+          "enum": ["meta", "dollar"]
+        },
         "legacyClients": {
           "description": "Pane apps from before the agent catalog can show this agent's chat tabs. The host hides every other agent's chat tabs from them.",
           "type": "boolean"
@@ -969,6 +977,7 @@
         "browser screenshot",
         "browser click",
         "browser type",
+        "browser fill",
         "browser press",
         "browser select",
         "browser scroll",
@@ -1220,6 +1229,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "browser type": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser fill": {
           "$ref": "#/$defs/helpLines"
         },
         "browser press": {

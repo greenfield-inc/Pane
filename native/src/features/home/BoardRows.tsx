@@ -4,15 +4,17 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { AGENT_LAUNCH_PRESETS } from '@shared/constants/agentLaunchPresets';
 
 import { sinceLabel } from '@/features/allMachines/allMachinesList';
+import { NewBadge } from '@/features/approvals/NewBadge';
 import type { Machine } from '@/features/machines/machines';
 import { MachineMark } from '@/features/machines/MachineMark';
 import { PausedBadge, StatusBadge, statusPresentation } from '@/features/panes/StatusBadge';
-import { SwipeRow, swipeRowAccessibility } from '@/features/panes/SwipeRow';
+import { SwipeRow, useSwipeRowAccessibility } from '@/features/panes/SwipeRow';
 import { useTheme } from '@/theme';
 import { Icon, Skeleton, Text } from '@/ui';
 import type { IconProps } from '@/ui/Icon';
 
 import type { PaneRecentRow } from './statusBoard';
+import { Focusable } from '@/features/controller/Focusable';
 
 /** How far a row from a machine that went offline fades: the same as a disconnected home. */
 export const STALE_OPACITY = 0.45;
@@ -49,7 +51,7 @@ export function RowDivider({ inset = 33 }: { inset?: number }) {
 }
 
 /** A question or permission request: its status dot, who asks, what, how long ago, and what's under it. */
-export function ApprovalRow({ title, detail, below, spoken = [], at, machine, stale = false, done = false, divided, onPress, onArchive, background, testID }: {
+export function ApprovalRow({ title, detail, below, spoken = [], at, machine, stale = false, done = false, fresh = false, divided, onPress, onArchive, background, testID }: {
   title: string;
   detail: string;
   /** A question's subtitle and reply status. */
@@ -63,6 +65,8 @@ export function ApprovalRow({ title, detail, below, spoken = [], at, machine, st
   stale?: boolean;
   /** Answered, held for Undo, or with the agent: a gray dot. */
   done?: boolean;
+  /** New since you last looked at Needs you: "New" before its time. */
+  fresh?: boolean;
   divided: boolean;
   onPress: () => void;
   /** Swipe left (or the screen reader's Archive) to archive it; `swipeId` names its swipe action. */
@@ -73,13 +77,14 @@ export function ApprovalRow({ title, detail, below, spoken = [], at, machine, st
 }) {
   const theme = useTheme();
   const time = sinceLabel(at, Date.now());
+  const accessibility = useSwipeRowAccessibility(onArchive ? { onArchive: onArchive.archive } : undefined);
   const content = (
     <Pressable
       testID={testID}
       accessibilityRole="button"
-      accessibilityLabel={[title, detail, ...spoken, time, machine?.name].filter(Boolean).join(', ')}
+      accessibilityLabel={[fresh ? 'New' : undefined, title, detail, ...spoken, time, machine?.name].filter(Boolean).join(', ')}
       accessibilityHint={stale ? `${machine?.name ?? 'Its machine'} is offline` : undefined}
-      {...(onArchive ? swipeRowAccessibility({ onArchive: onArchive.archive }) : {})}
+      {...accessibility}
       onPress={onPress}
       style={({ pressed }) => [styles.approval, { opacity: stale ? STALE_OPACITY : 1 }, onArchive && { backgroundColor: background }, pressed && { backgroundColor: theme.colors.surfacePressed }]}
     >
@@ -89,6 +94,7 @@ export function ApprovalRow({ title, detail, below, spoken = [], at, machine, st
         <View style={styles.titleLine}>
           {machine ? <MachineMark os={machine.os} slot={machine.slot} state={machine.state} size={12} /> : null}
           <Text variant="callout" numberOfLines={1} style={[styles.fill, styles.bold]}>{title}</Text>
+          {fresh ? <NewBadge label="New" testID={`${testID}-new`} /> : null}
           <Text variant="footnote" tone="muted" style={styles.time}>{time}</Text>
         </View>
         <Text variant="rowDetail" tone="muted" numberOfLines={2}>{detail}</Text>
@@ -96,17 +102,22 @@ export function ApprovalRow({ title, detail, below, spoken = [], at, machine, st
       </View>
     </Pressable>
   );
-  if (!onArchive) return content;
   return (
-    <SwipeRow testIDPrefix="approval" id={onArchive.swipeId} onArchive={onArchive.archive}>
-      <View style={{ backgroundColor: theme.colors.background }}>{content}</View>
-    </SwipeRow>
+    <Focusable onActivate={onPress}>
+      {onArchive ? (
+        <SwipeRow testIDPrefix="approval" id={onArchive.swipeId} onArchive={onArchive.archive}>
+          <View style={{ backgroundColor: theme.colors.background }}>{content}</View>
+        </SwipeRow>
+      ) : content}
+    </Focusable>
   );
 }
 
 /** A Working or Ready Pane: its name over agent, time and repository, with a chevron. */
-export function ActivityRow({ row, machine, divided, onPress, swipe, background }: {
+export function ActivityRow({ row, machine, divided, onPress, swipe, background, fresh = false }: {
   row: PaneRecentRow;
+  /** New since you last looked at Needs you: "New" at its end. */
+  fresh?: boolean;
   /** The card's colour, over the page's own so its swipe actions stay hidden behind a tint. */
   background?: string;
   machine?: MarkedMachine;
@@ -119,13 +130,14 @@ export function ActivityRow({ row, machine, divided, onPress, swipe, background 
   const agent = AGENT_LAUNCH_PRESETS.find(preset => preset.id === pane.agent)?.title;
   const detail = [agent, pane.activeAt ? sinceLabel(pane.activeAt, Date.now()) : undefined, pane.repository].filter(Boolean).join(' · ');
   const actions = swipe ? { pinned: pane.pinned, onTogglePinned: swipe.onTogglePinned, onArchive: swipe.onArchive, pause: { paused: Boolean(pane.paused), onToggle: swipe.onTogglePaused } } : undefined;
+  const accessibility = useSwipeRowAccessibility(actions);
   const content = (
     <Pressable
       testID={`board-pane-${row.key}`}
       accessibilityRole="button"
-      accessibilityLabel={[pane.name, statusPresentation[pane.status].label, detail, pane.session, machine?.name].filter(Boolean).join(', ')}
+      accessibilityLabel={[fresh ? 'New' : undefined, pane.name, statusPresentation[pane.status].label, detail, pane.session, machine?.name].filter(Boolean).join(', ')}
       accessibilityHint={row.stale ? `${machine?.name ?? 'Its machine'} is offline` : undefined}
-      {...(actions ? swipeRowAccessibility(actions) : {})}
+      {...accessibility}
       onPress={onPress}
       style={({ pressed }) => [styles.activity, { opacity: row.stale ? STALE_OPACITY : 1, backgroundColor: pressed ? theme.colors.surfacePressed : background ?? theme.colors.surfaceRaised }]}
     >
@@ -138,14 +150,18 @@ export function ActivityRow({ row, machine, divided, onPress, swipe, background 
         </View>
         <Text variant="rowDetail" tone="muted" numberOfLines={1}>{detail}</Text>
       </View>
+      {fresh ? <NewBadge label="New" testID={`board-pane-${row.key}-new`} /> : null}
       <Icon ios="chevron.right" android="chevron_right" size={14} />
     </Pressable>
   );
-  if (!actions) return content;
   return (
-    <SwipeRow testIDPrefix="pane" id={pane.id} {...actions}>
-      <View style={{ backgroundColor: theme.colors.background }}>{content}</View>
-    </SwipeRow>
+    <Focusable onActivate={onPress}>
+      {actions ? (
+        <SwipeRow testIDPrefix="pane" id={pane.id} {...actions}>
+          <View style={{ backgroundColor: theme.colors.background }}>{content}</View>
+        </SwipeRow>
+      ) : content}
+    </Focusable>
   );
 }
 
@@ -156,25 +172,36 @@ export function GroupRow({ icon, title, count, open, onPress, testID }: {
   count?: number;
   /** Set for a group that opens in place: its chevron points down while it is open. */
   open?: boolean;
-  onPress: () => void;
+  /** Left out for a plain heading: no chevron, nothing to press. */
+  onPress?: () => void;
   testID: string;
 }) {
   const theme = useTheme();
   const chevron = open === undefined ? 'right' : open ? 'down' : 'right';
+  if (!onPress) {
+    return (
+      <View testID={testID} accessible accessibilityRole="header" accessibilityLabel={count === undefined ? title : `${title}, ${count}`} style={styles.group}>
+        <View style={styles.groupIcon}><Icon ios={icon.ios} android={icon.android} size={16} color={theme.colors.textSecondary} /></View>
+        <Text variant="rowValue" numberOfLines={1} style={[styles.fill, styles.bold]}>{title}</Text>
+      </View>
+    );
+  }
   return (
-    <Pressable
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel={count === undefined ? title : `${title}, ${count}`}
-      accessibilityState={open === undefined ? undefined : { expanded: open }}
-      onPress={onPress}
-      style={({ pressed }) => [styles.group, pressed && { backgroundColor: theme.colors.surfacePressed }]}
-    >
-      <View style={styles.groupIcon}><Icon ios={icon.ios} android={icon.android} size={16} color={theme.colors.textSecondary} /></View>
-      <Text variant="rowValue" numberOfLines={1} style={[styles.fill, styles.bold]}>{title}</Text>
-      {count === undefined ? null : <Text variant="rowDetail" tone="muted" style={styles.tabular}>{String(count)}</Text>}
-      <Icon ios={chevron === 'down' ? 'chevron.down' : 'chevron.right'} android={chevron === 'down' ? 'expand_more' : 'chevron_right'} size={13} />
-    </Pressable>
+    <Focusable onActivate={onPress}>
+      <Pressable
+        testID={testID}
+        accessibilityRole="button"
+        accessibilityLabel={count === undefined ? title : `${title}, ${count}`}
+        accessibilityState={open === undefined ? undefined : { expanded: open }}
+        onPress={onPress}
+        style={({ pressed }) => [styles.group, pressed && { backgroundColor: theme.colors.surfacePressed }]}
+      >
+        <View style={styles.groupIcon}><Icon ios={icon.ios} android={icon.android} size={16} color={theme.colors.textSecondary} /></View>
+        <Text variant="rowValue" numberOfLines={1} style={[styles.fill, styles.bold]}>{title}</Text>
+        {count === undefined ? null : <Text variant="rowDetail" tone="muted" style={styles.tabular}>{String(count)}</Text>}
+        <Icon ios={chevron === 'down' ? 'chevron.down' : 'chevron.right'} android={chevron === 'down' ? 'expand_more' : 'chevron_right'} size={13} />
+      </Pressable>
+    </Focusable>
   );
 }
 

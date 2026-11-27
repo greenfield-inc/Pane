@@ -30,7 +30,7 @@ function host(count: number) {
     onEvent: callback => { events.add(callback); return () => events.delete(callback); },
     onState: () => () => undefined,
     send: unused, receipt: unused, unqueue: unused, sendNow: unused, editQueued: unused, clear: unused, stopTask: unused, configure: unused, cancel: unused, permission: unused, answer: unused, restart: unused, signIn: unused,
-    conversations: unused, resume: unused, dismissBanner: unused, agents: unused,
+    conversations: unused, resume: unused, dismissBanner: unused, agents: unused, files: unused,
   };
   /** Appends a message on the host; `deliver: false` loses the event on the way. */
   const append = (deliver = true) => {
@@ -243,6 +243,120 @@ describe('chat tab viewer reopen', () => {
     await settle();
     closers.forEach(close => close());
     expect(viewers.map(viewer => ids(viewer).length)).toEqual([0, 3, 3, 3, 3, 3]);
+  });
+
+  it('a closed chat shown again keeps its messages when the chat it replaces closes in the same switch (T-116 PR 6)', async () => {
+    const fake = host(3);
+    const [shownAgain, ...rest] = ['a', 'b', 'c', 'd', 'e'].map(panel => new ChatTabViewer(fake.client, panel));
+    const closers = [shownAgain, ...rest].map(viewer => viewer.subscribe(() => undefined));
+    const leaving = new ChatTabViewer(fake.client, 'f');
+    const closeLeaving = leaving.subscribe(() => undefined);
+    await settle();
+    closers.forEach(close => close());
+    expect(ids(shownAgain), 'held while closed').toHaveLength(3);
+
+    // The next chat renders (and is primed) before the one it replaces unmounts, then subscribes.
+    shownAgain.prime({ ...fake.view(), panelId: 'a' }, performance.now());
+    closeLeaving();
+    shownAgain.subscribe(() => undefined);
+
+    expect(ids(shownAgain)).toHaveLength(3);
+    expect(rest.map(viewer => ids(viewer).length)).toEqual([3, 3, 3, 3]);
+  });
+
+  it('chats primed by renders that were thrown away keep their messages for only the newest few (review SF-4)', async () => {
+    const fake = host(3);
+    const kept = ['k1', 'k2', 'k3', 'k4', 'k5'].map(panel => new ChatTabViewer(fake.client, panel));
+    kept.map(viewer => viewer.subscribe(() => undefined)).forEach(close => close());
+    await settle();
+    const primed = Array.from({ length: 10 }, (_, index) => new ChatTabViewer(fake.client, `x${index}`));
+    for (const viewer of primed) viewer.prime({ ...fake.view(), panelId: viewer.panelId }, performance.now());
+
+    expect(primed.map(viewer => ids(viewer).length)).toEqual([0, 0, 0, 0, 0, 0, 0, 3, 3, 3]);
+    // The five closed chats are not pushed out by them.
+    expect(kept.map(viewer => ids(viewer).length)).toEqual([3, 3, 3, 3, 3]);
+  });
+
+  it('a chat that is not kept on close holds nothing once closed, and pushes none of the five out (review suggestion)', async () => {
+    const fake = host(3);
+    const kept = ['k1', 'k2', 'k3', 'k4', 'k5'].map(panel => new ChatTabViewer(fake.client, panel));
+    kept.map(viewer => viewer.subscribe(() => undefined)).forEach(close => close());
+    const passing = new ChatTabViewer(fake.client, 'remote');
+    passing.setKeepOnClose(false);
+    passing.subscribe(() => undefined)();
+    await settle();
+
+    expect(ids(passing)).toEqual([]);
+    expect(kept.map(viewer => ids(viewer).length)).toEqual([3, 3, 3, 3, 3]);
+  });
+
+  it('a read answering an older copy of the same conversation never replaces the newer window shown (review follow-up SF)', async () => {
+    const fake = host(3);
+    const viewer = new ChatTabViewer(fake.client, 'p');
+    viewer.subscribe(() => undefined);
+    await settle();
+    fake.append();
+    await settle();
+    expect(ids(viewer)).toEqual(['m0', 'm1', 'm2', 'm3']);
+
+    // A held client answers a copy from before the last event.
+    const older = fake.view();
+    older.transcript = { ...older.transcript!, revision: older.transcript!.revision - 1, messages: older.transcript!.messages.slice(0, 3) };
+    fake.get.mockResolvedValueOnce(older);
+    await viewer.refresh();
+    expect(ids(viewer)).toEqual(['m0', 'm1', 'm2', 'm3']);
+  });
+
+  it('a read answering an older copy while events arrive keeps the newer window and reads no more (CI smoke loop)', async () => {
+    const fake = host(3);
+    const viewer = new ChatTabViewer(fake.client, 'p');
+    viewer.subscribe(() => undefined);
+    await settle();
+    fake.append();
+    await settle();
+    // Every read from now on answers the copy from before the last event (a held copy, or a host that lags).
+    const older = fake.view();
+    older.transcript = { ...older.transcript!, revision: older.transcript!.revision - 1, messages: older.transcript!.messages.slice(0, 3) };
+    fake.get.mockClear();
+    fake.get.mockResolvedValue(older);
+    const reading = viewer.refresh();
+    fake.append();
+    await reading;
+    await settle();
+    await settle();
+
+    expect(ids(viewer)).toEqual(['m0', 'm1', 'm2', 'm3', 'm4']);
+    expect(fake.get.mock.calls.length).toBeLessThanOrEqual(2);
+  });
+
+  it('jump to latest from a scrolled-back window shows the newest window even when the read answers an older copy (review quick check suggestion)', async () => {
+    // A 900-message chat whose reads answer a held copy at revision 1000.
+    const view = (): ChatTabView => ({
+      panelId: 'p', agent: 'claude', generation: 1, status: 'idle', canAttachImages: false, controls: [], commands: [], permissions: [], questions: [], queue: [], messageCount: 900,
+      transcript: { panelId: 'p', generation: 1, revision: 1000, start: 700, messages: Array.from({ length: 200 }, (_, index) => message(700 + index)) },
+    });
+    let onEvent: ((event: ChatTabEvent) => void) | undefined;
+    const unused = async (): Promise<never> => { throw new Error('Not used by the viewer'); };
+    const client: ChatTabClient = {
+      get: async () => view(),
+      history: async (_panelId, before, limit) => Array.from({ length: Math.min(limit, before) }, (_, index) => message(before - Math.min(limit, before) + index)),
+      onEvent: callback => { onEvent = callback; return () => undefined; },
+      onState: () => () => undefined,
+      send: unused, receipt: unused, unqueue: unused, sendNow: unused, editQueued: unused, clear: unused, stopTask: unused, configure: unused, cancel: unused, permission: unused, answer: unused, restart: unused, signIn: unused,
+      conversations: unused, resume: unused, dismissBanner: unused, agents: unused, files: unused,
+    };
+    const viewer = new ChatTabViewer(client, 'p');
+    viewer.subscribe(() => undefined);
+    await settle();
+    for (let page = 0; page < 6; page++) await viewer.loadEarlier();
+    expect(viewer.snapshot().hasNewer).toBe(true);
+    // A live event past the scrolled-back window's end moves its revision to 1001.
+    onEvent?.({ panelId: 'p', generation: 1, revision: 1001, index: 900, change: { type: 'append', id: 'm900', role: 'assistant', part: { type: 'text', text: 'x' } } });
+
+    await viewer.jumpToLatest();
+    const shown = viewer.snapshot().transcript!;
+    expect(shown.start + shown.messages.length).toBe(900);
+    expect(viewer.snapshot().hasNewer).toBe(false);
   });
 
   it('counts a chat closed before its first read lands toward the five', async () => {

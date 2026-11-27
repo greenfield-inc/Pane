@@ -1,3 +1,4 @@
+import { useReadOnlyHost } from '../../../stores/readOnlyHostStore';
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import type { TodoDetail } from '../../../../../shared/types/todos';
@@ -37,6 +38,7 @@ export function todoSubTodosAnchor(number: number): string {
 export function TodoCard({ detail, onOpenTodo, onOpenImage, onAddSubTodo }: TodoCardProps) {
   const { todo } = detail;
   const act = useTodosStore((state) => state.act);
+  const readOnly = useReadOnlyHost();
   const isSub = todo.parentNumber !== null;
   return (
     <div className="mb-2 mt-3.5" data-testid="todo-card">
@@ -51,6 +53,7 @@ export function TodoCard({ detail, onOpenTodo, onOpenImage, onAddSubTodo }: Todo
                 type="button"
                 role="checkbox"
                 aria-checked={item.met}
+                disabled={readOnly}
                 onClick={() => void act({ kind: 'check', number: todo.number, index, met: !item.met })}
                 className="flex items-start gap-2 rounded text-left text-[13px] text-text-primary"
                 data-testid="todo-done-when-item"

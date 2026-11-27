@@ -2,12 +2,13 @@ import { boundary, decodeBoundary, type JsonValue } from './boundaryDecoder';
 import type { ParsedArgs } from './commands';
 import { invokeDaemon } from './daemonClient';
 import { RunpaneError } from './errors';
+import { refuseTeammate } from './secrets';
 
 // `runpane browser`: the browser tabs of the calling tab's Pane (docs/BROWSER_AGENTS.md).
 // Pane fills in the Pane from the caller and checks every request; nothing here names a Pane.
 
 /** The browser commands, and the flags each one takes. */
-export const BROWSER_VERBS = ['open', 'tabs', 'close', 'snapshot', 'screenshot', 'click', 'type', 'press', 'select', 'scroll', 'navigate', 'wait', 'dialog', 'evaluate', 'upload'] as const;
+export const BROWSER_VERBS = ['open', 'tabs', 'close', 'snapshot', 'screenshot', 'click', 'type', 'fill', 'press', 'select', 'scroll', 'navigate', 'wait', 'dialog', 'evaluate', 'upload'] as const;
 
 /** Flags that take a value, by request field. Numbers and JSON arrays are parsed here; Pane checks the rest. */
 export const BROWSER_VALUE_FLAGS = new Map<string, { field: string; kind: 'text' | 'number' | 'list' }>([
@@ -18,6 +19,9 @@ export const BROWSER_VALUE_FLAGS = new Map<string, { field: string; kind: 'text'
   ['--y', { field: 'y', kind: 'number' }],
   ['--button', { field: 'button', kind: 'text' }],
   ['--text', { field: 'text', kind: 'text' }],
+  // `browser fill` names a saved login; its value never passes through here.
+  ['--project', { field: 'project', kind: 'text' }],
+  ['--name', { field: 'name', kind: 'text' }],
   ['--key', { field: 'key', kind: 'text' }],
   ['--values', { field: 'values', kind: 'list' }],
   ['--dx', { field: 'dx', kind: 'number' }],
@@ -77,6 +81,7 @@ const tabResult = boundary.object({ tab: boundary.optional(boundary.string), url
 
 export async function runBrowser(parsed: ParsedArgs): Promise<number> {
   const verb = parsed.command.slice('browser '.length);
+  if (verb === 'fill') refuseTeammate('fill a saved login');
   const request = parsed.browserRequest ?? {};
   const result = await invokeDaemon(`runpane:browser:${verb}`, [request], boundary.json, { paneDir: parsed.paneDir, timeoutMs: CALL_TIMEOUT_MS });
   console.log(parsed.json ? JSON.stringify(result, null, 2) : humanText(verb, result));

@@ -8,6 +8,8 @@ import { Text } from './Text';
 
 export interface ListRowProps {
   title: string;
+  /** Lines the title may take before it ends in an ellipsis; 1 by default. */
+  titleLines?: number;
   subtitle?: string;
   /** Holds the subtitle at exactly this many lines, so swapping its text never resizes the row. */
   subtitleLines?: number;
@@ -32,7 +34,7 @@ export interface ListRowProps {
 }
 
 /** One row of a grouped card (ListSection). */
-export function ListRow({ title, subtitle, subtitleLines, leading, value, trailing, onPress, onLongPress, destructive, accent, accessibilityActions, onAccessibilityAction, testID }: ListRowProps) {
+export function ListRow({ title, titleLines = 1, subtitle, subtitleLines, leading, value, trailing, onPress, onLongPress, destructive, accent, accessibilityActions, onAccessibilityAction, testID }: ListRowProps) {
   const theme = useTheme();
   return (
     <Pressable
@@ -56,7 +58,7 @@ export function ListRow({ title, subtitle, subtitleLines, leading, value, traili
     >
       {leading ? <View style={styles.leading}>{leading}</View> : null}
       <View style={styles.body}>
-        <Text variant="rowTitle" tone={destructive ? 'danger' : accent ? 'accent' : 'primary'} numberOfLines={1}>{title}</Text>
+        <Text variant="rowTitle" tone={destructive ? 'danger' : accent ? 'accent' : 'primary'} numberOfLines={titleLines}>{title}</Text>
         {subtitle ? (
           <Text
             variant="rowDetail"

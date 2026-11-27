@@ -8,10 +8,11 @@
  * with one `open` call. Passing over a Session starts nothing and saves nothing, and
  * the cursor never resumes a paused chat (Enter or a click does, as before).
  *
- * Only this machine's Sessions follow the cursor (`rowShowsInstantly`), in its own sidebar
- * and in the All machines view; another machine's rows, worktree Pane and project rows keep
- * Enter, and so does every row in a window showing another machine. A Session whose agent
- * runs in a terminal is shown only by Enter or a click, as before.
+ * This machine's Sessions follow the cursor (`rowShowsInstantly`), in its own sidebar and in
+ * the All machines view, and so do the Sessions of the owner's mirrored machines in All machines
+ * (T-116 PR 6): those show read-only and never settle by themselves. A teammate's machine,
+ * worktree Pane and project rows keep Enter, and so does every row in a window showing another
+ * machine. A Session whose agent runs in a terminal is shown only by Enter or a click, as before.
  */
 import { useConfigStore } from '../stores/configStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -20,17 +21,26 @@ import { useSessionStore } from '../stores/sessionStore';
 import { cachedSessionView, peekSessionView } from '../stores/sessionViewCache';
 import { usePanelStore } from '../stores/panelStore';
 import { useAllMachinesStore } from '../stores/allMachinesStore';
+import { useMachineMirrorStore } from '../stores/machineMirrorStore';
+import { clearRemoteSession, showRemoteSession } from '../stores/remoteSessionView';
 import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { chatPausedMarkOf, panePausedMark } from '../../../shared/types/panels';
 import type { AppConfig } from '../types/config';
-import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 
 /** How long the cursor rests on a row before its Session is selected and its agent starts. */
 const SETTLE_MS = 1000;
 
 /** The sidebar row attribute naming the chat Session a row shows; set only where the cursor may follow. */
 export const SESSION_CURSOR_ATTRIBUTE = 'data-session-cursor';
+/** Beside it, the machine the Session is on (T-116 PR 6): the same Session id can be on two machines. */
+export const SESSION_CURSOR_MACHINE_ATTRIBUTE = 'data-session-cursor-machine';
+
+/** The two attributes a Session row carries when `rowShowsInstantly` says the cursor shows it. */
+export function sessionCursorAttributes(machineId: string, sessionId: string | undefined) {
+  return { [SESSION_CURSOR_ATTRIBUTE]: sessionId, [SESSION_CURSOR_MACHINE_ATTRIBUTE]: sessionId ? machineId : undefined } as const;
+}
 
 /** The window's host: null on this machine, undefined before the config loads. */
 function hostIdOf(config: AppConfig | null | undefined): string | null | undefined {
@@ -50,19 +60,24 @@ export function useCursorFollowEnabled(): boolean {
 /**
  * Whether a Session row on `machineId` shows its Session as the cursor passes, rather than
  * waiting for Enter (T-116). Both sidebars' Session rows ask it before they carry
- * `SESSION_CURSOR_ATTRIBUTE`. Today only this computer's rows, in a window on this computer:
- * a Session on another machine has nothing here to show until the window switches to it.
- * Mirrored machines (T-116 PR 6) widen this predicate, and a remote row will then also need
- * its machine in the row attribute and in the Session view cache's key, both of which name
- * a Session by its id alone today.
+ * `sessionCursorAttributes`. This computer's rows do, and so do the rows of each of the owner's
+ * machines the desktop mirrors (PR 6, D-500): those show read-only from the mirror, or from one
+ * read of their host for a Session the mirror lacks, without switching the window. A teammate's
+ * machine, or one the mirror doesn't hold, keeps Enter (D-5); so does every row in a window
+ * showing another machine.
  */
-export function rowShowsInstantly(machineId: string, config: AppConfig | null | undefined = useConfigStore.getState().config): boolean {
-  return cursorFollowEnabled(config) && machineId === LOCAL_MACHINE_ID;
+export function rowShowsInstantly(
+  machineId: string,
+  config: AppConfig | null | undefined = useConfigStore.getState().config,
+  mirrored: (machineId: string) => boolean = id => useMachineMirrorStore.getState().listings[id] !== undefined,
+): boolean {
+  return cursorFollowEnabled(config) && (machineId === LOCAL_MACHINE_ID || mirrored(machineId));
 }
 
 /** The same, for a row that should re-render when it changes. */
 export function useRowShowsInstantly(machineId: string): boolean {
-  return useConfigStore(state => rowShowsInstantly(machineId, state.config));
+  const isMirrored = useMachineMirrorStore(state => state.listings[machineId] !== undefined);
+  return useConfigStore(state => rowShowsInstantly(machineId, state.config, () => isMirrored));
 }
 
 let pending: string | undefined;
@@ -95,8 +110,10 @@ function listen(): void {
   });
   // A selection made any other way (a tile, a restore, another host) ends the cursor's intent,
   // and so does turning the setting off or the window leaving this machine.
-  useOrchestrationSessionStore.subscribe(state => {
+  useOrchestrationSessionStore.subscribe((state, prior) => {
     if (pending !== undefined && state.cursorSessionId !== pending) { clearTimer(); pending = undefined; }
+    // So does a Session of this computer selected or shown: another machine's stops showing.
+    if (state.selectedSessionId !== prior.selectedSessionId || (state.cursorSessionId && state.cursorSessionId !== prior.cursorSessionId)) clearRemoteSession();
   });
   useConfigStore.subscribe(state => {
     if (!cursorFollowEnabled(state.config)) dropSessionCursor();
@@ -107,7 +124,7 @@ function listen(): void {
  * This machine's record of a Session: from the Sessions list, or from the All machines
  * view's read of this machine while the list is still loading at startup or failed to load.
  */
-function sessionRecord(sessionId: string): OrchestrationSessionRecord | undefined {
+function sessionRecord(sessionId: string): OrchestrationSessionSummary | undefined {
   return useOrchestrationSessionStore.getState().sessions.find(session => session.id === sessionId)
     ?? useAllMachinesStore.getState().snapshots[LOCAL_MACHINE_ID]?.sessions.find(session => session.id === sessionId);
 }
@@ -122,12 +139,29 @@ function isTerminalSession(sessionId: string): boolean {
 }
 
 /**
- * The sidebar cursor moved onto a chat Session's row: show it now, and settle on it
- * after SETTLE_MS unless the cursor moves on first.
+ * The sidebar cursor moved onto another machine's Session row (T-116 PR 6): show it, read-only,
+ * and nothing more. Resting on it settles nothing in this PR; Enter or a click opens it there.
  */
-export function showSessionAtCursor(sessionId: string): void {
+function showRemoteSessionAtCursor(machineId: string, sessionId: string): void {
+  pending = undefined;
+  const navigation = useNavigationStore.getState();
+  if (navigation.activeView !== 'pane-chat') navigation.navigateToPaneChat();
+  if (useSessionStore.getState().activeSessionId) void useSessionStore.getState().setActiveSession(null);
+  // This computer's Session of the same id, if the cursor showed it, is not what it shows now.
+  useOrchestrationSessionStore.getState().showAtCursor(undefined);
+  showRemoteSession({ machineId, sessionId });
+}
+
+/**
+ * The sidebar cursor moved onto a chat Session's row: show it now, and settle on it
+ * after SETTLE_MS unless the cursor moves on first. Another machine's row shows its
+ * Session and settles nothing.
+ */
+export function showSessionAtCursor(sessionId: string, machineId: string = LOCAL_MACHINE_ID): void {
   listen();
   clearTimer();
+  if (machineId !== LOCAL_MACHINE_ID) { showRemoteSessionAtCursor(machineId, sessionId); return; }
+  clearRemoteSession();
   const sessions = useOrchestrationSessionStore.getState();
   if (isTerminalSession(sessionId)) { pauseSessionCursor(); return; }
   const navigation = useNavigationStore.getState();
@@ -194,6 +228,7 @@ function chatPaused(sessionId: string): boolean | undefined {
 export function dropSessionCursor(): void {
   clearTimer();
   pending = undefined;
+  clearRemoteSession();
   if (useOrchestrationSessionStore.getState().cursorSessionId) useOrchestrationSessionStore.getState().showAtCursor(undefined);
 }
 
@@ -206,6 +241,7 @@ export function pendingCursorSession(): string | undefined {
 export function settleOnSession(sessionId: string): Promise<void> {
   clearTimer();
   pending = undefined;
+  clearRemoteSession();
   const sessions = useOrchestrationSessionStore.getState();
   // Already settled and shown (the cursor rested on it, then Enter): nothing to read again,
   // unless it settled by itself and a paused chat waits for this Enter or click to resume.

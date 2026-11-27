@@ -1,4 +1,5 @@
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
+import { splitWorkspacePassThrough } from './commands';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { isTodoCommand, mentionsTodos, withoutTodoArguments, withoutTodoLines } from './todosFeature';
 
@@ -35,6 +36,8 @@ export interface McpToolContract {
     openWorld?: boolean;
     /** Flags the CLI accepts that the tool leaves out. */
     cliOnlyFlags?: readonly string[];
+    /** The tool takes a `machine` and runs as `runpane workspace <machine> <command>`. */
+    otherMachines?: boolean;
     toolsets?: readonly string[];
     jsonSchemas?: readonly string[];
   }[];
@@ -80,6 +83,8 @@ export interface McpTool {
    * server refuses the call unless `yes` is true.
    */
   confirmsInServer: boolean;
+  /** A `machine` input sends the command to that machine. */
+  otherMachines: boolean;
   /** Contract toolsets that serve this tool (`runpane mcp --toolsets`). */
   toolsets: readonly string[];
   description: string;
@@ -213,7 +218,8 @@ function buildTool(
     const parameter = {
       flag,
       property: toProperty(flag),
-      takesValue: placeholder !== undefined || schema !== undefined,
+      // A boolean schema makes a switch even where another command's flag of that name takes a value.
+      takesValue: schema?.type === 'boolean' ? false : placeholder !== undefined || schema !== undefined,
       json: schema?.type === 'array' || schema?.type === 'object',
     };
     parameters.push(parameter);
@@ -229,6 +235,10 @@ function buildTool(
     if (isRequired) required.push(parameter.property);
   }
 
+  if (command.otherMachines) {
+    properties.machine = { type: 'string', minLength: 1, description: 'Another computer to ask, by a name from `runpane workspace list`; defaults to this one.' };
+  }
+
   const inputSchema: McpTool['inputSchema'] = { type: 'object', properties, additionalProperties: false };
   if (required.length > 0) inputSchema.required = required;
 
@@ -239,6 +249,7 @@ function buildTool(
     command: command.name,
     words,
     confirmsInServer,
+    otherMachines: command.otherMachines === true,
     toolsets: command.toolsets ?? [],
     description: describe(command.name, command.summary, context?.details, context?.notes ?? []),
     parameters,
@@ -339,6 +350,14 @@ export function buildToolArgv(tool: McpTool, input: JsonObject = {}): string[] {
     return parameter ? positionalValue(parameter) ?? [] : [word];
   });
   const known = new Set(tool.parameters.map((parameter) => parameter.property));
+  if (tool.otherMachines) {
+    known.add('machine');
+    if (input.machine !== undefined && input.machine !== null) {
+      argv.unshift('workspace', decodeBoundary(input.machine, boundary.string));
+      // A value such as `write` or `--help` would make this another runpane command.
+      if (!splitWorkspacePassThrough(argv)) throw new Error('machine must be a computer\'s name, from `workspace_list`.');
+    }
+  }
   const unknown = Object.keys(input).filter((key) => !known.has(key));
   if (unknown.length > 0) {
     throw new Error(`Unknown argument(s) for ${tool.name}: ${unknown.join(', ')}`);

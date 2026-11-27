@@ -10,7 +10,7 @@ const machines: MachineState[] = [
 ];
 
 let emit: (event: MachineConnectionsEvent) => void;
-const read = vi.fn((machineId: string, channel: string): Promise<MachineResult> => Promise.resolve({
+const read = vi.fn((machineId: string, channel: string, _args?: unknown[]): Promise<MachineResult> => Promise.resolve({
   machineId,
   data: { success: true, data: channel === 'sessions:get-all-with-projects' ? [{ id: 1, name: `${machineId}-repo`, sessions: [] }] : [] },
 }));
@@ -71,6 +71,8 @@ describe('All machines feed', () => {
       'permission:getPending',
       'sessions:get-all-with-projects',
     ]);
+    // The feed refetches the list on every Session change, so it reads summaries (T-127).
+    expect(read.mock.calls.find(([id, channel]) => id === 'devbox' && channel === 'orchestration-sessions:list')?.[2]).toEqual([{ summary: true }]);
   });
 
   it('re-reads only a machine\'s Session activity when it sends an activity change', async () => {

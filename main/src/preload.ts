@@ -10,6 +10,7 @@ import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult }
 import { contextBridge, ipcRenderer } from 'electron';
 import { createPreferencesApi } from '../../shared/types/preferences';
 import { isDaemonOwnedChannel } from '../../shared/types/daemon';
+import { SESSION_LIST_SUMMARY } from '../../shared/types/orchestrationSession';
 import { BROWSER_TAB_NOTICE_CHANNEL, BROWSER_VIEW_LIVE_CHANNEL, type BrowserTabNotice } from '../../shared/types/browser';
 import {
   WINDOW_CONTROLS_OVERLAY_ARG,
@@ -47,6 +48,8 @@ import type { PanelAgentStatusEvent } from '../../shared/types/agentStatus';
 import type { NotifyCommand, NotifyNavigateTarget, NotifySnapshot, NotifyWindowSize } from '../../shared/types/notify';
 import type { AutopilotDocument, AutopilotInstructionsView, AutopilotSnapshot, AutopilotStackCommand, AutopilotStackPushRequest } from '../../shared/types/autopilot';
 import type { MachineCommand, MachineConnectionsEvent, MachineLatency, MachineReadChannel, MachineResult, MachineState } from '../../shared/types/machineConnections';
+import { MACHINE_MIRROR_CHANNELS, type MachineChatEvent, type MachineMirrorListing } from '../../shared/types/machineMirror';
+import type { SessionSnapshot } from '../../shared/types/sessionSnapshot';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -426,6 +429,7 @@ function invokeIpc(channel: string, ...args: unknown[]) {
 }
 
 let machineEventListeners = 0;
+let machineMirrorListeners = 0;
 
 // Main has no network event; a reconnecting remote host retries when the renderer sees the network return.
 window.addEventListener('online', () => ipcRenderer.send('remote-daemon:network-online'));
@@ -434,9 +438,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** Settings → Secrets: this computer's Pane secret store. Values go in only; nothing returns one. */
   paneSecrets: {
     list: (): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:list'),
-    set: (project: string, name: string, value: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set', project, name, value),
+    set: (project: string, name: string, value: string, sites?: string[]): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set', project, name, value, sites),
+    setSites: (project: string, name: string, sites: string[]): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set-sites', project, name, sites),
     delete: (project: string, name: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:delete', project, name),
-    setReference: (project: string, name: string, reference: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set-reference', project, name, reference),
+    setReference: (project: string, name: string, reference: string, sites?: string[]): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set-reference', project, name, reference, sites),
     startLease: (request: SecretLeaseStartRequest): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:start-lease', request),
     endLease: (leaseId: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:end-lease', leaseId),
     endAllLeases: (): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:end-all-leases'),
@@ -590,6 +595,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     conversations: (panelId: string) => invokeIpc('chat-tab:conversations', panelId),
     resume: (panelId: string, sessionId: string) => invokeIpc('chat-tab:resume', panelId, sessionId),
     dismissBanner: (panelId: string) => invokeIpc('chat-tab:dismiss-banner', panelId),
+    files: (panelId: string, query: string) => invokeIpc('chat-tab:files', panelId, query),
     signIn: (panelId: string) => invokeIpc('chat-tab:sign-in', panelId),
     keys: () => invokeIpc('chat-tab:keys'),
     setKey: (agent: string, key: string | null) => invokeIpc('chat-tab:set-key', agent, key),
@@ -626,14 +632,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   orchestrationSessions: {
     runtimes: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:runtimes'),
-    list: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:list'),
-    select: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:select', selector),
+    // The renderer's list reads summaries (T-127); a Session's activity log and profile come with `get`.
+    list: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:list', SESSION_LIST_SUMMARY),
+    select: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:select', selector, SESSION_LIST_SUMMARY),
     create: (input: OrchestrationSessionCreateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:create', input, { chatTabs: true, chatAgents: true }),
     get: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:get', selector, { chatTabs: true, chatAgents: true }),
     peek: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:peek', selector, { chatTabs: true, chatAgents: true }),
     open: (selector: OrchestrationSessionSelector, options?: { select?: boolean }): Promise<IPCResponse> => invokeIpc('orchestration-sessions:open', selector, { chatTabs: true, chatAgents: true }, options ?? {}),
     update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:update', selector, input),
-    reorder: (sessionIds: string[]): Promise<IPCResponse> => invokeIpc('orchestration-sessions:reorder', { sessionIds }),
+    reorder: (sessionIds: string[]): Promise<IPCResponse> => invokeIpc('orchestration-sessions:reorder', { sessionIds }, SESSION_LIST_SUMMARY),
     setAgent: (selector: OrchestrationSessionSelector, agent: PaneChatAgent): Promise<IPCResponse> => invokeIpc('orchestration-sessions:set-agent', selector, agent),
     associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:associate', selector, association),
     detach: (selector: OrchestrationSessionSelector, paneId?: string): Promise<IPCResponse> => invokeIpc('orchestration-sessions:detach', selector, paneId),
@@ -1545,6 +1552,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.removeListener('machines:event', listener);
         if (--machineEventListeners === 0) ipcRenderer.send('machines:subscribe', false);
       };
+    },
+  },
+
+  // The desktop mirror of the owner's other machines (T-116 PR 6), and the one remote chat this window shows.
+  machineMirror: {
+    list: (): Promise<MachineMirrorListing[]> => ipcRenderer.invoke(MACHINE_MIRROR_CHANNELS.list),
+    session: (machineId: string, sessionId: string): Promise<SessionSnapshot | null> => ipcRenderer.invoke(MACHINE_MIRROR_CHANNELS.session, machineId, sessionId),
+    onChanged: (callback: (change: { machineId: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, change: { machineId: string }) => callback(change);
+      ipcRenderer.on(MACHINE_MIRROR_CHANNELS.changed, listener);
+      if (machineMirrorListeners++ === 0) ipcRenderer.send(MACHINE_MIRROR_CHANNELS.subscribe, true);
+      return () => {
+        ipcRenderer.removeListener(MACHINE_MIRROR_CHANNELS.changed, listener);
+        if (--machineMirrorListeners === 0) ipcRenderer.send(MACHINE_MIRROR_CHANNELS.subscribe, false);
+      };
+    },
+    /** The chat on another machine this window shows, or null; its events then arrive on `onChatEvent`. */
+    followChat: (target: { machineId: string; panelId: string } | null): void => ipcRenderer.send(MACHINE_MIRROR_CHANNELS.followChat, target),
+    onChatEvent: (callback: (event: MachineChatEvent) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, event: MachineChatEvent) => callback(event);
+      ipcRenderer.on(MACHINE_MIRROR_CHANNELS.chatEvent, listener);
+      return () => { ipcRenderer.removeListener(MACHINE_MIRROR_CHANNELS.chatEvent, listener); };
     },
   },
 

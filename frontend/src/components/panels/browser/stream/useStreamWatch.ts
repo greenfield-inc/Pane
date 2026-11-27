@@ -8,9 +8,11 @@ const WATCH_EVERY_MS = 5_000;
 type Invoke = (channel: string, ...args: Array<string | null | { kind: string; onScreen: boolean; width: number; height: number; scale: number }>) => Promise<JsonValue>;
 
 /**
- * Tells the tab's host this screen shows it (`browser:watch`) every 5 s and when it changes size
- * or visibility, with the room its stream gives the page (the element marked data-testid
- * "browser-stream" inside `rootRef`), and that it stopped when unmounted.
+ * Tells the tab's host this screen shows it (`browser:watch`) every 5 s and when it changes size,
+ * with the room its stream gives the page (the element marked data-testid "browser-stream" inside
+ * `rootRef`), and that it stopped when unmounted. Hiding sends one report off screen and then
+ * nothing: the host keeps this screen, and the page the size it gave, for 15 s of silence, so a
+ * short switch to another app changes nothing.
  */
 export function useStreamWatch(invoke: Invoke, panelId: string, kind: 'desktop' | 'phone' | 'web', rootRef: RefObject<HTMLElement | null>, on = true): void {
   useEffect(() => {
@@ -32,15 +34,20 @@ export function useStreamWatch(invoke: Invoke, panelId: string, kind: 'desktop' 
       else steady = size;
       void invoke('browser:watch', panelId, VIEWER_ID, { kind, onScreen: document.visibilityState === 'visible', ...size, scale: window.devicePixelRatio || 1 }).catch(() => undefined);
     };
-    report();
-    const timer = window.setInterval(report, WATCH_EVERY_MS);
-    document.addEventListener('visibilitychange', report);
+    let timer: number | undefined;
+    const follow = () => {
+      report();
+      window.clearInterval(timer);
+      timer = document.visibilityState === 'visible' ? window.setInterval(report, WATCH_EVERY_MS) : undefined;
+    };
+    follow();
+    document.addEventListener('visibilitychange', follow);
     const observer = new ResizeObserver(report);
     const element = box();
     if (element) observer.observe(element);
     return () => {
       window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', report);
+      document.removeEventListener('visibilitychange', follow);
       observer.disconnect();
       void invoke('browser:watch', panelId, VIEWER_ID, null).catch(() => undefined);
     };

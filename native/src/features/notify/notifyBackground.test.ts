@@ -1,10 +1,12 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { readOnlyToken } from '@shared/types/accessLevel';
+
 // Android draws a question's alert from a data-only push in the background task; capture both ends.
 const native = vi.hoisted(() => ({
   task: undefined as undefined | ((body: { data: unknown }) => Promise<void>),
   schedule: vi.fn((_request: { content: { categoryIdentifier?: string } }) => Promise.resolve('alert-id')),
-  profiles: [] as { id: string }[],
+  profiles: [] as { id: string; token: string }[],
   appState: { currentState: 'background' },
   refresh: vi.fn(),
   invoke: vi.fn((_client: { profile: string }, _channel: string, _args: unknown[]) => Promise.resolve({ ok: true })),
@@ -37,7 +39,7 @@ vi.mock('@/daemon/invoke', () => ({ invokeChannel: native.invoke }));
 vi.mock('@/features/notifications/usePushSetup', () => ({ requestPushRegistration: native.refresh }));
 vi.mock('@/features/notifications/device', () => ({
   clearPaneNotifications: () => Promise.resolve(), dismissNotifyAlerts: () => Promise.resolve(),
-  devicePush: { platform: 'android' }, getInstallationId: () => Promise.resolve('install-1'),
+  devicePush: { platform: 'android' }, getInstallationId: () => Promise.resolve('install-1'), LOUD_NOTICE: 'paneNotice',
 }));
 
 beforeAll(async () => {
@@ -65,7 +67,7 @@ describe('Android question alerts', () => {
 
 describe('relay grants', () => {
   it('hands the grant to the paired computer the push names, and to no other', async () => {
-    native.profiles = [{ id: 'host-1' }, { id: 'host-2' }];
+    native.profiles = [{ id: 'host-1', token: 't' }, { id: 'host-2', token: 't' }];
     native.schedule.mockClear();
     await native.task?.({ data: { data: { hostProfileId: 'host-1', paneGrant: 'studio.sig' } } });
     expect(native.invoke.mock.calls).toEqual([[{ profile: 'host-1' }, 'mobile:push-grant', [{ platform: 'android', installationId: 'install-1', grant: 'studio.sig' }]]]);
@@ -77,8 +79,15 @@ describe('relay grants', () => {
     expect(native.invoke).not.toHaveBeenCalled();
   });
 
+  it('hands nothing to a computer this phone is paired Read only with', async () => {
+    native.profiles = [{ id: 'host-1', token: readOnlyToken('a') }];
+    native.invoke.mockClear();
+    await native.task?.({ data: { data: { hostProfileId: 'host-1', paneGrant: 'studio.sig' } } });
+    expect(native.invoke).not.toHaveBeenCalled();
+  });
+
   it('refreshes the alert rows once the computer keeps the grant while Pane is open', async () => {
-    native.profiles = [{ id: 'host-1' }];
+    native.profiles = [{ id: 'host-1', token: 't' }];
     native.appState.currentState = 'active';
     native.refresh.mockClear();
     native.invoke.mockResolvedValueOnce({ ok: false });

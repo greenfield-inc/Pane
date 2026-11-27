@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigManager } from './configManager';
-import { applyRoutesReport, decodeComputers, routesReachableHere, upsertComputer, type RemoteComputer } from '../../../shared/types/remoteComputers';
+import { applyRoutesReport, decodeComputers, isOwnComputer, verifiedTailnetName, routesReachableHere, upsertComputer, type RemoteComputer } from '../../../shared/types/remoteComputers';
 
 // Saved by v2.4.225: the same Mac once through Tailscale and once through the relay, plus a code host.
 const tailnetMac = {
@@ -111,6 +111,38 @@ describe('reading saved computers', () => {
   });
 });
 
+describe('which saved computers are yours (D-500)', () => {
+  const link = { id: 'relay:https://x.runpane.net', kind: 'relay', source: 'link', baseUrl: 'https://x.runpane.net', token: 't', relay: { computerId: 'x', fingerprint: 'f' } };
+
+  it('keeps the Tailscale mark and the switch, and drops a value it can\'t read without dropping the computer', () => {
+    expect(decodeComputers([
+      { id: 'a', label: 'a', mine: 'tailscale', mineRelay: { computerId: 'x', fingerprint: 'f' }, mineOverride: false, routes: [link] },
+      { id: 'b', label: 'b', mine: 'someday', mineRelay: { computerId: 'x', fingerprint: 'f' }, mineOverride: 'yes', routes: [link] },
+      { id: 'c', label: 'c', mine: 'tailscale', mineRelay: 'x', routes: [link] },
+    ], () => undefined)).toEqual([
+      { id: 'a', label: 'a', mine: 'tailscale', mineRelay: { computerId: 'x', fingerprint: 'f' }, mineOverride: false, routes: [link] },
+      { id: 'b', label: 'b', routes: [link] },
+      { id: 'c', label: 'c', mine: 'tailscale', routes: [link] },
+    ]);
+  });
+
+  it('is yours by the switch when set, else by the Tailscale mark, and never when only watched', () => {
+    const routes = decodeComputers([{ id: 'a', label: 'a', routes: [link] }])[0].routes;
+    expect(isOwnComputer({ routes, mine: 'tailscale' })).toBe(true);
+    expect(isOwnComputer({ routes })).toBe(false);
+    expect(isOwnComputer({ routes, mineOverride: true })).toBe(true);
+    expect(isOwnComputer({ routes, mine: 'tailscale', mineOverride: false })).toBe(false);
+    expect(isOwnComputer({ routes: [{ ...routes[0], token: 'pane_read_x' }], mine: 'tailscale', mineOverride: true })).toBe(false);
+  });
+
+  it('keeps the mark and the switch when a computer reports its routes', () => {
+    const relayRoute = { id: 'relay:https://k.runpane.net', kind: 'relay' as const, source: 'link' as const, baseUrl: 'https://k.runpane.net', token: 'tok', relay: { computerId: 'k', fingerprint: 'fp' } };
+    const saved: RemoteComputer = { id: 'k', label: 'k', machineId: 'k-install', mine: 'tailscale', mineOverride: true, routes: [relayRoute] };
+    const { computers } = applyRoutesReport([saved], 'k', relayRoute, { machineId: 'k-install', name: 'k', relay: { id: 'k', address: 'https://k.runpane.net', fingerprint: 'fp', local: [] } });
+    expect(computers[0]).toMatchObject({ mine: 'tailscale', mineOverride: true });
+  });
+});
+
 describe('merging computers', () => {
   const relayRoute = { id: 'relay:https://k7xq2m4n8p3r5t6v.runpane.net', kind: 'relay' as const, source: 'link' as const, baseUrl: 'https://k7xq2m4n8p3r5t6v.runpane.net', token: 'tok', relay: { computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'fp' } };
   const devbox: RemoteComputer = { id: 'relay-k7xq2m4n8p3r5t6v', label: 'devbox', machineId: 'devbox-install', routes: [relayRoute] };
@@ -149,6 +181,111 @@ describe('merging computers', () => {
       ['tailscale', 'https://devbox.tail1234.ts.net:8443', 'tok', 'found'],
       ['relay', 'https://k7xq2m4n8p3r5t6v.runpane.net', 'tok', 'link'],
     ]);
+  });
+
+  it('refuses a Tailscale route a computer reports under a name another saved computer already has (review MF-1)', () => {
+    const studio: RemoteComputer = { id: 'studio', label: 'studio', routes: [{ id: 'tailscale:https://studio.tail1.ts.net:8443', kind: 'tailscale', source: 'found', baseUrl: 'https://studio.tail1.ts.net:8443', token: '', tailnetMachine: 'studio', tailnetDomain: 'tail1.ts.net' }] };
+    const { computers } = applyRoutesReport([studio, devbox], devbox.id, relayRoute, {
+      machineId: 'devbox-install',
+      name: 'devbox',
+      relay: { id: 'k7xq2m4n8p3r5t6v', address: 'https://k7xq2m4n8p3r5t6v.runpane.net', fingerprint: 'fp', local: [] },
+      tailnet: { dnsName: 'Studio.tail1.ts.net.', machine: 'Studio', domain: 'tail1.ts.net', port: 8443 },
+    });
+    expect(computers.find((computer) => computer.id === devbox.id)?.routes.map((route) => route.kind)).toEqual(['relay']);
+  });
+
+  it('lets a computer proved yours take its Tailscale name back from a record that claimed it first, and nothing else does (review S-8)', () => {
+    const claimedRoute = { id: 'tailscale:https://devbox.tail1.ts.net:8443', kind: 'tailscale' as const, source: 'found' as const, baseUrl: 'https://devbox.tail1.ts.net:8443', token: 'mallory-token', tailnetMachine: 'devbox', tailnetDomain: 'tail1.ts.net' };
+    const mallory: RemoteComputer = { id: 'mallory', label: 'mallory', routes: [claimedRoute, { ...relayRoute, id: 'relay:https://m.runpane.net', baseUrl: 'https://m.runpane.net', relay: { computerId: 'm', fingerprint: 'fp-m' } }] };
+    const report = {
+      machineId: 'devbox-install',
+      name: 'devbox',
+      relay: { id: 'k7xq2m4n8p3r5t6v', address: 'https://k7xq2m4n8p3r5t6v.runpane.net', fingerprint: 'fp', local: [] },
+      tailnet: { dnsName: 'devbox.tail1.ts.net.', machine: 'devbox', domain: 'tail1.ts.net', port: 8443 },
+    };
+    const kinds = (computers: RemoteComputer[], id: string) => computers.find((computer) => computer.id === id)?.routes.map((route) => route.kind);
+
+    // Not proved yours: first come keeps it.
+    const unproved = applyRoutesReport([mallory, devbox], devbox.id, relayRoute, report).computers;
+    expect(kinds(unproved, 'mallory')).toEqual(['tailscale', 'relay']);
+    expect(kinds(unproved, devbox.id)).toEqual(['relay']);
+
+    // Proved yours for the key this report's route is pinned to: the name is yours, and the claim goes.
+    const proved: RemoteComputer = { ...devbox, mine: 'tailscale', mineRelay: { computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'fp' } };
+    const taken = applyRoutesReport([mallory, proved], devbox.id, relayRoute, report).computers;
+    expect(kinds(taken, devbox.id)).toEqual(['tailscale', 'relay']);
+    expect(kinds(taken, 'mallory')).toEqual(['relay']);
+
+    // Only a route a host reported (`found`) is a claim: a hand-saved one stays, and no record is deleted (review S-10).
+    const handSaved: RemoteComputer = { id: 'by-hand', label: 'devbox (by hand)', routes: [{ ...claimedRoute, id: 'tailscale:https://devbox.tail1.ts.net:9443', source: 'manual' }] };
+    const onlyClaim: RemoteComputer = { id: 'only-claim', label: 'only-claim', routes: [{ ...claimedRoute, id: 'tailscale:https://devbox.tail1.ts.net:7443' }] };
+    const kept = applyRoutesReport([mallory, handSaved, onlyClaim, proved], devbox.id, relayRoute, report).computers;
+    expect(kinds(kept, 'mallory')).toEqual(['relay']);
+    expect(kept.find((computer) => computer.id === 'by-hand')).toEqual(handSaved);
+    expect(kept.find((computer) => computer.id === 'only-claim')).toEqual(onlyClaim);
+
+    // A mark proved for another key, or a report naming another key, takes nothing.
+    const otherKey: RemoteComputer = { ...proved, mineRelay: { computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'other' } };
+    expect(kinds(applyRoutesReport([mallory, otherKey], devbox.id, relayRoute, report).computers, 'mallory')).toEqual(['tailscale', 'relay']);
+    const lying = { ...report, relay: { ...report.relay, fingerprint: 'other' } };
+    expect(kinds(applyRoutesReport([mallory, proved], devbox.id, relayRoute, lying).computers, 'mallory')).toEqual(['tailscale', 'relay']);
+  });
+
+  it('lets a computer refused its Tailscale name take it back once a check over Tailscale finds its own key there, with no mark needed (review S-9)', async () => {
+    const claimedRoute = { id: 'tailscale:https://devbox.tail1.ts.net:8443', kind: 'tailscale' as const, source: 'found' as const, baseUrl: 'https://devbox.tail1.ts.net:8443', token: 'mallory-token', tailnetMachine: 'devbox', tailnetDomain: 'tail1.ts.net' };
+    const mallory: RemoteComputer = { id: 'mallory', label: 'mallory', routes: [claimedRoute, { ...relayRoute, id: 'relay:https://m.runpane.net', baseUrl: 'https://m.runpane.net', relay: { computerId: 'm', fingerprint: 'fp-m' } }] };
+    const report = {
+      machineId: 'devbox-install',
+      name: 'devbox',
+      relay: { id: 'k7xq2m4n8p3r5t6v', address: 'https://k7xq2m4n8p3r5t6v.runpane.net', fingerprint: 'fp', local: [] },
+      tailnet: { dnsName: 'devbox.tail1.ts.net.', machine: 'devbox', domain: 'tail1.ts.net', port: 8443 },
+    };
+    const asked: string[] = [];
+    const holds = (key: { computerId: string; fingerprint: string } | null | undefined) => async (tailnet: { name: string; domain: string }) => { asked.push(tailnet.name); return key; };
+
+    // The name is taken and the machine there holds the key this report's route is pinned to: it is this computer.
+    const verified = await verifiedTailnetName([mallory, devbox], devbox.id, relayRoute, report, holds({ computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'fp' }));
+    expect(verified).toBe(true);
+    expect(asked).toEqual(['devbox']);
+    const taken = applyRoutesReport([mallory, devbox], devbox.id, relayRoute, report, { verifiedTailnet: verified }).computers;
+    expect(taken.find((computer) => computer.id === devbox.id)?.routes.map((route) => route.kind)).toEqual(['tailscale', 'relay']);
+    expect(taken.find((computer) => computer.id === 'mallory')?.routes.map((route) => route.kind)).toEqual(['relay']);
+
+    // Another key there, none, or no answer: not verified.
+    for (const key of [{ computerId: 'm', fingerprint: 'fp-m' }, null, undefined]) {
+      expect(await verifiedTailnetName([mallory, devbox], devbox.id, relayRoute, report, holds(key))).toBe(false);
+    }
+    // Not taken, or a report whose key isn't the route's pin: nothing is asked.
+    asked.length = 0;
+    expect(await verifiedTailnetName([devbox], devbox.id, relayRoute, report, holds({ computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'fp' }))).toBe(false);
+    expect(await verifiedTailnetName([mallory, devbox], devbox.id, relayRoute, { ...report, relay: { ...report.relay, fingerprint: 'other' } }, holds({ computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'other' }))).toBe(false);
+    expect(asked).toEqual([]);
+    // A verified flag never helps an unproven report.
+    const unproven = applyRoutesReport([mallory, devbox], devbox.id, relayRoute, { ...report, relay: { ...report.relay, fingerprint: 'other' } }, { verifiedTailnet: true }).computers;
+    expect(unproven.find((computer) => computer.id === 'mallory')?.routes.map((route) => route.kind)).toEqual(['tailscale', 'relay']);
+  });
+
+  it('remembers a failed Tailscale name check for a day, so it doesn\'t run on every connect (review S-11)', async () => {
+    const claimed: RemoteComputer = { id: 'mallory', label: 'mallory', routes: [{ id: 'tailscale:https://devbox.tail1.ts.net:8443', kind: 'tailscale', source: 'found', baseUrl: 'https://devbox.tail1.ts.net:8443', token: '', tailnetMachine: 'devbox', tailnetDomain: 'tail1.ts.net' }] };
+    const report = {
+      machineId: 'devbox-install', name: 'devbox',
+      relay: { id: 'k7xq2m4n8p3r5t6v', address: 'https://k7xq2m4n8p3r5t6v.runpane.net', fingerprint: 'fp', local: [] },
+      tailnet: { dnsName: 'devbox.tail1.ts.net.', machine: 'devbox', domain: 'tail1.ts.net', port: 8443 },
+    };
+    let held: { computerId: string; fingerprint: string } | undefined;
+    let asks = 0;
+    const relayKeyAt = async () => { asks += 1; return held; };
+    const failures = new Map<string, number>();
+    const at = (iso: string) => ({ failures, now: Date.parse(iso) });
+
+    expect(await verifiedTailnetName([claimed, devbox], devbox.id, relayRoute, report, relayKeyAt, at('2026-11-26T12:00:00Z'))).toBe(false);
+    expect(await verifiedTailnetName([claimed, devbox], devbox.id, relayRoute, report, relayKeyAt, at('2026-11-26T18:00:00Z'))).toBe(false);
+    expect(asks).toBe(1);
+
+    held = { computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'fp' };
+    expect(await verifiedTailnetName([claimed, devbox], devbox.id, relayRoute, report, relayKeyAt, at('2026-11-27T12:01:00Z'))).toBe(true);
+    expect(asks).toBe(2);
+    expect(failures.size).toBe(0);
   });
 
   it('saves only https addresses a computer reports, so its token never goes out in the clear', () => {

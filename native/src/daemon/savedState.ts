@@ -35,7 +35,15 @@ export interface SavedStateFiles {
   list(): string[];
 }
 
-const fileName = (machineId: string) => `${hostIdHash(machineId)}.json`;
+/** A machine's file: named by a hash of its id, so nothing of its token is in the name. */
+export const machineFileName = (machineId: string) => `${hostIdHash(machineId)}.json`;
+const fileName = machineFileName;
+
+/** Deletes every file in `files` that belongs to none of `machineIds`. */
+export function keepMachineFiles(files: SavedStateFiles, machineIds: readonly string[]) {
+  const kept = new Set(machineIds.map(fileName));
+  for (const name of files.list()) if (!kept.has(name)) files.remove(name);
+}
 
 /**
  * Keeps each machine's last-known lists on the phone, so a launch, a return or a switch paints
@@ -95,8 +103,7 @@ export function createSavedState(queryClient: QueryClient, files: SavedStateFile
     forget,
     /** Deletes every file that belongs to none of `machineIds`. */
     keepOnly(machineIds: readonly string[]) {
-      const kept = new Set(machineIds.map(fileName));
-      for (const name of files.list()) if (!kept.has(name)) files.remove(name);
+      keepMachineFiles(files, machineIds);
     },
     /** Writes every pending change now, as the app goes to the background. */
     flush() {

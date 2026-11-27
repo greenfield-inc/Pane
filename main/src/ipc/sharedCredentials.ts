@@ -30,6 +30,7 @@ export function registerSharedCredentialHandlers(
     ...readSharedCredentials(configManager.getConfig()),
     paneSecrets: await secrets.exportForSync(),
     paneSecretReferences: secrets.exportReferencesForSync(),
+    paneLogins: await secrets.exportLoginsForSync(),
   });
   commandRegistry.register('credentials:shared:get', async (_input: PaneCommandValue, trusted: PaneCommandValue) => {
     // The local socket passes a caller's own "trusted" argument, so only paired devices over HTTP may sync.
@@ -45,6 +46,7 @@ export function registerSharedCredentialHandlers(
     const changedSecrets = [
       ...(incoming.paneSecrets ? await secrets.applyFromSync(incoming.paneSecrets) : []),
       ...(incoming.paneSecretReferences ? await secrets.applyReferencesFromSync(incoming.paneSecretReferences) : []),
+      ...(incoming.paneLogins ? await secrets.applyLoginsFromSync(incoming.paneLogins) : []),
     ];
     // Carries no values, so no key ever rides an event.
     if (changed.length + changedSecrets.length > 0) getPaneEventSink().send('remote:settings-changed');

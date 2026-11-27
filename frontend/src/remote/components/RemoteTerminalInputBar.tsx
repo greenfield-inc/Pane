@@ -12,7 +12,7 @@ import type {
   VoiceTranscriptionResult,
 } from '../../../../shared/types/voiceTranscription';
 import { Bone, LoadingStatus, Skeleton, SkeletonSwap } from '../../components/ui/Skeleton';
-import { useRemoteVoiceDictation } from '../hooks/useRemoteVoiceDictation';
+import { useVoiceDictation } from '../../hooks/useVoiceDictation';
 
 interface RemoteTerminalInputBarProps {
   shortcuts: RemotePwaTerminalShortcut[];
@@ -83,7 +83,7 @@ export function RemoteTerminalInputBar({
     setDraft(current => appendTranscriptDraft(current, text));
   };
 
-  const voice = useRemoteVoiceDictation({
+  const voice = useVoiceDictation({
     mode: selectedVoiceMode,
     onTranscript: appendTranscript,
     onTranscribeAudio,
@@ -111,7 +111,9 @@ export function RemoteTerminalInputBar({
     sending.current = true; setPending(true);
     const submitted = draft;
     try {
-      await onSendInput(`${submitted}\r`);
+      // An agent reads text and Enter arriving together as a paste and keeps the Enter as a newline,
+      // so the Enter is a write of its own: the client sends a bare Enter alone, after the text.
+      await Promise.all([onSendInput(submitted), onSendInput('\r')]);
       setDraft(current => current === submitted ? '' : current);
     } catch (error) {
       setClipboardError(error instanceof Error ? error.message : 'Delivery unknown. Check the original panel before resubmitting.');

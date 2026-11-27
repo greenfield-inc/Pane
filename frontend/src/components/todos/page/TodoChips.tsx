@@ -121,7 +121,7 @@ export function TodoChips({ detail, splitCount, splitLead, splitHidden, onOpenAp
       {splitCount === 0 && (attaching
         ? <AttachField number={todo.number} onAttached={onAttached} onClose={() => setAttaching(false)} className="h-6" />
         : (
-          <button type="button" onClick={() => setAttaching(true)} className={cn(CHIP, 'border-dashed')} data-testid="todo-chip-attach">
+          <button type="button" onClick={() => setAttaching(true)} className={cn('needs-full-access', CHIP, 'border-dashed')} data-testid="todo-chip-attach">
             <Paperclip className="h-3.5 w-3.5" aria-hidden="true" />
             Nothing attached yet · <span className="font-medium text-interactive-text">+ Attach</span>
           </button>

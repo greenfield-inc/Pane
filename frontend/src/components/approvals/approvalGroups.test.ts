@@ -37,6 +37,12 @@ describe('Most recent', () => {
     expect(ids(queue.list)).toEqual(['asked-first-answered-last', 'update', 'asked-last-answered-first']);
   });
 
+  it('T-88: lists an updated approval by when its latest version was asked', () => {
+    const updated = item('updated', 1, { version: 2, revision: { asked: 'why?', whatChanged: ['reworded'], by: 'agent', at: 8 } });
+    const queue = groupApprovals([updated, item('newer', 5)], 'waiting', 'recent');
+    expect(ids(queue.list)).toEqual(['updated', 'newer']);
+  });
+
   it('keeps items asked in the same millisecond in one order, whatever order they arrive in', () => {
     const [a, b] = [item('a', 5), item('b', 5)];
     expect(ids(groupApprovals([a, b], 'waiting', 'recent').list)).toEqual(ids(groupApprovals([b, a], 'waiting', 'recent').list));
@@ -324,16 +330,16 @@ describe('the Waiting list', () => {
     expect(groupApprovals(items, 'answered', 'recent').list.map(entry => entry.id)).toEqual(['old']);
   });
 
-  it('files stale items apart, oldest first, out of the count, and an offline machine\'s stale item stays in its row', () => {
+  it('files stale items apart, newest first, out of the count, and an offline machine\'s stale item stays in its row', () => {
     const items = [item('fresh', 5), item('newer', 3, { staleSince: 9 }), item('older', 2, { staleSince: 8 }), offline('gone', 'studio', { staleSince: 8 })];
     const queue = groupApprovals(items, 'waiting', 'recent');
     expect(queue.waiting).toBe(1);
-    expect(queue.stale.map(entry => entry.id)).toEqual(['older', 'newer']);
+    expect(queue.stale.map(entry => entry.id)).toEqual(['newer', 'older']);
     expect(queue.list.map(entry => entry.id)).toEqual(['fresh']);
     expect(queue.offline).toEqual([{ machineId: 'studio', machine: 'studio', count: 1 }]);
     expect(groupApprovals(items, 'answered', 'recent').stale).toEqual([]);
     // Every sort leaves the two where they are.
-    expect(groupApprovals(items, 'waiting', 'project').stale.map(entry => entry.id)).toEqual(['older', 'newer']);
+    expect(groupApprovals(items, 'waiting', 'project').stale.map(entry => entry.id)).toEqual(['newer', 'older']);
     expect(groupApprovals(items, 'waiting', 'session').offline).toEqual(queue.offline);
   });
 

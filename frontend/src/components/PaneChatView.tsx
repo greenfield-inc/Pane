@@ -3,13 +3,14 @@ import { useApprovalColumnStore } from '../stores/approvalColumnStore';
 import { SessionApprovalColumn, SessionApprovalsButton } from './approvals/SessionApprovals';
 import { openNewSessionApprovals } from './approvals/useSessionApprovals';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Info, RefreshCw, Settings, Terminal, X } from 'lucide-react';
 import { API } from '../utils/api';
 import type { Session } from '../types/session';
 import { PANE_CHAT_AGENT_LABELS, type PaneChatAgent, type PaneChatState } from '../../../shared/types/paneChat';
 import type {
   OrchestrationSessionRecord,
+  OrchestrationSessionSummary,
   OrchestrationSessionUpdateInput,
   OrchestrationSessionView,
 } from '../../../shared/types/orchestrationSession';
@@ -29,8 +30,8 @@ import { SessionWorkspaceSkeleton } from './SessionWorkspaceSkeleton';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { SessionLaunchFields } from './SessionLaunchFields';
 import { SessionChangesPanel, SessionOverviewPanel, useSessionOverview } from './SessionOverviewPanel';
+import { newestFullRecord, SessionSettingsForm, withNewerSummary } from '../utils/sessionRecords';
 import { useConfigStore } from '../stores/configStore';
-import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
 import { cn } from '../utils/cn';
 import { LiveRegion } from './ui/LiveRegion';
 import { Tooltip } from './ui/Tooltip';
@@ -51,6 +52,8 @@ import { readDraggedSessionId, startSessionDrag, useDraggedSessionId } from '../
 import type { DropZone, LayoutDirection } from '../utils/layoutTree';
 import { switchMark } from '../../../shared/switchMarks';
 import { useCursorFollowEnabled } from '../services/sessionCursor';
+import { useRemoteSessionView } from '../stores/remoteSessionView';
+import { RemoteSessionTileBody } from './RemoteSessionView';
 import { SessionShowContext } from '../contexts/SessionShowContext';
 import { QuietSkeletons } from './ui/Skeleton';
 import {
@@ -217,6 +220,16 @@ function SessionWorkspace() {
     if (sessionId === useOrchestrationSessionStore.getState().selectedSessionId) return;
     void select({ sessionId }).catch(() => undefined);
   }, [select]);
+
+  // The Session on screen counts as opened when it shows (a launch restores one without a click)
+  // and each time the window comes back to it: a phone's Recent lists Sessions by when they were opened.
+  const shownChatPaneId = sessions.find(session => session.id === selectedSessionId)?.internalSessionId;
+  useEffect(() => {
+    if (!shownChatPaneId) return;
+    const markOpened = () => { void API.sessions.markViewed(shownChatPaneId).catch(() => undefined); };
+    markOpened();
+    return window.electronAPI?.events?.onWindowFocusChanged?.(focused => { if (focused) markOpened(); });
+  }, [shownChatPaneId]);
 
   // Something always has to be selected for the layout to have a starting tile;
   // what the layout already shows beats an arbitrary first Session.
@@ -451,6 +464,10 @@ function SessionTile({
   const hostId = useConfigStore(state => state.config ? getActiveRemoteHostId(state.config.remoteDaemon) : undefined);
   // Arrow keys open chat Sessions (T-87): the tile paints from the Session view cache.
   const cached = useCursorFollowEnabled() && !inline;
+  // Another machine's Session under the cursor shows, read-only, in the focused tile (T-116 PR 6).
+  // Deferred: drawing it never holds the next key press (D-6); a newer press interrupts the draw.
+  const remoteTarget = useDeferredValue(useRemoteSessionView(state => state.target));
+  const remote = cached && isFocused ? remoteTarget : undefined;
   const visit = useOrchestrationSessionStore(state => state.selectionVisits[sessionId] ?? 0);
   const [view, setView] = useState<OrchestrationSessionView<Session> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -510,14 +527,16 @@ function SessionTile({
     }
     agentReloadKey.current = null;
     if (view.session.revision === record.revision) return;
-    setView(current => current ? { ...current, session: record } : current);
+    // The list sends summaries (T-127): keep the view's profile and activity log while folding the rest in.
+    setView(current => current ? { ...current, session: withNewerSummary(current.session, record) } : current);
   }, [cached, load, record, view]);
 
   const handleOverviewUpdate = useCallback(async (input: OrchestrationSessionUpdateInput): Promise<OrchestrationSessionRecord> => {
     if (!view) throw new Error('This Session is not open');
     const next = await useOrchestrationSessionStore.getState().update(
       { sessionId },
-      { ...input, expectedRevision: view.session.revision },
+      // A form filled from an older record sends that record's revision (settingsSave).
+      { ...input, expectedRevision: input.expectedRevision ?? view.session.revision },
     );
     setView(current => current ? { ...current, session: next } : current);
     return next;
@@ -567,7 +586,9 @@ function SessionTile({
       onMouseDownCapture={focusThisTile}
       onFocusCapture={focusThisTile}
     >
-      {cached ? (
+      {remote ? (
+        <RemoteSessionTileBody target={remote} />
+      ) : cached ? (
         <CachedSessionTileBody sessionId={sessionId} record={record} hostId={hostId} chrome={chrome} />
       ) : view && view.session.id === sessionId && loadingSessionId === sessionId && loadingHostId === hostId && loadingVisit === visit && !isLoading && !selectionError && !error ? (
         <NamedSessionWorkspace
@@ -619,7 +640,7 @@ function SessionTile({
  */
 function CachedSessionTileBody({ sessionId, record, hostId, chrome }: {
   sessionId: string;
-  record?: OrchestrationSessionRecord;
+  record?: OrchestrationSessionSummary;
   hostId: string | null | undefined;
   chrome: SessionTileChrome;
 }) {
@@ -660,7 +681,7 @@ function CachedSessionTileBody({ sessionId, record, hostId, chrome }: {
     if (!display) return undefined;
     // A newer record (a rename, a pin) folds into the held view without a read.
     const current = record?.id === display.view.session.id ? record : undefined;
-    return current && current.revision > display.view.session.revision ? { ...display.view, session: current } : display.view;
+    return current && current.revision > display.view.session.revision ? { ...display.view, session: withNewerSummary(display.view.session, current) } : display.view;
   }, [display, record]);
 
   // The cursor's Session, and the one kept dimmed behind it while the next is read, are only
@@ -728,7 +749,7 @@ function CachedSessionTileBody({ sessionId, record, hostId, chrome }: {
 }
 
 function SessionTileFallback({ record, error, isLoading, chrome, onRetry }: {
-  record?: OrchestrationSessionRecord;
+  record?: OrchestrationSessionSummary;
   error: string | null;
   isLoading: boolean;
   chrome: SessionTileChrome;
@@ -754,12 +775,12 @@ function SessionTileFallback({ record, error, isLoading, chrome, onRetry }: {
 }
 
 /** The agent tab's title, as the host names it, for a Session not open yet. */
-function agentTabTitle(record: OrchestrationSessionRecord | undefined): string {
+function agentTabTitle(record: OrchestrationSessionSummary | undefined): string {
   return record ? `${record.name} · ${configuredAgent(record.agent).title}` : 'Session';
 }
 
 /** A Session's workspace skeleton, in the layout this window last showed it with. */
-function SavedSessionSkeleton({ record, name, chromeInline }: { record?: OrchestrationSessionRecord; name: string; chromeInline: boolean }) {
+function SavedSessionSkeleton({ record, name, chromeInline }: { record?: OrchestrationSessionSummary; name: string; chromeInline: boolean }) {
   const internalId = record?.internalSessionId;
   const layout = usePanelStore(state => (internalId ? state.layouts[internalId] : undefined));
   const panels = usePanelStore(state => (internalId ? state.panels[internalId] : undefined));
@@ -919,7 +940,7 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
     {chrome.isFocused && <SwitchToChatPaletteEntry key={view.panel.id} panel={view.panel} view="session" />}
     <Tooltip content="Session settings" side="bottom">
       <button type="button" aria-label="Session settings" onClick={() => setShowSettings(true)}
-        className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded text-text-secondary hover:bg-surface-hover hover:text-text-primary">
+        className="needs-full-access inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded text-text-secondary hover:bg-surface-hover hover:text-text-primary">
         <Settings className="h-4 w-4" aria-hidden="true" />
       </button>
     </Tooltip>
@@ -930,7 +951,7 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
       <LiveRegion>{statusAnnouncement}</LiveRegion>
       <SessionTileHeader name={view.session.name} chrome={chrome} error={error} />
       <TodoBreadcrumb session={view.session} />
-      {showSettings && <SessionSettingsDialog record={view.session} onClose={() => setShowSettings(false)} onSave={saveOverview} />}
+      {showSettings && <SessionSettingsDialog record={newestFullRecord(view.session, overview?.session)} onClose={() => setShowSettings(false)} onSave={saveOverview} />}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <SessionProvider session={view.internalSession}>
           <SessionWorkspacePanels agentPanel={view.panel} agentPanelIds={Object.values(view.session.panelIds)}
@@ -1020,9 +1041,11 @@ function SessionSettingsDialog({ record, onClose, onSave }: {
 }) {
   const config = useConfigStore(state => state.config);
   const fetchConfig = useConfigStore(state => state.fetchConfig);
-  const [command, setCommand] = useState(record.launchCommand ?? '');
-  const [customResume, setCustomResume] = useState<CustomCommandResume | null>(record.customResume ?? null);
-  const [profile, setProfile] = useState(record.profile ?? DEFAULT_SESSION_PROFILE);
+  // Made once when the dialog opens: a save is checked against the record the form was filled from (review F-3).
+  const [form, setForm] = useState(() => new SessionSettingsForm(record));
+  const [command, setCommand] = useState(form.values.launchCommand);
+  const [customResume, setCustomResume] = useState<CustomCommandResume | null>(form.values.customResume);
+  const [profile, setProfile] = useState(form.values.profile);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -1035,10 +1058,22 @@ function SessionSettingsDialog({ record, onClose, onSave }: {
     setSaving(true);
     setSaveError(null);
     try {
-      await onSave({ launchCommand: command, profile, customResume });
+      await onSave(form.saveInput({ launchCommand: command, profile, customResume }));
       onClose();
     } catch (cause) {
-      setSaveError(cause instanceof Error ? cause.message : 'Failed to save Session settings');
+      // Save stays disabled while the current settings load.
+      const next = await form.afterFailure(cause instanceof Error ? cause.message : 'Failed to save Session settings', async () => {
+        const response = await API.orchestrationSessions.get({ sessionId: record.id });
+        if (!response.success || !response.data) throw new Error(response.error ?? 'The host did not send the Session.');
+        return response.data.session;
+      });
+      if (next.form !== form) {
+        setForm(next.form);
+        setCommand(next.form.values.launchCommand);
+        setCustomResume(next.form.values.customResume);
+        setProfile(next.form.values.profile);
+      }
+      setSaveError(next.message);
     } finally {
       setSaving(false);
     }
@@ -1050,7 +1085,8 @@ function SessionSettingsDialog({ record, onClose, onSave }: {
         <ModalHeader title="Session settings" />
         <ModalBody className="min-h-0 space-y-4">
           <p className="text-sm text-text-secondary">Saved changes apply the next time this Session terminal starts. Saving keeps the current conversation running.</p>
-          <SessionLaunchFields resume={customResume} onResumeChange={setCustomResume} command={command} profile={profile} customCommands={config?.customCommands} onCommandChange={setCommand} onProfileChange={setProfile} />
+          {/* Remounted when a refusal refills the form, so its own profile draft starts from the refill. */}
+          <SessionLaunchFields key={form.revision} resume={customResume} onResumeChange={setCustomResume} command={command} profile={profile} customCommands={config?.customCommands} onCommandChange={setCommand} onProfileChange={setProfile} />
           {saveError && <p role="alert" className="text-sm text-status-error">{saveError}</p>}
         </ModalBody>
         <ModalFooter className="shrink-0">

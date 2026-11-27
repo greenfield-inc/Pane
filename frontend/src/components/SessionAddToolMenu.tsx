@@ -56,7 +56,7 @@ export function SessionAddToolMenu({ onAdd, disabled = false }: {
           type="button"
           aria-label="Add tool"
           disabled={disabled}
-          className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
+          className="needs-full-access inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
         >
           <Plus className="h-4 w-4" aria-hidden="true" />
         </button>

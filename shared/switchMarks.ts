@@ -17,6 +17,8 @@ export interface SwitchMarkDetail {
   status?: string;
   start?: number;
   n?: number;
+  /** Another machine's Session (T-116 PR 6): the machine it is on. */
+  machineId?: string;
 }
 
 export interface SwitchMark {

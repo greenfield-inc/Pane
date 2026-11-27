@@ -124,6 +124,8 @@ export interface OrchestrationSessionRecord {
   todoNumber?: number;
   /** Set while the Session's chat and every Pane in it are paused. Computed when read, never stored. */
   paused?: TerminalPausedMark;
+  /** When someone last opened the Session, on the desktop or a phone (its chat Pane's last view). Computed when read, never stored. */
+  openedAt?: string;
   agent: PaneChatAgent;
   /** Empty uses the selected built-in agent command. */
   launchCommand?: string;
@@ -175,10 +177,30 @@ export interface OrchestrationSessionStoreData {
   sessions: OrchestrationSessionRecord[];
 }
 
-export interface OrchestrationSessionListResult {
-  sessions: OrchestrationSessionRecord[];
+export interface OrchestrationSessionListResult<TSession extends OrchestrationSessionSummary = OrchestrationSessionRecord> {
+  sessions: TSession[];
   selectedSessionId?: string;
 }
+
+/**
+ * The fields a summary list leaves out (T-127): the activity log and the profile are most of a
+ * record's size, and a list row, the All machines feed and a host switch read neither.
+ */
+export const ORCHESTRATION_SESSION_DETAIL_FIELDS = ['activity', 'profile'] as const;
+
+/** A Session as a summary list sends it; read the full record with `orchestration-sessions:get`. */
+export type OrchestrationSessionSummary = Omit<OrchestrationSessionRecord, typeof ORCHESTRATION_SESSION_DETAIL_FIELDS[number]>;
+
+/**
+ * What `orchestration-sessions:list`, `:select` and `:reorder` take last. `summary` asks for
+ * summary records; a host older than T-127 ignores it and sends full ones, which still read as summaries.
+ */
+export interface OrchestrationSessionListOptions {
+  summary?: boolean;
+}
+
+/** The options a list reader sends when summaries are all it needs. */
+export const SESSION_LIST_SUMMARY = { summary: true } as const satisfies OrchestrationSessionListOptions;
 
 export interface OrchestrationSessionView<TSession = unknown> {
   session: OrchestrationSessionRecord;
@@ -210,7 +232,7 @@ export interface OrchestrationSessionOpenResult<TSession = unknown> {
   /** The agent's chat with its newest messages, when the agent tab is a chat. */
   chat?: ChatTabView;
   /** With `select`: the Session list after saving the selection. */
-  list?: OrchestrationSessionListResult;
+  list?: OrchestrationSessionListResult<OrchestrationSessionSummary>;
 }
 
 export interface OrchestrationSessionOpenOptions {

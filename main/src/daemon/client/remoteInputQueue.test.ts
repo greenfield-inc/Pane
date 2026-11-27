@@ -83,6 +83,58 @@ describe('RemoteInputQueue lifecycle', () => {
     expect(send).toHaveBeenCalledTimes(expected.length);
   });
 
+  it('sends a bare Enter in a write of its own, so an agent submits instead of reading it as part of a paste', async () => {
+    const finish: Array<() => void> = [];
+    const send = vi.fn((_channel: string, _args: unknown[], _signal?: AbortSignal) =>
+      new Promise<void>(resolve => finish.push(resolve)));
+    const queue = new RemoteInputQueue(send);
+    const wheel = '\x1b[<65;40;12M';
+    // A message sent while a scroll's wheel reports are in flight, then a key after it.
+    const completed = Promise.all([wheel, wheel, 'fix the build', '\r', 'y'].map(key =>
+      queue.invoke('terminal:input', ['panel', key])));
+    const expected = [wheel, `${wheel}fix the build`, '\r', 'y'];
+    for (const [index, data] of expected.entries()) {
+      await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(index + 1));
+      expect(send.mock.calls[index][1]).toEqual(['panel', data]);
+      finish[index]();
+    }
+    await completed;
+    expect(send).toHaveBeenCalledTimes(expected.length);
+  });
+
+  it('holds a bare Enter until an agent that gathers fast text as a paste has taken in the text before it', async () => {
+    vi.useFakeTimers();
+    // Measured on Codex 0.172: an Enter that comes within about 15 ms + 0.35 ms per character of a
+    // 200-character message lands in the box as a newline (it needed about 80 ms).
+    const sentAt: Array<{ data: string; at: number }> = [];
+    const send = vi.fn(async (_channel: string, args: unknown[]) => {
+      sentAt.push({ data: String(args[1]), at: Date.now() });
+    });
+    const queue = new RemoteInputQueue(send);
+    const message = 'x'.repeat(200);
+    const done = Promise.all([queue.invoke('terminal:input', ['panel', message]), queue.invoke('terminal:input', ['panel', '\r'])]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await done;
+
+    expect(sentAt.map(write => write.data)).toEqual([message, '\r']);
+    expect(sentAt[1].at - sentAt[0].at).toBeGreaterThanOrEqual(100);
+  });
+
+  it('adds no wait before a bare Enter when the text took longer than that to be answered', async () => {
+    vi.useFakeTimers();
+    const sentAt: number[] = [];
+    const send = vi.fn((_channel: string, _args: unknown[]) => {
+      sentAt.push(Date.now());
+      return new Promise<void>(resolve => setTimeout(resolve, 300));
+    });
+    const queue = new RemoteInputQueue(send);
+    const done = Promise.all([queue.invoke('terminal:input', ['panel', 'x'.repeat(200)]), queue.invoke('terminal:input', ['panel', '\r'])]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await done;
+
+    expect(sentAt[1] - sentAt[0]).toBe(300);
+  });
+
   it('bounds combined batches without splitting individual input events', async () => {
     const finish: Array<() => void> = [];
     const send = vi.fn((_channel: string, _args: unknown[], _signal?: AbortSignal) =>
@@ -97,8 +149,11 @@ describe('RemoteInputQueue lifecycle', () => {
     finish[0]();
     await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
     expect(send.mock.calls[1][1]).toEqual(['panel', paste]);
+    vi.useFakeTimers();
     finish[1]();
-    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(3));
+    // A paste this long holds its Enter for the longest wait, 2 s.
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(send).toHaveBeenCalledTimes(3);
     expect(send.mock.calls[2][1]).toEqual(['panel', '\r']);
     finish[2]();
     await completed;

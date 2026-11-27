@@ -323,7 +323,16 @@ any changed `--title`, `--context`, `--choices` (a reworded choice adds
 `"was"`, its old label), `--questions` or `--links` saves a new version and
 waits on it. `--ui options` may ask 2 to 4 `--questions` (`[{title, choices}]`)
 at once instead of `--choices`, and `--links` may name another approval as
-`{label, approval}`.
+`{label, approval}`. A local file is `{"label":"Mock-ups","path":"/abs/path/index.html"}`:
+`url` is only for http(s) pages (a `file://` url is read as its path). A file the
+card's text names but no link opens is attached for you, and a card naming one
+that isn't there is refused. The card's warnings print on stderr before it
+waits; `runpane notify --check` shows the card and its warnings and posts nothing.
+
+A question asked from a Pane tab stays open if the call waiting on it ends
+first (killed, timed out, the agent restarted): Pane types the answer into the
+tab as `answer: Q-n → <answer> (by you)`. To withdraw a card you no longer
+need, run `runpane notify --close <id|Q-n>`; it prints `{closed: true, id}`.
 
 Autopilot (experimental) reads `runpane autopilot status|waiting|stack` and adds
 to its stack with `runpane autopilot stack push (--item <id>|--file <path>|--url

@@ -1,6 +1,7 @@
 import { DEFAULT_RELAY_DOMAIN, isRelayProfile, type ConnectionPresence } from '@shared/remoteClient';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus } from '@shared/types/remoteDaemon';
 import type { TailnetMachine, TailnetMachineList } from '@shared/types/workspaceAccess';
+import { isReadOnlyProfile } from '@/auth/access';
 import { assignMachineColorSlots, preferredMachineColorSlot } from '@shared/utils/machineColor';
 
 
@@ -25,6 +26,8 @@ export interface Machine {
   current: boolean;
   /** Tapping it switches (saved) or connects (new). */
   selectable: boolean;
+  /** This phone only watches it. */
+  readOnly: boolean;
   /** Set for a saved machine. */
   profile?: RemotePaneConnectionProfile;
   /** Its entry in the Tailscale list, when there is one. */
@@ -102,6 +105,7 @@ export function listMachines({ profiles, current, connection, presence, tailnet 
       status: isRelayProfile(profile) ? `${live.status} · Via ${relayName(profile.relay.domain)}` : live.status,
       current: isCurrent,
       selectable: !isCurrent && live.state !== 'dimmed',
+      readOnly: isReadOnlyProfile(profile),
       profile,
       tailnet: entry,
       domain,
@@ -118,6 +122,7 @@ export function listMachines({ profiles, current, connection, presence, tailnet 
       ...fromTailnet(machine.state),
       current: false,
       selectable: true,
+      readOnly: false,
       tailnet: machine,
       domain,
     }));
@@ -145,12 +150,6 @@ function isSameMachine(profile: RemotePaneConnectionProfile, machine: TailnetMac
 /** The host part of a machine's address. */
 export function hostOf(url: string): string {
   return /^[a-z]+:\/\/([^/:]+)/i.exec(url)?.[1]?.toLowerCase() ?? '';
-}
-
-/** A machine's name cut to its first `length` characters and an ellipsis, for tight rows; labels keep the full name. */
-export function shortMachineName(name: string, length: number): string {
-  const characters = Array.from(name);
-  return characters.length > length ? `${characters.slice(0, length).join('')}…` : name;
 }
 
 function relayName(domain: string): string {

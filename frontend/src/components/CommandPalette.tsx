@@ -45,6 +45,7 @@ import {
 import type { Project } from '../types/project';
 import { useTodosEnabled, useTodosStore } from '../stores/todosStore';
 import { openTodo } from './todos/todosNavigation';
+import { isReadOnlyHost } from '../stores/readOnlyHostStore';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -135,8 +136,16 @@ async function reportFailure(title: string, request: Promise<{ success: boolean;
   }
 }
 
+const READ_ONLY_ACTIONS: ReadonlySet<string> = new Set(['open', 'open-session', 'copy-path', 'pr']);
+
+function machineOpenOnly(item: SearchItem, machine: MachineRef): LauncherAction[] {
+  return machineActionsFor(item, { ...machine, readOnly: false }).filter((action) => READ_ONLY_ACTIONS.has(action.id));
+}
+
 /** A row from All machines: it opens on its machine, and pin and archive run there in place. */
 function machineActionsFor(item: SearchItem, machine: MachineRef): LauncherAction[] {
+  // A computer this one only watches: opening is all there is.
+  if (machine.readOnly) return machineOpenOnly(item, machine);
   const open = (target: Parameters<typeof openOnMachine>[1]) => () => afterLeavingSettings(() => void openOnMachine(machine.id, target));
   switch (item.kind) {
     case 'pane': {
@@ -170,6 +179,12 @@ function machineActionsFor(item: SearchItem, machine: MachineRef): LauncherActio
 
 function actionsFor(item: SearchItem, context: ActionContext): LauncherAction[] {
   if (item.machine) return machineActionsFor(item, item.machine);
+  // The window shows a computer it only watches: actions that change it are left out; the host refuses them anyway.
+  if (isReadOnlyHost()) return hostActionsFor(item, context).filter((action) => READ_ONLY_ACTIONS.has(action.id) || item.kind === 'command');
+  return hostActionsFor(item, context);
+}
+
+function hostActionsFor(item: SearchItem, context: ActionContext): LauncherAction[] {
   switch (item.kind) {
     case 'pane': {
       const { pane, prUrl } = item;

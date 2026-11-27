@@ -6,6 +6,9 @@ import { LINK_EXPIRY_LABELS, useAddDeviceStore, type LinkExpiry, type MakerResul
 import { LinkFlowView } from './LinkConfirm';
 import { TabFooter } from './SshTab';
 import { Tooltip } from '../ui/Tooltip';
+import { AccessPicker } from './AccessPicker';
+import { DEVICE_ACCESS_LABELS } from '../../../../shared/types/accessLevel';
+import { requestOpenSettings } from '../../utils/openSettings';
 import { RelayLimitNotice, RelayLimitTip } from './RelayLimitNotice';
 
 const EXPIRIES: LinkExpiry[] = ['10m', '1h', '24h'];
@@ -19,16 +22,35 @@ function isExpiry(value: string): value is LinkExpiry {
 export function MakerResultView({ maker }: { maker: MakerResult }) {
   const unlinkMaker = useAddDeviceStore((state) => state.unlinkMaker);
   const close = useAddDeviceStore((state) => state.close);
+  const readOnly = maker.access === 'read';
   return (
     <div className="space-y-4">
       <div role="status" className="flex items-start gap-3 rounded-lg border border-status-success/30 bg-status-success/10 p-3">
         <CheckCircle2 className="mt-0.5 h-5 w-5 flex-none text-status-success" aria-hidden="true" />
         <div className="min-w-0">
-          <p className="text-sm font-medium text-text-primary">Linked with {maker.label}</p>
-          <p className="text-xs text-text-secondary">{maker.label} now reaches this computer and the computers linked with it.</p>
+          <p className="text-sm font-medium text-text-primary">{readOnly ? `Paired Read only with ${maker.label}` : `Linked with ${maker.label}`}</p>
+          <p className="text-xs text-text-secondary">
+            {readOnly
+              ? `${maker.label} now watches this computer and the computers linked with it. It can't change anything on them.`
+              : `${maker.label} now reaches this computer and the computers linked with it.`}
+          </p>
         </div>
       </div>
-      {maker.unlink === 'done' ? (
+      {readOnly ? (
+        <p className="text-sm text-text-secondary">
+          Not you?{' '}
+          <button
+            type="button"
+            onClick={() => {
+              close();
+              requestOpenSettings({ category: 'remote-access', setting: 'remote-linked-computers' });
+            }}
+            className="text-interactive hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+          >
+            Remove it in Settings › Remote Access
+          </button>
+        </p>
+      ) : maker.unlink === 'done' ? (
         <p className="text-sm text-text-secondary" role="status">{maker.outcome}</p>
       ) : maker.computerId && (
         <p className="text-sm text-text-secondary">
@@ -60,7 +82,7 @@ export function ComputerTab({ ready, error = null, onRetry, limitUntil = null, o
   limitUntil?: string | null;
   onSetUpTailscale?: () => void;
 }) {
-  const { expiresIn, setExpiresIn, copied, copyError, copyLink, flow, startLink, cancelLink, maker } = useAddDeviceStore();
+  const { expiresIn, setExpiresIn, access, copied, copyError, copyLink, flow, startLink, cancelLink, maker } = useAddDeviceStore();
   const [pasted, setPasted] = useState('');
   const [copying, setCopying] = useState(false);
 
@@ -74,7 +96,8 @@ export function ComputerTab({ ready, error = null, onRetry, limitUntil = null, o
     void copyLink().finally(() => setCopying(false));
   };
   let copyNote = `Works once. Choose ${LINK_EXPIRY_LABELS['10m']}, ${LINK_EXPIRY_LABELS['1h']} or ${LINK_EXPIRY_LABELS['24h']}.`;
-  if (copied) copyNote = `Copied. It works once, until ${new Date(copied.expiresAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}.`;
+  if (copied && copied.access !== access) copyNote = `The link you copied gives ${DEVICE_ACCESS_LABELS[copied.access]}. Copy again for a ${DEVICE_ACCESS_LABELS[access]} link.`;
+  else if (copied) copyNote = `Copied. It works once, until ${new Date(copied.expiresAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}.`;
 
   return (
     <>
@@ -114,6 +137,7 @@ export function ComputerTab({ ready, error = null, onRetry, limitUntil = null, o
             </SelectContent>
           </Select>
         </div>
+        <AccessPicker />
         <p className="text-xs text-text-tertiary" role={copied ? 'status' : undefined}>{copyNote}</p>
         {copyError && <p className="text-xs text-status-error" role="alert">{copyError}</p>}
       </section>
@@ -141,7 +165,11 @@ export function ComputerTab({ ready, error = null, onRetry, limitUntil = null, o
       </section>
     </div>
     <TabFooter>
-      <p className="mr-auto text-sm text-text-secondary">Whatever opens the link joins all your linked computers. Only link computers you own.</p>
+      <p className="mr-auto text-sm text-text-secondary">
+        {access === 'read'
+          ? "Whatever opens the link watches this computer and your linked computers, and can't change anything on them."
+          : 'Whatever opens the link joins all your linked computers. Only link computers you own.'}
+      </p>
     </TabFooter>
     </>
   );

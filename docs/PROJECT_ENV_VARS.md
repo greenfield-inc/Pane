@@ -16,7 +16,7 @@ Each variable is one of:
 | Source | What the project stores |
 | --- | --- |
 | Plain text | The value, in the Pane database |
-| Pane secret | Only the secret's address, `<project>/<NAME>`. The value lives in [Pane secrets](PANE_SECRETS.md), so every repo and agent that uses it shares one copy, synced to your other machines. A secret from 1Password has a value only during a [lease](PANE_SECRETS.md#leases). |
+| Pane secret | Only the secret's address, `<project>/<NAME>`. The value lives in [Pane secrets](PANE_SECRETS.md), so every repo and agent that uses it shares one copy, synced to your other machines. A secret from 1Password has a value only during a [lease](PANE_SECRETS.md#leases). A [login](PANE_SECRETS.md#logins) never goes into an environment. |
 | macOS Keychain | Only the service and account of a generic-password item you already have (macOS hosts only) |
 
 For a Pane secret row, type a value to create or replace that secret when you save;
@@ -49,7 +49,7 @@ other projects' Panes. They are not a sandbox:
 - Every process Pane starts for the project, including the agents, gets the value in
   its environment, and other processes running as your user can read a process's
   environment (for example with `ps eww`).
-- Any agent can use any Pane secret through `runpane secrets exec`
+- Any agent can use any Pane secret that is not a login through `runpane secrets exec`
   ([who can read a secret](PANE_SECRETS.md#who-can-read-a-secret)).
 - On a host set to "Everyone on tailnet", a teammate's commands and terminals run as
   you and can reach every secret. Pane only keeps the secret and keychain variables

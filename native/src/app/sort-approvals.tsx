@@ -1,3 +1,8 @@
-import { SortApprovalsSheet } from '@/features/approvals/SortApprovalsSheet';
+import { router } from 'expo-router';
 
-export default SortApprovalsSheet;
+import { SortApprovalsSheet } from '@/features/approvals/SortApprovalsSheet';
+import { FocusScope } from '@/features/controller/FocusScope';
+
+export default function SortApprovalsRoute() {
+  return <FocusScope bare onBack={() => router.back()}><SortApprovalsSheet /></FocusScope>;
+}

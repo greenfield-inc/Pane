@@ -270,11 +270,39 @@ box), **Space**, start typing, or click into the Session: only then is the
 Session selected and its agent started. Passing over a Session never starts its
 agent or resumes a paused one; Enter or a click resumes it when **Resume a
 paused Pane when you open it** is on. In the **All machines** view this
-computer's Session rows work the same way; another machine's rows keep Enter
-(the cursor stops on them, and nothing switches machines until you press Enter
-or click). Sessions whose agent runs in a terminal, Pane and project rows, and
-a window showing another machine keep Enter. With the setting off, the arrows
+computer's Session rows work the same way. The rows of your other machines
+(those this computer mirrors: see the desktop mirror below) show their Session
+at once too, read-only and without switching the window: the header says
+**On** *machine*, its tabs are listed but not usable, and the message box reads
+"Type to continue on *machine*". The chat paints from the mirror (its newest 30
+messages); once the cursor stays about 150 ms, one read of that machine
+(`orchestration-sessions:peek`, which starts nothing) brings its newest 200
+messages, and while it is shown the chat follows that machine's chat events for
+it alone. If its live events skip ahead of what is held (a gap, or its agent
+starting a new run there), one more read of that machine catches it up, with the
+events that arrive meanwhile applied on top. **Earlier messages** reads older
+messages from that machine (`chat-tab:history`, which starts nothing). On a
+chat that machine hasn't run since it started, only its saved window is there:
+the host answers `unavailable` (asked with `{ withStatus: true }`; an older
+desktop still gets the plain list), and the button gives way to "Older messages
+load once this chat is opened on *machine*", asked again only once the chat runs. These
+reads (`peek` and `chat-tab:history`) are served only for your own machines.
+A Session the mirror doesn't hold (just created, or one whose agent runs in a
+terminal) shows its name at once and fills from that same one read.
+An offline machine's Session shows what it last sent, with an **Offline · last
+seen** *time* chip and a note in place of the message box; while the mirror
+catches up after a reconnect, the header says **Updating from** *machine*; and
+a chat its host can't read yet says its messages load when it is opened there.
+Resting on another machine's row shows it and nothing more: it starts no agent
+there and switches nothing until you press Enter or click. A teammate's machine,
+or one that isn't mirrored, keeps Enter (the cursor stops on its rows). Sessions
+whose agent runs in a terminal on this computer, Pane and project rows, and a
+window showing another machine keep Enter. With the setting off, the arrows
 only move the cursor.
+
+While the cursor only passes over a chat, it draws the newest 30 messages, so a
+held arrow key never waits on a long chat; the rest of what it holds draws once
+the cursor stays.
 
 Drag a Session up or down in Pinned, in Sessions, or in the compact rail to
 change its place; a line shows where it will land. With a Session row focused,
@@ -309,8 +337,9 @@ adding Panes, or `runpane` focusing one of its Panes leaves it collapsed. Each
 device remembers the Sessions you opened, separately for each host: the
 desktop in its own settings, the remote web app (PWA) in browser storage
 (`pane.remotePwa.expandedSessions@<host id>`). Opening a Session under Pinned
-opens it under Sessions too. The native iOS and Android app does not follow
-this yet: its Sessions start expanded and it forgets on restart.
+opens it under Sessions too. The native iOS and Android app keeps them in one
+file per host in its cache folder (`open-sessions/`), and Home and its Sessions
+screen share them.
 Child Pane rows are indented beyond the Session chat icon and keep the ordinary
 Pane actions. Create Pane, opened while a Session is showing, has an
 **Add to <Session>** checkbox, on by default, that files the new Pane under that
@@ -1031,8 +1060,8 @@ The daemon and Electron IPC channels are:
 `orchestration-sessions:list`, `orchestration-sessions:select`,
 `orchestration-sessions:create`, `orchestration-sessions:get`,
 `orchestration-sessions:update`, `orchestration-sessions:archive-preview`, `orchestration-sessions:archive`, `orchestration-sessions:reorder`, `orchestration-sessions:set-agent`,
-`orchestration-sessions:associate`, `orchestration-sessions:detach`, and
-`orchestration-sessions:overview`.
+`orchestration-sessions:associate`, `orchestration-sessions:detach`, `orchestration-sessions:overview`, and
+`orchestration-sessions:snapshots`.
 
 Selectors accept a stable Session ID or an exact Session name. Phone apps
 released before chat tabs crash on a tab kind they don't know, so clients that
@@ -1041,7 +1070,132 @@ show chat tabs pass `{ chatTabs: true }` as a second argument to
 (desktop, the PWA and current phone apps do). For any other client, `create`
 starts the orchestrator in a terminal, `get` of a Session whose orchestrator is a
 chat tab fails with `CHAT_TAB_CLIENT_OUTDATED`, which says to update Pane on the
-phone, and `panels:list` leaves chat tabs out. The existing
+phone, and `panels:list` leaves chat tabs out.
+
+`orchestration-sessions:list`, `:select` and `:reorder` take `{ summary: true }`
+as their last argument. The answer then leaves each Session's `activity` log and
+`profile` out, which are most of a record's size: on one machine with 123
+Sessions the list fell from 4.5 MB to 262 KB. The sidebar, the All machines feed,
+a host switch and the phone ask for it; `get` and `overview` still carry the
+full record. A host older than this ignores the argument and sends full records.
+Desktop requests to another machine also ask for gzip, and the host compresses
+answers of 1 KB or more.
+
+`orchestration-sessions:snapshots` serves host snapshots, which let the owner's
+other machines show a chat Session ahead of opening it. There is one snapshot
+per unarchived chat Session. It holds:
+
+- the summary record, without its launch settings (`launchCommand`,
+  `customResume`, `openingPrompt`, `profile`);
+- its chat and terminal tabs, as names and kinds only, with the few state
+  fields a Read only device sees. No terminal screen, launch input, selection
+  or file content leaves the machine, and other kinds of tab are left out;
+- the stored layout;
+- the chat view with its newest 30 messages.
+
+Any string over 4 KB outside a message's own text is replaced in place by
+`{ omitted: { field, length } }`. That covers an image's `data`, a `data:` URI,
+a resource's `blob` or `text`, a tool's input or output, a waiting approval's
+tool call and a question's form.
+
+Each snapshot has a `revision` that rises on any change to the record (except
+order and selection), the tabs, the layout or the chat.
+
+The request is `{ since?, epoch?, held? }`. The answer lists every snapshotted
+Session id, the snapshots newer than `since`, and the `revision` and `epoch` to
+send next time. `held` maps a Session id to the `{ generation, count, revision }`
+of the messages the caller already has. Only messages added or changed since
+that transcript revision are sent, including an earlier tool call that
+finished later. The host sends the whole window when it can't tell what
+changed.
+
+`epoch` names the host's run. An answer from another run, such as after a
+restart or with the clock set back, has `since` and `held` ignored, so every
+Session is sent whole.
+
+After a restart, a chat whose agent hasn't run yet carries the newest window
+the host saved beside the tab (`recent.json`, as a read that starts nothing
+shows it), so a cold host's snapshots have their messages without starting
+any agent. Only a chat with no saved window (never written, or saved for
+another conversation) has no `chat.transcript`, `messageCount` 0 and
+`transcriptUnknown: true`, which means "not known yet", not "empty". Once the
+chat is opened there, its snapshot's revision rises and carries its messages.
+
+A change also sends `session-snapshot:changed` `{ sessionId, revision }` on the
+event stream, at most once a second per Session. Reading creates no tab and
+starts no agent. Only the owner's own devices get an answer; teammates and Read
+only devices are refused with `SESSION_SNAPSHOTS_OWNER_ONLY`.
+
+The desktop keeps a mirror of these snapshots for each of the owner's other
+machines (`main/src/services/machineMirror.ts`). Each machine has a folder,
+`<PANE_DIR>/machine-mirror/<machine id>/` (0700), holding an `index.json` and
+one `<session id>.json` per Session (each 0600, written to a temporary file
+and renamed; at most one save every 2 s per machine, the index last). Main
+keeps every machine's index in memory (each Session's revision, size and held
+window) and the 30 Sessions read or changed most recently, across all
+machines; any other Session is read from its file (under 10 ms for 100 KB).
+It reads `snapshots` once when a machine connects or resyncs, then after its
+`session-snapshot:changed` notices, batched for 250 ms. Each read sends back
+`since`, `epoch` and `held`, so only changed messages cross. A machine stays
+at 25 MB at most; when it is over, the Sessions changed longest ago (lowest
+snapshot revision) are left out first.
+
+Only the person's own machines are mirrored (D-500). A saved computer is
+theirs when its Tailscale owner, as this computer's Tailscale reports it, is
+this computer's own Tailscale login. That is checked each time a connection
+starts on, or moves to, one of the computer's Tailscale routes, where
+Tailscale itself names the peer, and saved on it as `mine: 'tailscale'`. A
+Tailscale name a host reported about itself is never trusted on its own. On a
+connection over Same network or the relay, which are pinned to the computer's
+relay key, a side check makes one short read over each of its Tailscale routes,
+through this computer's Tailscale (`computers:routes-report`, as this
+computer's login). Only a machine there that holds the same relay key is the
+one connected, so only its Tailscale owner sets or clears the mark. It runs
+once per connect while the computer is unmarked (backing off after one that
+proved nothing, up to an hour) and once a day after a result either way. When
+Tailscale here can't say, the last result is kept.
+
+The mark is bound to the relay key of the machine it was proved for
+(`mineRelay`): read with `computers:routes-report` over the proving Tailscale
+connection, or the key the side check matched. While connected, it counts on a
+Tailscale route (checked by name on every connect) and on a Same network or
+relay route only when that route is pinned to the same key; on any other key or
+route the machine is not mirrored until proved again. While offline the mark
+stands, so the saved copy stays. A Tailscale route a host reports under a name
+another saved computer already has is refused, unless the name is the
+reporting computer's own: it is proved yours for the key its route is pinned
+to, or a read over Tailscale finds that same key at the name (a read that
+fails is not repeated for that name and key for a day). Then the other
+record's routes under it that a host reported are dropped; a route the person
+or this computer saved stays, and no record is deleted. A machine with no
+Tailscale name here (relay only, say) or owned by another login is not
+mirrored. **This is my computer** in Settings › Remote Access › Computers
+(`mineOverride`) wins over the check both ways: on mirrors the machine, off
+never does; **Use Tailscale** goes back to the check. The host's
+`SESSION_SNAPSHOTS_OWNER_ONLY` check stays as a second layer.
+
+Some machines are never copied, and their folder is removed:
+- a machine that is not the person's own (see above);
+- a machine this computer only watches (a Read only token), whatever the
+  switch says;
+- a machine whose host answers `SESSION_SNAPSHOTS_OWNER_ONLY` (tried again on
+  its next connection);
+- a machine that is forgotten;
+- a machine not seen for 30 days.
+
+A Session whose file is lost or unreadable is never rebuilt from a delta:
+its held window is dropped and the next read lists every Session again, so
+the host sends that one whole. At start, index entries whose file is missing
+are dropped the same way.
+
+A snapshot marked `transcriptUnknown` (its host restarted, hasn't run the
+chat's agent since and saved no window for it) keeps the messages and count the mirror already holds, in
+any host run, until a snapshot with a transcript arrives. A machine whose Pane
+has no snapshots (`ERR_HOST_OUTDATED`, or `ERR_UNKNOWN_CHANNEL` from an older
+host) is left alone until it reconnects. Each machine's state is `live`,
+`catching-up` or `offline`, with `lastSeenAt`.
+
+The existing
 `pane-chat:*` channels remain compatibility endpoints for the imported legacy
 conversation.
 

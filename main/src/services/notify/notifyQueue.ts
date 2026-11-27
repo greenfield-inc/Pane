@@ -27,11 +27,13 @@ import type {
   NotifyVersion,
 } from '../../../../shared/types/notify';
 import { NOTIFY_VERSIONS_MAX } from '../../../../shared/types/notify';
+import type { CardFields } from './cardCheck';
 import type { MachineState } from '../../../../shared/types/machineConnections';
 import type { AppConfig } from '../../types/config';
 import { PaneError } from '../../../../shared/paneError';
 import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 import { leadingQn } from '../../../../shared/autopilotDecision';
+import { newestFirst } from '../../../../shared/approvalOrder';
 import { connectedOf, originOf, type ApprovalStore } from '../approvals/approvalStore';
 
 /** Pane holds an answer this long so Undo can take it back. */
@@ -78,6 +80,8 @@ function forSecret(result: NotifyResult): NotifyResult {
 const ASKER_STOPPED = 'the asker stopped waiting';
 /** Why an item's asker is gone when only its tab closed: a relaying orchestrator or Autopilot can still read for it. */
 export const ASKING_TAB_CLOSED = 'the asking tab was closed';
+/** Why a card closed when its asker ran `runpane notify --close`. */
+const ASKER_WITHDREW = 'its asker withdrew it';
 /** What a reader that took a reply as a question is doing, until it says otherwise. */
 const ASKING_STATUS = 'Getting more context…';
 
@@ -311,6 +315,8 @@ export class NotifyQueue extends EventEmitter {
   private readonly entries = new Map<string, Entry>();
   /** Waiting question ids, oldest first. */
   private queue: string[] = [];
+  /** Questions Skip sent to the back: newer ones go in front of them, whatever their time (T-88). */
+  private readonly skipped = new Set<string>();
   private readonly hidden = new Set<string>();
   /** The tabs each moving Session is stopping, by move id: their cards are held for the move (T-44). */
   private readonly moveHoldPanels = new Map<string, Set<string>>();
@@ -345,6 +351,8 @@ export class NotifyQueue extends EventEmitter {
   private readonly tabsTyping = new Set<string>();
   /** Replies whose line is being typed into their reader's tab right now: not replaceable until it's known whether it went. */
   private readonly repliesTyping = new Set<string>();
+  /** The lines being typed right now: one that already left can't be taken back. */
+  private readonly messagesTyping = new Set<TabMessage>();
   /** In use and "Show cards on" as last polled; a change redraws the strip and Settings. */
   private lastAlertState: string | undefined;
 
@@ -382,6 +390,8 @@ export class NotifyQueue extends EventEmitter {
       if (item.dismissedAt !== undefined) this.hidden.add(item.id);
       if (item.quiet) this.armRing(entry);
     }
+    // Newest first, as it was before the restart (T-88).
+    this.queue = this.byNewest(this.queue);
     for (const entry of this.entries.values()) {
       const { item } = entry;
       if (item.state === 'answered' && !item.delivered && !item.undelivered && item.source.panelId && !item.agentPrompt) this.enqueueTabMessage(item, answerLine(item), true);
@@ -464,7 +474,8 @@ export class NotifyQueue extends EventEmitter {
       return Promise.resolve({ delivered });
     }
 
-    this.queue.push(item.id);
+    // Newest on top, like a stack (T-88).
+    this.enqueue(item);
     // A question never waits behind an update; the update stays under For your information.
     if (this.transient?.view.kind === 'info') this.clearTransient();
     this.chime(item.id);
@@ -594,7 +605,7 @@ export class NotifyQueue extends EventEmitter {
     const entry: Entry = { item, resumeLoop: false };
     this.entries.set(item.id, entry);
     this.save(entry);
-    this.queue.push(item.id);
+    this.enqueue(item);
     if (item.quiet) this.armRing(entry);
     this.changed();
   }
@@ -790,8 +801,8 @@ export class NotifyQueue extends EventEmitter {
 
   /** `runpane notify --relays <item>`: the orchestrator improves the worker's card and waits on it as on any notify (J8). */
   private relay(id: string, question: NotifyQuestion, returnAfterMs: number | undefined, signal?: AbortSignal, by?: NotifySource): Promise<NotifyResult> {
-    const entry = this.entries.get(id) ?? [...this.entries.values()].find(candidate => candidate.item.rewrittenFrom?.id === id && isOpen(candidate.item));
-    if (!entry || entry.item.originKind !== 'worker' || entry.item.state !== 'waiting') {
+    const entry = this.relayEntry(id);
+    if (!entry) {
       return Promise.resolve({ unavailable: `There's no waiting worker question ${id}: it was answered or closed, or its worker moved on. Nothing was shown.`, next: 'Check runpane inbox for the answer.' });
     }
     const { title, ...improved } = question;
@@ -807,6 +818,34 @@ export class NotifyQueue extends EventEmitter {
     const result = this.wait(entry, returnAfterMs, signal);
     this.changed();
     return result;
+  }
+
+  /** The waiting worker card `--relays <id>` improves, if there still is one. */
+  private relayEntry(id: string): Entry | undefined {
+    const entry = this.entries.get(id) ?? [...this.entries.values()].find(candidate => candidate.item.rewrittenFrom?.id === id && isOpen(candidate.item));
+    return entry && entry.item.originKind === 'worker' && entry.item.state === 'waiting' ? entry : undefined;
+  }
+
+  /**
+   * The card an --update or --relays call is about to change, as it stands, so Pane can check the
+   * new version's files against it before anything changes. Undefined when there is none, or the
+   * caller may not change it: the call itself then says why.
+   */
+  storedCard(target: { update: string; reader: NotifyReaderCaller } | { relays: string }): CardFields | undefined {
+    let entry: Entry | undefined;
+    try {
+      entry = 'update' in target ? this.forReader(target.reader, target.update, 'update') : this.relayEntry(target.relays);
+    } catch {
+      return undefined;
+    }
+    if (!entry) return undefined;
+    const { title, context, choices, questions, links } = entry.item;
+    const card: CardFields = { title };
+    if (context !== undefined) card.context = context;
+    if (choices) card.choices = choices;
+    if (questions) card.questions = questions;
+    if (links) card.links = links;
+    return card;
   }
 
   private isRewrittenFrom(id: string): boolean {
@@ -953,7 +992,8 @@ export class NotifyQueue extends EventEmitter {
   /** The reader order (D-258): the asker (its call, else its tab), the orchestrator that relayed it, then Autopilot. */
   private firstReader(entry: Entry, tried: Set<string>): NotifyReplyReader | undefined {
     const { item } = entry;
-    const openCall = (entry.waiter !== undefined || entry.resumeLoop) && !tried.has('call');
+    // Between resume rounds a tab's asker may never call again (F-1), so its tab reads the reply instead.
+    const openCall = (entry.waiter !== undefined || (entry.resumeLoop && !outlivesCall(item))) && !tried.has('call');
     // A worker's open call is its orchestrator's relay: the worker's own tab reads first.
     if (openCall && item.originKind !== 'worker') return { kind: 'asker', name: askerName(item) };
     const asker = item.source.panelId;
@@ -1060,7 +1100,8 @@ export class NotifyQueue extends EventEmitter {
     // A call between resume rounds gets it on its next --resume, unless that call read the reply itself.
     const callRead = reply.reader !== undefined && !reply.reader.panelId;
     if (entry.waiter) entry.waiter.resolve(result);
-    else if (entry.resumeLoop && !callRead) entry.pending = result;
+    // A tab's card keeps it for a later --resume too, as it does a picked answer (F-1).
+    else if ((entry.resumeLoop || outlivesCall(item)) && !callRead) entry.pending = result;
     if (reply.reader?.kind !== 'orchestrator') this.correctRelay(item);
     if (reply.reader?.kind !== 'asker' && item.source.panelId && !this.env.askerGone?.(item)) this.enqueueTabMessage(item, answerLine(item), true);
     this.save(entry);
@@ -1115,6 +1156,9 @@ export class NotifyQueue extends EventEmitter {
     item.staleSince = undefined;
     item.dismissedAt = undefined;
     this.hidden.delete(item.id);
+    // Its new version is the newest card: back on top (T-88).
+    this.queue = this.queue.filter(other => other !== item.id);
+    this.enqueue(item);
     this.save(entry);
     // Ready again is quiet: a notice where the person is, and no chime (D-244).
     const current = this.strip();
@@ -1169,11 +1213,44 @@ export class NotifyQueue extends EventEmitter {
     // An answer still waiting for the next --resume is no longer the answer.
     entry.pending = undefined;
     this.queue = [item.id, ...this.queue.filter(other => other !== item.id)];
+    this.skipped.delete(item.id);
     // The relay that returned the reply as the answer hears it doesn't stand; the new answer follows as a correction.
     const relay = item.relayedBy;
     if (item.originKind === 'worker' && relay && item.reply && item.reply.reader?.kind !== 'orchestrator') {
       this.enqueueTabMessage(item, `reopened: ${askerRef(item)} → ${askerName(item)} took "${item.reply.text}" as a question and is updating the card${idTag(item)} (by ${askerName(item)})`, false, { panelId: relay.panelId });
     }
+  }
+
+  /**
+   * `runpane notify --close <id|Q-n>`: the asking tab withdraws a card it no longer needs. Ending
+   * its call no longer closes a tab's card, so this is how an asker takes one back. Only the tab
+   * that asked may: a relayed worker's card stays the worker's.
+   */
+  withdrawByAsker(caller: NotifyReaderCaller, ref: string): NotifyResult {
+    const wanted = ref.trim();
+    const open = [...this.entries.values()].filter(entry => isOpen(entry.item) && (entry.item.id === wanted || leadingQn(entry.item.title) === wanted));
+    if (open.length === 0) {
+      throw new PaneError('ERR_NOTIFY_GONE', `There's no waiting approval ${wanted} on ${this.machine()}: it was answered or closed. Nothing was changed.`, 'Nothing to withdraw. If it was answered, act on the answer you got.');
+    }
+    const own = open.filter(entry => caller.panelId !== undefined && entry.item.source.panelId === caller.panelId).sort((a, b) => b.item.createdAt - a.item.createdAt);
+    if (own.length === 0) {
+      throw new PaneError('ERR_NOTIFY_NOT_READER', `Only the tab that asked ${wanted} (${open[0].item.source.name}) can withdraw it, and this tab isn't it. Nothing was changed.`, 'Leave it open, or ask the person to close it.');
+    }
+    const [entry] = own;
+    if (entry.item.agentPrompt) {
+      throw new PaneError('ERR_NOTIFY_IN_TERMINAL', `"${entry.item.title}" is a permission prompt, so it can't be withdrawn. Nothing was changed.`, 'Answer it, on its card or in its terminal.');
+    }
+    if (entry.item.state === 'sent') {
+      throw new PaneError('ERR_NOTIFY_ANSWERED', `${refOf(entry.item)} was just answered; the answer reaches you in a moment. Nothing was changed.`, 'Act on the answer when it comes.');
+    }
+    // A reply being typed into the tab right now can't be taken back: it becomes the answer once it lands.
+    if ([...this.messagesTyping].some(message => message.itemId === entry.item.id && (message.reply || message.answer))) {
+      throw new PaneError('ERR_NOTIFY_ANSWERED', `The person's reply to ${refOf(entry.item)} is being typed into your tab right now. Nothing was changed.`, 'Read the reply when it lands and act on it.');
+    }
+    // A reply still waiting for this busy tab never goes: the card it answers is gone.
+    this.tabMessages = this.tabMessages.filter(message => message.itemId !== entry.item.id || !message.reply);
+    this.closeOpen(entry, { by: 'pane', reason: ASKER_WITHDREW }, closedResult('You withdrew this question.'));
+    return { closed: true, id: entry.item.id };
   }
 
   /**
@@ -1239,7 +1316,8 @@ export class NotifyQueue extends EventEmitter {
     }
     entry.item.answeredOn = device;
     const who = by === 'autopilot' ? 'Autopilot' : 'The person';
-    const heardOnCall = entry.waiter !== undefined || entry.resumeLoop;
+    // Between resume rounds a tab's asker may never call again, so its tab hears it too.
+    const heardOnCall = entry.waiter !== undefined || (entry.resumeLoop && !outlivesCall(entry.item));
     this.closeOpen(entry, { by, reason }, closedResult(`${who} closed this question${reason ? `: ${reason}` : ''}.`));
     if (!heardOnCall && entry.item.source.panelId) {
       const tail = `(by ${by === 'autopilot' ? 'Autopilot' : 'you'})${reason ? `: ${reason}` : ''}`;
@@ -1280,6 +1358,7 @@ export class NotifyQueue extends EventEmitter {
     if (device) entry.item.reopened.device = device;
     entry.restored = true;
     this.queue = [id, ...this.queue];
+    this.skipped.delete(id);
     this.save(entry);
     this.changed();
   }
@@ -1297,19 +1376,45 @@ export class NotifyQueue extends EventEmitter {
     this.changed();
   }
 
-  /** The answer goes to an open call; a worker's goes to its tab, since the call open on it is its orchestrator's relay. */
+  /**
+   * The one handoff for every answer, the person's or Autopilot's. A call waiting on it gets it. With
+   * none waiting it is kept for a later `--resume`, and a card asked from a Pane tab is also typed into
+   * that tab, since its asker may never call again (between resume rounds, or its call ended). A
+   * worker's goes to its tab, since the call open on it is its orchestrator's relay. Delivery by call
+   * is recorded only when a call takes the answer (here, or in `resume`).
+   */
   private handOverAnswer(entry: Entry, result: NotifyResult): void {
     const { item } = entry;
     if (item.summaryOf) {
       this.applySummary(item, result);
     }
-    const overCall = entry.waiter !== undefined || entry.resumeLoop;
+    const waiting = entry.waiter !== undefined;
     if (entry.waiter) entry.waiter.resolve(result);
     else entry.pending = result;
-    if (item.source.panelId && !item.agentPrompt && (item.originKind === 'worker' || !overCall)) this.enqueueTabMessage(item, answerLine(item), true);
-    else if (overCall) item.delivered = { via: 'call', at: Date.now() };
+    if (outlivesCall(item) && (item.originKind === 'worker' || !waiting)) this.enqueueTabMessage(item, answerLine(item), true);
+    else if (waiting) item.delivered = { via: 'call', at: Date.now() };
     this.correctRelay(item);
     this.save(entry);
+  }
+
+  /**
+   * A `--resume` took the kept answer: the call has it. Its line, if still waiting for a busy tab, is
+   * dropped so the answer arrives once; a line already being typed still lands, and the tab records it.
+   */
+  private collectedByCall(entry: Entry): void {
+    const { item } = entry;
+    if (item.state !== 'answered' || item.delivered) return;
+    this.tabMessages = this.tabMessages.filter(message => message.itemId !== item.id || !message.answer || this.messagesTyping.has(message));
+    if ([...this.messagesTyping].some(message => message.itemId === item.id && message.answer)) return;
+    item.delivered = { via: 'call', at: Date.now() };
+    this.save(entry);
+    this.changed();
+  }
+
+  /** A reply's line goes only while it is still the card's current reply and the card still waits. */
+  private replyStillOwed(message: TabMessage): boolean {
+    const item = this.entries.get(message.itemId)?.item;
+    return item !== undefined && item.state === 'waiting' && item.reply?.id === message.reply;
   }
 
   /**
@@ -1351,7 +1456,13 @@ export class NotifyQueue extends EventEmitter {
     if (!type) return;
     for (const message of [...this.tabMessages]) {
       if (this.tabsTyping.has(message.panelId)) continue;
+      // Checked again before every try: the card may have been withdrawn or closed, or the reply replaced, since it was queued.
+      if (message.reply && !this.replyStillOwed(message)) {
+        this.tabMessages = this.tabMessages.filter(other => other !== message);
+        continue;
+      }
       this.tabsTyping.add(message.panelId);
+      this.messagesTyping.add(message);
       if (message.reply) this.repliesTyping.add(message.reply);
       // Archive all on one asker's cards: their closes reach its tab as one line, so one turn.
       const batch = message.closed ? this.tabMessages.filter(other => other.panelId === message.panelId && other.closed?.tail === message.closed?.tail) : [message];
@@ -1374,6 +1485,7 @@ export class NotifyQueue extends EventEmitter {
         console.warn(`[Notify] Couldn't type into tab ${message.panelId}; the next sweep tries again:`, error);
       }).finally(() => {
         this.tabsTyping.delete(message.panelId);
+        this.messagesTyping.delete(message);
         if (message.reply) this.repliesTyping.delete(message.reply);
         // Only after a message went: a busy tab waits for its next idle or the next sweep.
         if (again && this.tabMessages.some(other => other.panelId === message.panelId)) this.flushTabMessages();
@@ -1681,7 +1793,7 @@ export class NotifyQueue extends EventEmitter {
       // Only an open call can be abandoned: a saved item with no call is waiting on its tab's answer.
       if (entry.item.source.panelId !== panelId || !isOpen(entry.item) || !entry.waiter || this.heldForMove(entry)) continue;
       clearTimeout(entry.idleTimer);
-      entry.idleTimer = idle ? setTimeout(() => this.expire(entry.item.id), NOTIFY_IDLE_BACKSTOP_MS) : undefined;
+      entry.idleTimer = idle ? setTimeout(() => this.callEnded(entry), NOTIFY_IDLE_BACKSTOP_MS) : undefined;
     }
   }
 
@@ -1930,6 +2042,7 @@ export class NotifyQueue extends EventEmitter {
       const result = entry.pending;
       entry.pending = undefined;
       clearTimeout(entry.graceTimer);
+      this.collectedByCall(entry);
       return Promise.resolve(result);
     }
     if (!entry || !isOpen(entry.item)) {
@@ -1954,7 +2067,7 @@ export class NotifyQueue extends EventEmitter {
           return;
         }
         // Pane stopping its server ends every call; that isn't the asker leaving (J6).
-        if (!this.quitting) this.expire(entry.item.id);
+        if (!this.quitting) this.callEnded(entry);
       };
       const waiter: Waiter = {
         resolve: (result) => {
@@ -1977,23 +2090,21 @@ export class NotifyQueue extends EventEmitter {
         // Each round has its own 15 minutes: an updated version counts from when it was posted. A
         // worker's question has no such limit, so each of its relay calls waits a full round.
         const remaining = (entry.item.revision?.at ?? entry.item.createdAt) + NOTIFY_RESUME_CAP_MS - Date.now();
+        // A worker's question, and one asked from a tab, outlive their calls: neither has the cap.
+        const uncapped = entry.item.originKind === 'worker' || outlivesCall(entry.item);
         returnTimer = setTimeout(() => {
           const worker = entry.item.originKind === 'worker';
-          if (remaining <= returnAfterMs && !worker) {
+          if (remaining <= returnAfterMs && !uncapped) {
             // An answer in its Undo hold reaches this call when the hold ends.
             if (entry.item.state === 'sent') return;
             this.expire(entry.item.id, unavailable('Nobody answered within 15 minutes.'));
             return;
           }
           entry.resumeLoop = true;
-          waiter.resolve({
-            waiting: true,
-            id: entry.item.id,
-            next: `Call \`runpane notify --resume ${entry.item.id}\` now to keep waiting for the answer.`,
-          });
+          waiter.resolve(waitingResult(entry.item));
           // A relayed worker question keeps waiting for its worker even if the relay never resumes.
-          if (!worker) entry.graceTimer = setTimeout(() => this.expire(entry.item.id), NOTIFY_RESUME_GRACE_MS);
-        }, entry.item.originKind === 'worker' ? returnAfterMs : Math.min(returnAfterMs, Math.max(remaining, 0)));
+          if (!worker) entry.graceTimer = setTimeout(() => this.callEnded(entry), NOTIFY_RESUME_GRACE_MS);
+        }, uncapped ? returnAfterMs : Math.min(returnAfterMs, Math.max(remaining, 0)));
       }
     });
   }
@@ -2139,7 +2250,33 @@ export class NotifyQueue extends EventEmitter {
     entry.item.dismissedAt = undefined;
     this.save(entry);
     this.queue = [id, ...this.queue];
+    this.skipped.delete(id);
     if (this.transient?.view.itemId === id) this.clearTransient();
+  }
+
+  /**
+   * Its call ended (killed, cancelled, idle, or never resumed). A card asked from a Pane tab keeps
+   * waiting: the tab takes its answer, so only an answer, a close, or the tab, Pane or Session going
+   * ends it. A call from outside Pane, or a permission prompt's hook, can't be told later, so it expires.
+   */
+  private callEnded(entry: Entry): void {
+    const { item } = entry;
+    if (!outlivesCall(item)) {
+      this.expire(item.id);
+      return;
+    }
+    clearTimeout(entry.graceTimer);
+    clearTimeout(entry.idleTimer);
+    entry.graceTimer = undefined;
+    entry.idleTimer = undefined;
+    entry.resumeLoop = false;
+    // A call still holding on (an idle Codex tab's) returns now; a dropped one is let go.
+    entry.waiter?.resolve(waitingResult(item));
+    // Answered between resume rounds and never collected, with no line already on its way: the tab gets it (a later --resume still does).
+    const lineOwed = this.tabMessages.some(message => message.itemId === item.id && message.answer);
+    if (entry.pending && item.state === 'answered' && !item.delivered && !lineOwed && !this.env.askerGone?.(item)) {
+      this.enqueueTabMessage(item, answerLine(item), true);
+    }
   }
 
   /** The caller stopped waiting: the card says so, then moves to Earlier today as Expired. */
@@ -2207,6 +2344,7 @@ export class NotifyQueue extends EventEmitter {
   private skip(id: string): void {
     if (!this.queue.includes(id)) return;
     this.queue = [...this.queue.filter(other => other !== id), id];
+    this.skipped.add(id);
     this.changed();
   }
 
@@ -2257,7 +2395,7 @@ export class NotifyQueue extends EventEmitter {
     this.transient = null;
   }
 
-  /** What the strip shows: a confirmation, expiry or update first, else the oldest visible question. */
+  /** What the strip shows: a confirmation, expiry or update first, else the newest visible question (T-88). */
   private strip(): NotifyStripView | null {
     if (this.transient) return this.transient.view;
     const hidden = this.allHidden();
@@ -2284,7 +2422,28 @@ export class NotifyQueue extends EventEmitter {
     return undefined;
   }
 
-  /** Every machine's waiting questions, oldest first; each machine keeps its own order (skip moves one back). */
+  /**
+   * Puts a card in the queue where the shared comparator lists it (T-88): ahead of the first card
+   * it sorts before, so cards of the same millisecond agree with every list. Cards skipped to the
+   * back stay behind it.
+   */
+  private enqueue(item: NotifyItem): void {
+    this.skipped.delete(item.id);
+    const at = this.queue.findIndex(other => {
+      const queued = this.find(other);
+      return queued === undefined || this.skipped.has(other) || newestFirst(item, queued) < 0;
+    });
+    if (at === -1) this.queue.push(item.id);
+    else this.queue.splice(at, 0, item.id);
+  }
+
+  /** These ids, newest first by `approvalListedAt` (T-88). */
+  private byNewest(ids: readonly string[]): string[] {
+    const items = ids.flatMap(id => this.find(id) ?? []);
+    return items.sort(newestFirst).map(item => item.id);
+  }
+
+  /** Every machine's waiting questions, newest first (T-88); each machine keeps its own order (skip moves one back). */
   private allQueued(): string[] {
     const queues = [this.localQueue(), ...[...this.remotes.values()].map(remote => remote.queue.filter(id => !this.sendingHere.has(id)))].filter(queue => queue.length > 0);
     if (queues.length <= 1) return [...queues[0] ?? []];
@@ -2292,11 +2451,12 @@ export class NotifyQueue extends EventEmitter {
     const merged: string[] = [];
     for (;;) {
       let pick = -1;
-      let pickAt = Infinity;
+      let pickHead: NotifyItem | undefined;
       queues.forEach((queue, index) => {
         if (heads[index] >= queue.length) return;
-        const at = this.find(queue[heads[index]])?.createdAt ?? Infinity;
-        if (pick === -1 || at < pickAt) { pick = index; pickAt = at; }
+        const head = this.find(queue[heads[index]]);
+        // The shared comparator, so a tie goes the way the Approvals list shows it; unknown last.
+        if (pick === -1 || (head && (!pickHead || newestFirst(head, pickHead) < 0))) { pick = index; pickHead = head; }
       });
       if (pick === -1) return merged;
       merged.push(queues[pick][heads[pick]++]);
@@ -2378,6 +2538,24 @@ function withDeviceLabels(item: NotifyItem, label: (device: string | undefined) 
 /** A machine's items under its current name, after a rename. */
 function withMachine(items: Map<string, NotifyItem>, machine: string): Map<string, NotifyItem> {
   return new Map([...items].map(([key, item]) => [key, item.machine === machine ? item : { ...item, machine }]));
+}
+
+/**
+ * A card asked from a Pane tab outlives the call waiting on it: the answer can still be typed into
+ * that tab. A permission prompt belongs to its hook, which has its own way to end.
+ */
+function outlivesCall(item: NotifyItem): boolean {
+  return item.source.panelId !== undefined && !item.agentPrompt;
+}
+
+/** A call that returns before the answer: `--resume` keeps waiting; a tab's card can also be left to its tab. */
+function waitingResult(item: NotifyItem): NotifyResult {
+  const resume = `Call \`runpane notify --resume ${item.id}\` now to keep waiting for the answer`;
+  return {
+    waiting: true,
+    id: item.id,
+    next: outlivesCall(item) ? `${resume}, or stop waiting: the card stays open, and its answer is typed into this tab as an answer: line.` : `${resume}.`,
+  };
 }
 
 function isOpen(item: NotifyItem): boolean {

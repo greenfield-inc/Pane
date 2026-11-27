@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionRecord, OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -148,7 +148,7 @@ describe('Session selection per desktop', () => {
 describe('Session order', () => {
   // SAFETY: Order tests read only record ids.
   const four = ['a', 'b', 'c', 'd'].map(id => ({ id, name: id.toUpperCase() } as OrchestrationSessionRecord));
-  const ids = (records: OrchestrationSessionRecord[]) => records.map(record => record.id);
+  const ids = (records: ReadonlyArray<{ id: string }>) => records.map(record => record.id);
   const reorder = vi.fn();
   async function orderStore() {
     vi.resetModules();
@@ -205,7 +205,7 @@ describe('the sidebar cursor (T-87)', () => {
   });
 
   it('settles with one selecting open call and selects at once', async () => {
-    const reply = deferred<{ success: true; data: { view: null; panels: never[]; layout: null; list: { sessions: OrchestrationSessionRecord[]; selectedSessionId: string } } }>();
+    const reply = deferred<{ success: true; data: { view: null; panels: never[]; layout: null; list: { sessions: OrchestrationSessionSummary[]; selectedSessionId: string } } }>();
     const open = vi.fn().mockReturnValue(reply.promise);
     const store = await setupWithOpen(open);
     store.getState().showAtCursor('b');
@@ -221,7 +221,7 @@ describe('the sidebar cursor (T-87)', () => {
   });
 
   it('a newer settle wins over a slower one', async () => {
-    const first = deferred<{ success: true; data: { view: null; panels: never[]; layout: null; list: { sessions: OrchestrationSessionRecord[]; selectedSessionId: string } } }>();
+    const first = deferred<{ success: true; data: { view: null; panels: never[]; layout: null; list: { sessions: OrchestrationSessionSummary[]; selectedSessionId: string } } }>();
     const open = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValueOnce({ success: true, data: { view: null, panels: [], layout: null } });
     const store = await setupWithOpen(open);
     const slow = store.getState().settle('b', null);
@@ -254,7 +254,7 @@ describe('the sidebar cursor (T-87)', () => {
   });
 
   it('keeps a list that landed while the settle read, instead of the settle\'s own', async () => {
-    const reply = deferred<{ success: true; data: { view: null; panels: never[]; layout: null; list: { sessions: OrchestrationSessionRecord[]; selectedSessionId: string } } }>();
+    const reply = deferred<{ success: true; data: { view: null; panels: never[]; layout: null; list: { sessions: OrchestrationSessionSummary[]; selectedSessionId: string } } }>();
     const open = vi.fn().mockReturnValue(reply.promise);
     const store = await setupWithOpen(open);
     const settling = store.getState().settle('b', null);

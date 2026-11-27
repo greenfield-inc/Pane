@@ -16,7 +16,7 @@ import {
 } from '../utils/sessionMoveView';
 import type { SessionMoveCheck, SessionMovePreflight, SessionMoveProgress, SessionMoveStep } from '../../../shared/types/sessionMove';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
-import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
 import { Bone, LoadingStatus, Skeleton, useSkeletonHold } from './ui/Skeleton';
@@ -36,7 +36,7 @@ const submitResultSchema = boundary.object({
  */
 export type MoveSessionTarget =
   | { kind: 'here'; sessionId: string }
-  | { kind: 'machine'; machineId: string; session: OrchestrationSessionRecord };
+  | { kind: 'machine'; machineId: string; session: OrchestrationSessionSummary };
 
 /** The Session's host: the named machine's, or with none, the host on screen. */
 function hostOf(machineId: string | null, config: Pick<RemoteDaemonConfig, 'client'> | undefined): SessionHost {

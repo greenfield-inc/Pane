@@ -7,6 +7,7 @@ import type { IconProps } from '@/ui/Icon';
 
 import { useApprovalSort } from './approvalSortPreference';
 import { APPROVAL_SORTS, type ApprovalSort } from './approvals';
+import { Focusable } from '@/features/controller/Focusable';
 
 const ICONS: Record<ApprovalSort, Pick<IconProps, 'ios' | 'android'>> = {
   recent: { ios: 'clock', android: 'schedule' },
@@ -24,17 +25,18 @@ export function SortApprovalsSheet() {
       <View style={[styles.card, { borderRadius: theme.radius.card, backgroundColor: theme.colors.surfaceRaised }]} accessibilityRole="radiogroup">
         {APPROVAL_SORTS.map((option, index) => {
           const on = option.id === sort;
+          const pick = () => {
+            setSort(option.id);
+            router.back();
+          };
           return (
+            <Focusable key={option.id} preferred={on} onActivate={pick}>
             <Pressable
-              key={option.id}
               testID={`sort-approvals-${option.id}`}
               accessibilityRole="radio"
               accessibilityState={{ checked: on }}
               accessibilityLabel={`${option.label}, ${option.description}`}
-              onPress={() => {
-                setSort(option.id);
-                router.back();
-              }}
+              onPress={pick}
               style={({ pressed }) => [styles.option, pressed && { backgroundColor: theme.colors.surfacePressed }]}
             >
               {index > 0 ? <View style={[styles.divider, { backgroundColor: theme.colors.border }]} /> : null}
@@ -50,6 +52,7 @@ export function SortApprovalsSheet() {
                 {on ? <Icon ios="checkmark" android="check" size={17} color={theme.colors.accentText} /> : null}
               </View>
             </Pressable>
+            </Focusable>
           );
         })}
       </View>

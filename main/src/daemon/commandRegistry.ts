@@ -12,8 +12,8 @@ export function paneCommandSignal(): AbortSignal | undefined {
   return invocationSignal.getStore();
 }
 
-/** A remote call, and the Tailscale login of a caller who is not this computer's owner. */
-const remoteInvocation = new AsyncLocalStorage<{ teammate: string | null }>();
+/** A remote call: the Tailscale login of a caller who is not this computer's owner, and whether its device is paired Read only. */
+const remoteInvocation = new AsyncLocalStorage<{ teammate: string | null; readOnly: boolean }>();
 
 const callerInvocation = new AsyncLocalStorage<PaneDaemonCaller>();
 
@@ -41,6 +41,11 @@ export function isRemotePaneCommand(): boolean {
  */
 export function teammatePaneCaller(): string | null {
   return remoteInvocation.getStore()?.teammate ?? null;
+}
+
+/** Whether the caller is a device paired Read only: a read it may run must also change nothing. */
+export function readOnlyPaneCaller(): boolean {
+  return remoteInvocation.getStore()?.readOnly ?? false;
 }
 
 type PaneCommandObject = object;
@@ -150,8 +155,8 @@ export class PaneCommandRegistry {
   }
 
   /** Provenance is set by the HTTP transport, never by caller-supplied arguments. */
-  invokeRemote(channel: string, args: readonly PaneCommandValue[] = [], from: { teammate?: string | null; caller?: PaneDaemonCaller } = {}): Promise<PaneCommandValue> {
-    const run = () => remoteInvocation.run({ teammate: from.teammate ?? null }, () => this.invoke(channel, args));
+  invokeRemote(channel: string, args: readonly PaneCommandValue[] = [], from: { teammate?: string | null; readOnly?: boolean; caller?: PaneDaemonCaller } = {}): Promise<PaneCommandValue> {
+    const run = () => remoteInvocation.run({ teammate: from.teammate ?? null, readOnly: from.readOnly ?? false }, () => this.invoke(channel, args));
     return from.caller ? callerInvocation.run(from.caller, run) : run();
   }
 

@@ -12,6 +12,7 @@ import { PaneRemoteHttpApiServer, type WorkspaceAccessPolicy } from './httpApiSe
 import { RecentWrites } from './recentWrites';
 import { PairingExchange } from './relay/pairingExchange';
 import { GlassesAccess } from './glassesAccess';
+import { confirmedSharers } from './relay/confirmedSharers';
 import { RelayLinks } from './relay/relayLinks';
 import { ComputerLinking } from './relay/computerLinking';
 import { registerRelayCommands } from './relay/relayCommands';
@@ -1229,6 +1230,7 @@ describe('QR-paired phones and linked computers', () => {
       self: () => LAPTOP,
       call,
       disconnect: (ids) => { server.disconnectClients(ids); },
+      sharerConfirmed: (id) => confirmedSharers.confirm(id),
       connectedClientIds: () => new Set(),
     });
     const relay = new RelayService({

@@ -2,6 +2,7 @@ import { ChatTabNotifyBridge } from '../services/chatTabs/notifyBridge';
 import { getChatTabManager, setChatTabNotify } from '../services/chatTabs';
 import { app, BrowserWindow, powerMonitor, type IpcMain } from 'electron';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { isDesktopAlertHandedOff, showDesktopAlert } from './desktopAlerts';
 import type { AppServices } from './types';
@@ -26,18 +27,18 @@ import { normalizeAppearance } from '../../../shared/types/appearance';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { statusCard } from '../services/notify/workerContext';
 import { admitCard } from '../services/notify/cardAdmit';
-import { checkCard, fitLinks } from '../services/notify/cardCheck';
+import { checkCard, fitLinks, type CardFields } from '../services/notify/cardCheck';
 import { summaryPage } from '../services/notify/summaryPage';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import type { MachineHealthCard } from '../../../shared/types/machineHealth';
-import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState, type NotifySummaryPage, type NotifyTodoLink } from '../../../shared/types/notify';
+import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCheckResult, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState, type NotifySummaryPage, type NotifyTodoLink } from '../../../shared/types/notify';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
 import type { SessionInboxEnded } from '../services/sessionInbox';
 import { thisMachineName, type ApprovalStore } from '../services/approvals/approvalStore';
 import type { LoopManager } from '../services/loops/loopManager';
 import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 import type { AgentState } from '../../../shared/types/agentStatus';
-import { paneSecretNameProblem, paneSecretProjectProblem, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
+import { leaseReferenceText, paneSecretNameProblem, paneSecretProjectProblem, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
 import { paneSecretStore, secretLeaseStore } from '../services/paneSecrets';
 import { secretLeaseService } from '../services/secretLeaseRuntime';
 import type { SecretLeaseStart } from '../services/secretLeaseService';
@@ -93,6 +94,7 @@ const notifyRequestSchema = boundary.object({
   resume: boundary.optional(boundary.nonEmptyString),
   took: boundary.optional(boundary.string),
   tookAs: boundary.optional(boundary.enumeration('answer', 'question')),
+  close: boundary.optional(boundary.string),
   status: boundary.optional(boundary.string),
   update: boundary.optional(boundary.string),
   asked: boundary.optional(boundary.string),
@@ -455,7 +457,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     machine: thisMachineName(),
     secrets: {
       exists: (project, name) => paneSecretStore().has(project, name),
-      save: async (project, name, value) => { await paneSecretStore().set(project, name, value); },
+      save: async (project, name, value) => { await paneSecretStore().replaceValue(project, name, value); },
     },
     leases: {
       describe: (project, names) => {
@@ -463,7 +465,8 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
         const references: Record<string, string> = {};
         for (const name of names) {
           const reference = store.referenceOf(project, name);
-          if (reference) references[name] = reference;
+          if (!reference) continue;
+          references[name] = leaseReferenceText(reference, store.sitesOf(project, name));
         }
         // Only a desktop knows the length it will grant; a headless host's card shows none until a desktop shows it.
         const lengthMs = secretLeaseService()?.lengthFor(project) ?? null;
@@ -477,6 +480,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       const request: SecretLeaseStart = {
         project: lease.project,
         names: lease.names,
+        approved: lease.references ?? {},
         machines: machineId ? [machineId] : [],
         requestedBy: `${item.source.agent} in "${item.source.name}"`,
       };
@@ -606,10 +610,21 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     // A secret card writes the owner's secret store, so a teammate cannot post one.
     if (teammate && parsed.ui === 'secret') throw teammateSecretRefusal(teammate, 'ask for a secret');
     if (teammate && parsed.lease) throw teammateSecretRefusal(teammate, 'ask for a lease');
-    const warnings = [...admitNotifyCard(parsed), ...loopInfoWarning(parsed)];
+    const warnings = [...admitNotifyCard(parsed, notify.storedCard(parsed)), ...loopInfoWarning(parsed)];
     const result = await notify.ask(parsed, paneCommandSignal());
     // A card that wasn't shown (a worker's, sent back to its orchestrator) has nothing to warn about.
     return warnings.length && !('unavailable' in result) ? { ...result, warnings } : result;
+  });
+
+  // The same checks as a card that is posted, and nothing posted: the CLIs run it before a card waits.
+  commandRegistry.register('runpane:notify:check', async (request: PaneCommandValue): Promise<NotifyCheckResult> => {
+    const parsed = parseNotifyRequest(request);
+    const teammate = teammatePaneCaller();
+    if (teammate && parsed.ui === 'secret') throw teammateSecretRefusal(teammate, 'ask for a secret');
+    if (teammate && parsed.lease) throw teammateSecretRefusal(teammate, 'ask for a lease');
+    const warnings = [...admitNotifyCard(parsed, notify.storedCard(parsed)), ...loopInfoWarning(parsed)];
+    const { caller: _caller, returnAfterMs: _after, ...card } = parsed;
+    return { check: true, card, warnings };
   });
 
   commandRegistry.register('notify:remote-snapshot', async () => notify.sharedState());
@@ -818,7 +833,13 @@ function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): Sav
     queue.setRemote(machineId, { machine: machine.label, online: machine.status !== 'offline', state: withOwnTodoLinks(state, machine.installId) });
   };
   const read = async (machineId: string) => {
-    if (!known.has(machineId)) return;
+    const machine = known.get(machineId);
+    if (!machine) return;
+    // A machine this computer only watches shares no questions with it.
+    if (machine.access === 'read') {
+      queue.setRemote(machineId, null);
+      return;
+    }
     try {
       show(machineId, decodeOptionalBoundary((await machines.read(machineId, 'notify:remote-snapshot')).data, notifySharedStateSchema));
     } catch (error) {
@@ -833,7 +854,8 @@ function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): Sav
       listed.add(machine.id);
       const before = known.get(machine.id);
       known.set(machine.id, { ...machine });
-      if (machine.status === 'offline') queue.setRemote(machine.id, { machine: machine.label, online: false });
+      if (machine.access === 'read') queue.setRemote(machine.id, null);
+      else if (machine.status === 'offline') queue.setRemote(machine.id, { machine: machine.label, online: false });
       // A stream can recover without a resync here yet: read the machine again.
       else if (!before || (machine.status === 'online' && before.status !== 'online')) void read(machine.id);
       else if (before.label !== machine.label) queue.setRemote(machine.id, { machine: machine.label, online: true });
@@ -881,21 +903,32 @@ function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): Sav
  * The card check every way of asking reaches (P3): a new card, a relayed one and an update are
  * tidied when they are old paragraph cards, refused for the two clear mistakes and warned on the
  * rest. Leaves the request as Pane posts it and returns the warnings. Info and secret cards, and
- * calls that ask nothing (resume, --took), aren't cards to check.
+ * calls that ask nothing (resume, --took, --close), aren't cards to check. `stored` is the card an
+ * --update or --relays call changes: the new version is checked as it will stand (its fields over
+ * the stored ones, its links or else the stored links), and only paths it adds are checked.
  */
-function admitNotifyCard(request: NotifyRequest): string[] {
-  if (request.resume || request.took !== undefined) return [];
+function admitNotifyCard(request: NotifyRequest, stored?: CardFields): string[] {
+  if (request.resume || request.took !== undefined || request.close !== undefined) return [];
   if (request.update !== undefined) {
-    if (request.title === undefined && !request.choices && !request.questions) return [];
-    // An update changes only what it passes; the rest is the approval's, checked when it was asked.
-    const { refusal } = checkCard({ title: request.title ?? '', choices: request.choices, questions: request.questions });
-    if (refusal) throw new PaneError(refusal.code, refusal.message, refusal.next);
-    return [];
+    if (!stored) {
+      // No card to change (the update itself says why): only the update's own fields can be checked.
+      if (request.title === undefined && !request.choices && !request.questions) return [];
+      const { refusal } = checkCard({ title: request.title ?? '', choices: request.choices, questions: request.questions });
+      if (refusal) throw new PaneError(refusal.code, refusal.message, refusal.next);
+      return [];
+    }
+    const admitted = admitCard(revisionOf(stored, request), { tidy: false, known: stored });
+    // Files it names join the card's links; without --links the update keeps the card's own.
+    if (admitted.attached.length) request.links = admitted.card.links;
+    return admitted.fileWarnings;
   }
   if (!request.ui || request.ui === 'info' || request.ui === 'secret' || request.title === undefined) return [];
   // Only a card asked in words (or with options it hasn't got) is tidied into buttons.
   const tidy = request.ui === 'ask' || request.ui === 'options';
-  const admitted = admitCard({ title: request.title, context: request.context, choices: request.choices, questions: request.questions, links: request.links }, { tidy });
+  const fields = stored ? revisionOf(stored, request) : { title: request.title, context: request.context, choices: request.choices, questions: request.questions, links: request.links };
+  const admitted = admitCard(fields, { tidy, known: stored });
+  // Files the card's text names are attached as links; a relay without --links keeps the worker's.
+  if (admitted.attached.length) request.links = admitted.card.links;
   if (admitted.asSent) {
     const { card } = admitted;
     request.ui = 'options';
@@ -913,6 +946,26 @@ function admitNotifyCard(request: NotifyRequest): string[] {
   return admitted.warnings;
 }
 
+/**
+ * The card an --update or --relays call leaves: the fields it passes over the stored card's, as
+ * the queue applies them (questions replace choices and the other way round), and its links or
+ * else the card's own.
+ */
+function revisionOf(stored: CardFields, request: NotifyRequest): CardFields {
+  const card: CardFields = { title: request.title?.trim() ? request.title : stored.title };
+  const context = request.context ?? stored.context;
+  if (context !== undefined) card.context = context;
+  if (request.questions) card.questions = request.questions;
+  else if (request.choices) card.choices = request.choices;
+  else {
+    if (stored.choices) card.choices = stored.choices;
+    if (stored.questions) card.questions = stored.questions;
+  }
+  const links = request.links ?? stored.links;
+  if (links) card.links = links;
+  return card;
+}
+
 /** Checks a notify call the way the tool's schema promises, naming the field that's wrong. */
 function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   let decoded: ReturnType<typeof notifyRequestSchema.decode>;
@@ -924,6 +977,12 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   const { links, ...rest } = decoded;
   const request: NotifyRequest = rest;
   if (request.resume) return request;
+  if (request.close !== undefined) {
+    if (!request.close.trim()) throw invalid('close needs the approval\'s id or Q-n.');
+    const { caller: _caller, close: _close, ...others } = request;
+    if (Object.values(others).some(value => value !== undefined)) throw invalid('close goes on its own: pass only the approval\'s id or Q-n.');
+    return request;
+  }
   if (request.took !== undefined) {
     if (!request.took.trim()) throw invalid('took needs the approval\'s id or Q-n.');
     if (!request.tookAs) throw invalid('took needs answer or question: --took <id|Q-n> question.');
@@ -1057,7 +1116,7 @@ function checkQuestions(questions: NonNullable<NotifyRequest['questions']>): voi
 
 /** Autopilot's rewrite takes the same checks as any notify call. */
 export function parseRewriteQuestion(value: PaneCommandValue, cwd?: string): NotifyQuestion {
-  const { caller: _caller, resume: _resume, relays: _relays, aboutSession: _about, returnAfterMs: _after, took: _took, tookAs: _tookAs, status: _status, update: _update, asked: _asked, whatChanged: _changed, ...question } = parseNotifyRequest({ ...decodeBoundary(value, boundary.jsonObject), caller: { cwd } });
+  const { caller: _caller, resume: _resume, relays: _relays, aboutSession: _about, returnAfterMs: _after, took: _took, tookAs: _tookAs, close: _close, status: _status, update: _update, asked: _asked, whatChanged: _changed, ...question } = parseNotifyRequest({ ...decodeBoundary(value, boundary.jsonObject), caller: { cwd } });
   if (!question.ui || !question.title) throw invalid('ui and title are required.');
   return { ...question, ui: question.ui, title: question.title };
 }
@@ -1079,11 +1138,43 @@ function parseLinks(links: Array<{ label: string; path?: string; url?: string; a
     if ([filePath, url, approval].filter(Boolean).length !== 1) throw invalid(`${where} needs exactly one of path, url or approval.`);
     if (approval) return { label, approval };
     if (url) {
-      if (!/^https?:\/\/\S+$/i.test(url)) throw invalid(`${where}.url must be an http(s) URL.`);
+      const local = localFileUrl(url);
+      if (local === null) throw invalid(`${where}.url is a file:// URL that names no file on this computer (it needs file:///abs/path or file://localhost/abs/path); for a local file use {"label":…,"path":"/abs/path"}.`);
+      if (local !== undefined) return { label, path: local };
+      if (!/^https?:\/\/\S+$/i.test(url)) throw invalid(`${where}.url must be an http(s) URL; for a local file use {"label":…,"path":"/abs/path"}; url is only for http(s) pages.`);
       return { label, url };
     }
-    return { label, path: cwd && !path.isAbsolute(filePath ?? '') ? path.resolve(cwd, filePath ?? '') : filePath ?? '' };
+    const given = filePath?.startsWith('~/') ? path.join(os.homedir(), filePath.slice(2)) : filePath ?? '';
+    return { label, path: cwd && !path.isAbsolute(given) ? path.resolve(cwd, given) : given };
   });
+}
+
+/** file:///abs/path or file://localhost/abs/path: the only file URLs that name a file on this computer. */
+const LOCAL_FILE_URL = /^file:\/\/(?:localhost)?(\/[^?#]*)(?:[?#].*)?$/iu;
+
+/**
+ * A link url that names a local file (file://, an absolute path, ~/ or a Windows drive path) as
+ * that file's path, so a card asked with url still opens the file. Undefined for any other url;
+ * null for a file: URL that names no file here: another host (never a network share), a relative
+ * one, a bad escape, or on Windows no drive. runpane (npm and pip) reads them the same way.
+ */
+function localFileUrl(url: string): string | null | undefined {
+  if (/^file:/iu.test(url)) {
+    const match = LOCAL_FILE_URL.exec(url);
+    if (!match || /%(?:2f|5c)/iu.test(match[1])) return null;
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(match[1]);
+    } catch {
+      return null;
+    }
+    if (process.platform !== 'win32') return decoded;
+    return /^\/[A-Za-z]:\//u.test(decoded) ? decoded.slice(1).replace(/\//gu, '\\') : null;
+  }
+  if (url.startsWith('~/')) return path.join(os.homedir(), url.slice(2));
+  if (/^[A-Za-z]:[\\/]/u.test(url)) return url;
+  if (url.startsWith('/') && !url.startsWith('//')) return url;
+  return undefined;
 }
 
 function invalid(reason: string): PaneError {
