@@ -14,6 +14,7 @@ import { create } from 'zustand';
 import { useNavigationStore } from '../stores/navigationStore';
 import {
   SESSION_CURSOR_ATTRIBUTE,
+  SESSION_CURSOR_MACHINE_ATTRIBUTE,
   cursorFollowEnabled,
   pauseSessionCursor,
   pendingCursorSession,
@@ -500,7 +501,7 @@ export function handleSidebarListKey(event: KeyboardEvent): void {
     // Arrow keys open chat Sessions (T-87): the row's Session shows, and focus stays here.
     if (cursorFollowEnabled()) {
       const sessionId = next.getAttribute(SESSION_CURSOR_ATTRIBUTE);
-      if (sessionId) showSessionAtCursor(sessionId);
+      if (sessionId) showSessionAtCursor(sessionId, next.getAttribute(SESSION_CURSOR_MACHINE_ATTRIBUTE) ?? undefined);
       else pauseSessionCursor();
     }
   };

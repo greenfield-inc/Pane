@@ -42,7 +42,7 @@ import { resumeIfOpenResumes, runPauseAction } from '../utils/pause';
 import { usePanelStore } from '../stores/panelStore';
 import { panePausedMark } from '../../../shared/types/panels';
 import { moveMarkLabel } from '../utils/sessionMoveView';
-import { SESSION_CURSOR_ATTRIBUTE, cursorFollowEnabled, settleOnSession, useRowShowsInstantly } from '../services/sessionCursor';
+import { cursorFollowEnabled, sessionCursorAttributes, settleOnSession, useRowShowsInstantly } from '../services/sessionCursor';
 import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 import { switchMark } from '../../../shared/switchMarks';
 
@@ -477,7 +477,7 @@ export function OrchestrationSessionNav({
         data-sidebar-item
         data-sidebar-key={`session-${placement}-${session.id}`}
         // The sidebar cursor shows this Session as it passes (T-87); an arriving one opens only once it has arrived.
-        {...{ [SESSION_CURSOR_ATTRIBUTE]: rowsShowInstantly && !arriving ? session.id : undefined }}
+        {...sessionCursorAttributes(LOCAL_MACHINE_ID, rowsShowInstantly && !arriving ? session.id : undefined)}
         aria-current={isOpen ? 'page' : undefined}
         aria-label={isLegacy ? label : `Open Session ${session.name}${moveLabel ? ` (${moveLabel})` : ''}`}
         aria-disabled={arriving || undefined}

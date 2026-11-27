@@ -52,6 +52,8 @@ import { readDraggedSessionId, startSessionDrag, useDraggedSessionId } from '../
 import type { DropZone, LayoutDirection } from '../utils/layoutTree';
 import { switchMark } from '../../../shared/switchMarks';
 import { useCursorFollowEnabled } from '../services/sessionCursor';
+import { useRemoteSessionView } from '../stores/remoteSessionView';
+import { RemoteSessionTileBody } from './RemoteSessionView';
 import { SessionShowContext } from '../contexts/SessionShowContext';
 import { QuietSkeletons } from './ui/Skeleton';
 import {
@@ -462,6 +464,9 @@ function SessionTile({
   const hostId = useConfigStore(state => state.config ? getActiveRemoteHostId(state.config.remoteDaemon) : undefined);
   // Arrow keys open chat Sessions (T-87): the tile paints from the Session view cache.
   const cached = useCursorFollowEnabled() && !inline;
+  // Another machine's Session under the cursor shows, read-only, in the focused tile (T-116 PR 6).
+  const remoteTarget = useRemoteSessionView(state => state.target);
+  const remote = cached && isFocused ? remoteTarget : undefined;
   const visit = useOrchestrationSessionStore(state => state.selectionVisits[sessionId] ?? 0);
   const [view, setView] = useState<OrchestrationSessionView<Session> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -580,7 +585,9 @@ function SessionTile({
       onMouseDownCapture={focusThisTile}
       onFocusCapture={focusThisTile}
     >
-      {cached ? (
+      {remote ? (
+        <RemoteSessionTileBody target={remote} />
+      ) : cached ? (
         <CachedSessionTileBody sessionId={sessionId} record={record} hostId={hostId} chrome={chrome} />
       ) : view && view.session.id === sessionId && loadingSessionId === sessionId && loadingHostId === hostId && loadingVisit === visit && !isLoading && !selectionError && !error ? (
         <NamedSessionWorkspace

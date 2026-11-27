@@ -31,7 +31,8 @@ import { useNavigationStore } from '../../stores/navigationStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { commandOnMachine, openOnMachine, runOnMachine } from '../../utils/machineRowActions';
-import { SESSION_CURSOR_ATTRIBUTE, useRowShowsInstantly } from '../../services/sessionCursor';
+import { sessionCursorAttributes, useRowShowsInstantly } from '../../services/sessionCursor';
+import { followMachineMirror } from '../../stores/machineMirrorStore';
 import { confirmMachineArchive } from '../archiveConfirm';
 import { ReadOnlyPill } from './ReadOnlyPill';
 import { savedOrderAfterMove, type AllMachinesPane, type AllMachinesSession, type MachineRef } from '../../utils/allMachinesTree';
@@ -282,7 +283,7 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
           data-row-open
           data-sidebar-item
           data-sidebar-key={`machine-session-${row.key}`}
-          {...{ [SESSION_CURSOR_ATTRIBUTE]: instant ? session.id : undefined }}
+          {...sessionCursorAttributes(machine.id, instant ? session.id : undefined)}
           onClick={() => { if (!arriving) void openOnMachine(machine.id, { kind: 'session', id: session.id, name: session.name }); }}
           aria-current={active ? 'page' : undefined}
           aria-disabled={arriving || undefined}
@@ -380,6 +381,8 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
   const isOpen = (key: string) => layout.open.includes(key);
   const [announcement, setAnnouncement] = useState('');
   const reorderRow = useRowReorder(setAnnouncement);
+  // The owner's mirrored machines' rows show at once under the cursor (T-116 PR 6).
+  useEffect(() => { followMachineMirror(); }, []);
   const [menu, setMenu] = useState<RowMenu | null>(null);
   const [renaming, setRenaming] = useState<RowMenu | null>(null);
   const [reviewing, setReviewing] = useState<RowMenu | null>(null);

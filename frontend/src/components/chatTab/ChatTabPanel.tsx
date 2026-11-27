@@ -195,6 +195,11 @@ export interface ChatTabPanelProps {
    * of `workers`; Autopilot passes the workers of every Session it walks.
    */
   working?: readonly WorkingAgent[];
+  /**
+   * Shown read-only from another machine (T-116 PR 6): nothing here acts on the chat. The message
+   * box reads `placeholder` and takes no text; with `note` instead, the note replaces it.
+   */
+  watchOnly?: { placeholder: string } | { note: ReactNode };
 }
 
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
@@ -222,7 +227,7 @@ function TurnsSkeleton() {
   </>;
 }
 
-export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, session, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
+export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, session, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride, watchOnly }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
   // A Session the sidebar cursor only shows (T-87): its chat reads never start the agent,
   // and it paints the window the Session's one open or peek call returned.
@@ -287,7 +292,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
   const stopped = view?.status === 'stopped';
-  const readOnly = useReadOnlyHost();
+  const readOnly = useReadOnlyHost() || watchOnly !== undefined;
   const disabled = !connected || stopped || !view || readOnly;
   // Reading a chat starts no agent for a read-only viewer, so one nobody opened has no transcript to wait for.
   const notRunning = readOnly && !snapshot.transcript && !view?.problem && (view?.status === 'idle' || view?.status === 'stopped');
@@ -659,13 +664,13 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         {view && <ChatStatusBar context={view.context} tasks={view.tasks}
           queued={view.queue.length} pr={pr} agents={agentsWorking} onOpenAgent={actions.onOpenWorker} working={working} sendNowSteers={view.sendNowSteers} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
           onStopTask={taskId => void act(() => client.stopTask(panelId, taskId))} onShowQueue={showQueue} />}
-        {readOnly && <p role="status" className="chat-notice">Read only: you can watch this chat, and its owner sends the messages.</p>}
-        <ComposerPrimitive.Root className="needs-full-access chat-composer" data-pane-part="chat-composer">
+        {readOnly && !watchOnly && <p role="status" className="chat-notice">Read only: you can watch this chat, and its owner sends the messages.</p>}
+        {watchOnly && 'note' in watchOnly ? <div role="status" className="chat-notice" data-testid="chat-watch-note">{watchOnly.note}</div> : <ComposerPrimitive.Root className="needs-full-access chat-composer" data-pane-part="chat-composer">
           {composerMenu.menu && <ChatComposerMenu id={composerMenu.listId} menu={composerMenu.menu} active={composerMenu.active} onHover={composerMenu.hover} onPick={composerMenu.pick} />}
           <div className="flex flex-wrap gap-2 empty:hidden"><ComposerPrimitive.Attachments components={{ Attachment }} /></div>
           <div className="chat-input-box">
           <ComposerHighlight input={inputRef} text={snapshot.draft} marks={composerMenu.marks} className="chat-input" />
-          <ComposerPrimitive.Input ref={inputRef} {...composerMenu.inputProps} data-chat-composer={panelId} readOnly={!!snapshot.pendingDelivery} aria-label={`Message ${agentName}`} placeholder={placeholder ?? composerPlaceholder(view?.mentions, { session, phone })} rows={1}
+          <ComposerPrimitive.Input ref={inputRef} {...composerMenu.inputProps} data-chat-composer={panelId} readOnly={!!snapshot.pendingDelivery || watchOnly !== undefined} aria-label={`Message ${agentName}`} placeholder={(watchOnly && 'placeholder' in watchOnly ? watchOnly.placeholder : undefined) ?? placeholder ?? composerPlaceholder(view?.mentions, { session, phone })} rows={1}
             // Pasted images and files attach through attachFiles, which shows any refusal.
             addAttachmentOnPaste={false}
             onPaste={event => {
@@ -731,7 +736,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
                 : <ComposerPrimitive.Send aria-label="Send message" title="Send message" className="chat-send"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>}
             </div>
           </div>
-        </ComposerPrimitive.Root>
+        </ComposerPrimitive.Root>}
       </div>
     </ThreadPrimitive.Root>
   </CopyProgressContext.Provider></AssistantRuntimeProvider>;
