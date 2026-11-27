@@ -862,6 +862,20 @@ describe('chat tab manager', () => {
 
   const MARK = { at: '2026-11-13T00:00:00.000Z', by: 'auto' as const };
 
+  it('says when a tab pauses and when it resumes, so its Session can read as paused (T-134 QA F-1)', async () => {
+    const changes: Array<[string, boolean]> = [];
+    const { manager, store, directory } = harness(new MemoryStore(), {}, undefined, { onPausedChange: (panelId, paused) => changes.push([panelId, paused]) });
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => manager.receipt('p1', 'a')?.state).toBe('completed');
+    expect(changes).toEqual([]);
+    await manager.pause(['p1'], MARK);
+    expect(changes).toEqual([['p1', true]]);
+    await manager.ensure('p1');
+    expect(changes).toEqual([['p1', true], ['p1', false]]);
+  });
+
   it.each([
     ['a turn running', 'slow', false, (view: ChatTabView) => view.status === 'working'],
     ['an approval waiting', 'permission', false, (view: ChatTabView) => view.permissions.length === 1],

@@ -105,6 +105,13 @@ export function pausedMarkOf(panel: Pick<ToolPanel, 'type' | 'state'>): Terminal
   return (panel.state.customState as TerminalPanelState | undefined)?.paused;
 }
 
+/** A chat tab's paused mark: set by a pause (by hand, idle auto-pause or a move) until its agent starts again. */
+export function chatPausedMarkOf(panel: Pick<ToolPanel, 'type' | 'state'>): TerminalPausedMark | undefined {
+  if (panel.type !== 'chat') return undefined;
+  // SAFETY: a chat panel's custom state is the ChatPanelState contract, whose `paused` is a TerminalPausedMark.
+  return (panel.state.customState as { paused?: TerminalPausedMark } | undefined)?.paused;
+}
+
 /**
  * A Pane is paused when it has terminal tabs and every one of them is paused. Returns the
  * latest of their marks, so a Pane reads as paused since its last tab paused.

@@ -41,7 +41,8 @@ import { resumeIfOpenResumes, runPauseAction } from '../utils/pause';
 import { usePanelStore } from '../stores/panelStore';
 import { panePausedMark } from '../../../shared/types/panels';
 import { moveMarkLabel } from '../utils/sessionMoveView';
-import { SESSION_CURSOR_ATTRIBUTE, cursorFollowEnabled, settleOnSession } from '../services/sessionCursor';
+import { SESSION_CURSOR_ATTRIBUTE, cursorFollowEnabled, settleOnSession, useRowShowsInstantly } from '../services/sessionCursor';
+import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 import { switchMark } from '../../../shared/switchMarks';
 
 interface OrchestrationSessionNavProps {
@@ -156,6 +157,8 @@ export function OrchestrationSessionNav({
   const reorder = useOrchestrationSessionStore(state => state.reorder);
   const navigateToPaneChat = useNavigationStore(state => state.navigateToPaneChat);
   const activeView = useNavigationStore(state => state.activeView);
+  // This sidebar lists the window's own machine; its rows follow the cursor when it is this computer (T-116).
+  const rowsShowInstantly = useRowShowsInstantly(LOCAL_MACHINE_ID);
   const setActiveSession = useSessionStore(state => state.setActiveSession);
   const [showCreate, setShowCreate] = useState(false);
   const expandedSessions = useNavigationStore(state => state.expandedSessions);
@@ -472,7 +475,7 @@ export function OrchestrationSessionNav({
         data-sidebar-item
         data-sidebar-key={`session-${placement}-${session.id}`}
         // The sidebar cursor shows this Session as it passes (T-87); an arriving one opens only once it has arrived.
-        {...{ [SESSION_CURSOR_ATTRIBUTE]: arriving ? undefined : session.id }}
+        {...{ [SESSION_CURSOR_ATTRIBUTE]: rowsShowInstantly && !arriving ? session.id : undefined }}
         aria-current={isOpen ? 'page' : undefined}
         aria-label={isLegacy ? label : `Open Session ${session.name}${moveLabel ? ` (${moveLabel})` : ''}`}
         aria-disabled={arriving || undefined}

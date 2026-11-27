@@ -108,6 +108,10 @@ and p95 from keydown or click to the Session's last message on screen, per
 scenario and chat size, and checks the arrow-key targets on the last app: p95
 ≤ 50 ms for a Session shown before, ≤ 100 ms for one not opened since launch.
 A checkout without the arrow-key scenarios reports click and Enter only.
+The `allm-*` scenarios repeat the arrow walks in the All machines view, whose
+rows for this computer follow the cursor too (T-116); a saved machine that
+never answers turns that view on. The held-↓ lines time keydown → the frame
+with the cursor on the next row at 30 Hz, in both views.
 
 ```bash
 pnpm build:main && pnpm build:frontend && pnpm electron:rebuild   # in each checkout

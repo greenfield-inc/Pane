@@ -206,8 +206,14 @@ interface Sample {
 
 interface ProbeResult { input?: number; visible?: number; painted?: number; focused?: number; timedOut?: boolean }
 
-async function switchTo(page: Page, session: Seeded, trigger: Trigger, scenario: string, probeMs = 60_000): Promise<Sample> {
-  const row = page.getByTestId(`orchestration-session-${session.id}`);
+/** A Session's row: in the Sessions sidebar, or this machine's row in the All machines view (T-116). */
+type RowView = 'sessions' | 'all-machines';
+const rowFor = (page: Page, session: Seeded, view: RowView = 'sessions') => (view === 'sessions'
+  ? page.getByTestId(`orchestration-session-${session.id}`)
+  : page.getByTestId('all-machines-sidebar').locator(`[data-session-cursor="${session.id}"]`));
+
+async function switchTo(page: Page, session: Seeded, trigger: Trigger, scenario: string, probeMs = 60_000, view: RowView = 'sessions'): Promise<Sample> {
+  const row = rowFor(page, session, view);
   // An arrow moves from the focused row; scrolling the target first would not change that.
   if (trigger === 'click' || trigger === 'enter') await row.scrollIntoViewIfNeeded();
   await page.evaluate(({ panelId, mark, focuses, probeMs }) => {
@@ -337,7 +343,7 @@ function summarize(samples: Sample[]): Summary[] {
 
 const ms = (value: number | null) => (value === null ? '–' : String(Math.round(value)));
 
-function markdown(summary: Summary[], retention: Retention | undefined, arrowRetention?: Retention): string {
+function markdown(summary: Summary[], retention: Retention | undefined, arrowRetention?: Retention, cursorRepeat: CursorRepeat[] = []): string {
   const lines = [
     '### Session switch latency (reported only)',
     '',
@@ -348,6 +354,9 @@ function markdown(summary: Summary[], retention: Retention | undefined, arrowRet
   if (arrowRetention) {
     lines.push('', `Arrow keys: retained after ${arrowRetention.switches} switches and a forced GC, per switch: **${arrowRetention.perSwitch.nodes} DOM nodes** (limit ${MAX_RETAINED_NODES_PER_SWITCH}), ${arrowRetention.perSwitch.listeners} listeners, ${arrowRetention.perSwitch.heapMB} MB heap.`);
   }
+  for (const repeat of cursorRepeat) {
+    lines.push('', `Held ↓ at 30 Hz in ${repeat.view === 'sessions' ? 'the Sessions sidebar' : 'All machines'}: ${repeat.moved}/${repeat.presses} presses moved the cursor; keydown → cursor on screen **p50 ${ms(repeat.p50)} / p95 ${ms(repeat.p95)} ms**; ${repeat.longTasks} long tasks (longest ${Math.round(repeat.longestTask)} ms).`);
+  }
   if (retention) {
     lines.push('', `Retained after ${retention.switches} switches and a forced GC, per switch: **${retention.perSwitch.nodes} DOM nodes** (limit ${MAX_RETAINED_NODES_PER_SWITCH}), ${retention.perSwitch.listeners} listeners, ${retention.perSwitch.heapMB} MB heap.`);
   }
@@ -355,7 +364,9 @@ function markdown(summary: Summary[], retention: Retention | undefined, arrowRet
 }
 
 interface Meta { commit: string; branch: string; platform: string; renderer: string; at: string }
-interface Report { meta?: Meta; summary: Summary[]; samples: Sample[]; retention?: Retention; arrowRetention?: Retention }
+/** Held ↓ at key-repeat rate (D-6): keydown → the first frame with focus on the next row, and long tasks meanwhile. */
+interface CursorRepeat { view: RowView; presses: number; moved: number; p50: number | null; p95: number | null; longTasks: number; longestTask: number }
+interface Report { meta?: Meta; summary: Summary[]; samples: Sample[]; retention?: Retention; arrowRetention?: Retention; cursorRepeat?: CursorRepeat[] }
 const report: Report = { summary: [], samples: [] };
 
 /** Writes session-switch.json (every sample) and session-switch.md (the table); returns the table. */
@@ -363,7 +374,7 @@ function writeReport(): string {
   mkdirSync(OUT, { recursive: true });
   report.summary = summarize(report.samples);
   writeFileSync(path.join(OUT, 'session-switch.json'), JSON.stringify(report, null, 2));
-  const table = markdown(report.summary, report.retention, report.arrowRetention);
+  const table = markdown(report.summary, report.retention, report.arrowRetention, report.cursorRepeat);
   writeFileSync(path.join(OUT, 'session-switch.md'), table);
   return table;
 }
@@ -398,7 +409,7 @@ async function countersAfterGc(app: ElectronApplication): Promise<Counters> {
 // ---------------------------------------------------------------------------
 
 test.afterAll(() => {
-  if (report.samples.length === 0 && !report.retention && !report.arrowRetention) return;
+  if (report.samples.length === 0 && !report.retention && !report.arrowRetention && !report.cursorRepeat) return;
   const table = writeReport();
   console.log(`\n${table}\nSamples: ${path.join(OUT, 'session-switch.json')}`);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, table);
@@ -512,6 +523,27 @@ async function sidebarOrder(page: Page, sessions: Seeded[]): Promise<Seeded[]> {
   return ids.flatMap(id => sessions.filter(session => session.id === id));
 }
 
+/**
+ * Turns the sidebar to All machines (T-116). The switcher shows once another machine is saved,
+ * so one is saved that never answers: its rows never load, and this machine's rows are the list.
+ */
+async function showAllMachines(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await window.electronAPI.remoteDaemon.upsertConnectionProfile({
+      id: 'bench-unreachable', label: 'bench-unreachable', baseUrl: 'http://127.0.0.1:9', token: 'bench-token', transport: 'http+sse',
+    });
+  });
+  await page.getByRole('button', { name: /Switch machine$/ }).click();
+  await page.getByRole('menuitemradio', { name: /All machines/ }).click();
+  await expect(page.getByTestId('all-machines-sidebar')).toBeVisible();
+}
+
+/** The Sessions in All machines order, as the cursor walks them (other rows carry no cursor). */
+async function allMachinesOrder(page: Page, sessions: Seeded[]): Promise<Seeded[]> {
+  const ids = await page.getByTestId('all-machines-sidebar').locator('[data-session-cursor]').evaluateAll(rows => rows.map(row => row.getAttribute('data-session-cursor') ?? ''));
+  return ids.flatMap(id => sessions.filter(session => session.id === id));
+}
+
 /** What one cursor move did: peeks and opens per Session, chat mounts, and whether focus stayed on the row. */
 interface MoveCheck { peeks: number; opens: number; focusOnRow: boolean }
 async function moveCheck(page: Page, session: Seeded): Promise<MoveCheck> {
@@ -526,17 +558,17 @@ async function moveCheck(page: Page, session: Seeded): Promise<MoveCheck> {
   }, session.id);
 }
 
-async function focusRow(page: Page, session: Seeded): Promise<void> {
-  const row = page.getByTestId(`orchestration-session-${session.id}`);
+async function focusRow(page: Page, session: Seeded, view: RowView = 'sessions'): Promise<void> {
+  const row = rowFor(page, session, view);
   await row.scrollIntoViewIfNeeded();
   await row.focus();
 }
 
 /** One arrow press onto `session`, checked hard and timed (reported only). */
 /** `settles`: the move may rest long enough to settle (a memory check on a slow runner), so opening is allowed. */
-async function arrowTo(page: Page, session: Seeded, key: 'down' | 'up', scenario: string, held: Set<string>, pauseMs: number, settles = false): Promise<Sample> {
+async function arrowTo(page: Page, session: Seeded, key: 'down' | 'up', scenario: string, held: Set<string>, pauseMs: number, settles = false, view: RowView = 'sessions'): Promise<Sample> {
   const started = Date.now();
-  const sample = await switchTo(page, session, key, scenario, 5_000);
+  const sample = await switchTo(page, session, key, scenario, 5_000, view);
   const check = await moveCheck(page, session);
   expect(check.focusOnRow, `${scenario}: focus stays on ${session.name}'s sidebar row`).toBe(true);
   expect(sample.visible, `${scenario}: ${session.name} shows its last message`).not.toBeNull();
@@ -654,5 +686,132 @@ test(`arrow-key switching leaves at most ${MAX_RETAINED_NODES_PER_SWITCH} DOM no
   } finally {
     writeReport();
     await app.close().catch(() => undefined);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// All machines (T-116 PR 1b): this machine's rows show at once there too, measured the same way.
+
+interface RepeatProbe { frames: number[]; moved: boolean[]; longTasks: number[] }
+declare global {
+  var __paneRepeatProbe: RepeatProbe | undefined;
+}
+
+/** Counts, per keydown, the time to the first frame with focus on another row; and long tasks meanwhile. */
+async function probeRepeat(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const probe: RepeatProbe = { frames: [], moved: [], longTasks: [] };
+    globalThis.__paneRepeatProbe = probe;
+    window.addEventListener('keydown', event => {
+      if (event.key !== 'ArrowDown') return;
+      const before = document.activeElement;
+      requestAnimationFrame(now => {
+        probe.moved.push(document.activeElement !== before && document.activeElement?.hasAttribute('data-sidebar-item') === true);
+        probe.frames.push(now - event.timeStamp);
+      });
+    }, { capture: true });
+    new PerformanceObserver(list => { for (const entry of list.getEntries()) probe.longTasks.push(entry.duration); }).observe({ type: 'longtask' });
+  });
+}
+
+/** Holds ↓ for `presses` rows at 30 a second; returns what the probe saw. */
+async function holdDown(page: Page, view: RowView, presses: number): Promise<CursorRepeat> {
+  await probeRepeat(page);
+  for (let index = 0; index < presses; index++) {
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(33);
+  }
+  await page.waitForTimeout(300);
+  const probe = await page.evaluate(() => globalThis.__paneRepeatProbe ?? { frames: [], moved: [], longTasks: [] });
+  return {
+    view,
+    presses,
+    moved: probe.moved.filter(Boolean).length,
+    p50: percentile(probe.frames, 50),
+    p95: percentile(probe.frames, 95),
+    longTasks: probe.longTasks.length,
+    longestTask: Math.max(0, ...probe.longTasks),
+  };
+}
+
+test('arrow keys show this machine\'s chat Sessions at once in All machines too, and holding ↓ never waits on a load (T-116)', async ({ baseURL }) => {
+  test.setTimeout(15 * 60_000);
+  const { pane, sessions } = await fixture(baseURL);
+  report.meta ??= meta();
+  const { app, page } = await launch(pane, baseURL);
+  try {
+    // A fresh launch, as the Sessions sidebar's walk has: nothing read but the Session it opens on.
+    await showAllMachines(page);
+    const order = await allMachinesOrder(page, sessions);
+    expect(order.length, 'every seeded Session follows the cursor in All machines').toBe(sessions.length);
+    const held = new Set<string>();
+    await switchTo(page, order[0], 'click', 'allm-cursor-start', 60_000, 'all-machines');
+    held.add(order[0].id);
+    await page.waitForTimeout(1_500);
+    await watchCursor(page);
+    await focusRow(page, order[0], 'all-machines');
+    await resetWatch(page);
+
+    // ↓ through 20 Sessions, 400 ms apart (shorter than the 1 s settle), then back up.
+    const walk = order.slice(1, 21);
+    for (const session of walk) report.samples.push(await arrowTo(page, session, 'down', 'allm-arrow-walk', held, 400, false, 'all-machines'));
+    let watch = await resetWatch(page);
+    expect(watch.starts, 'the All machines walk starts no agent').toEqual([]);
+    expect(watch.skeletons, `the All machines walk shows no skeleton (${watch.skeletonAt.join('; ')})`).toBe(0);
+    for (const session of walk.slice(0, -1).reverse()) report.samples.push(await arrowTo(page, session, 'up', 'allm-arrow-walk-held', held, 400, false, 'all-machines'));
+    watch = await resetWatch(page);
+    expect(watch.starts, 'walking back starts no agent').toEqual([]);
+
+    // ↑/↓ between two Sessions, 20 times.
+    const [a, b] = [walk[0], walk[1]];
+    await focusRow(page, a, 'all-machines');
+    for (let index = 0; index < 20; index++) {
+      report.samples.push(await arrowTo(page, index % 2 === 0 ? b : a, index % 2 === 0 ? 'down' : 'up', 'allm-arrow-pingpong', held, 400, false, 'all-machines'));
+    }
+    watch = await resetWatch(page);
+    expect(watch.starts, 'the All machines ping-pong starts no agent').toEqual([]);
+
+    // A 1.2 s rest on a row settles it: one open call, and only its agent starts.
+    // 20 presses end back on a.
+    const last = a;
+    await resetWatch(page);
+    await page.evaluate(() => { globalThis.__paneSwitchMarks = []; });
+    await page.waitForTimeout(1_200);
+    expect((await moveCheck(page, last)).opens, `resting on ${last.name} opens it once`).toBe(1);
+    await expect.poll(async () => (await page.evaluate(() => globalThis.__paneCursorWatch?.starts ?? [])), { timeout: 10_000 }).toEqual([last.panelId]);
+    // The next launch opens in the Sessions sidebar.
+    await page.evaluate(async () => { await window.electronAPI.preferences.set('sidebar_all_machines', 'false'); });
+  } finally {
+    writeReport();
+    await app.close().catch(() => undefined);
+  }
+});
+
+test('holding ↓ at 30 Hz over Sessions not read yet moves the cursor every press, in All machines and the Sessions sidebar (D-6, T-116)', async ({ baseURL }) => {
+  test.setTimeout(10 * 60_000);
+  const { pane, sessions } = await fixture(baseURL);
+  report.meta ??= meta();
+  // A fresh launch per view, so every row passed is one the window has not read.
+  for (const view of ['all-machines', 'sessions'] as const) {
+    const { app, page } = await launch(pane, baseURL);
+    try {
+      if (view === 'all-machines') await showAllMachines(page);
+      const order = view === 'all-machines' ? await allMachinesOrder(page, sessions) : await sidebarOrder(page, sessions);
+      await switchTo(page, order[0], 'click', 'repeat-start', 60_000, view);
+      await page.waitForTimeout(1_500);
+      await focusRow(page, order[0], view);
+      await page.evaluate(() => { globalThis.__paneSwitchMarks = []; });
+      const repeat = await holdDown(page, view, order.length - 1);
+      (report.cursorRepeat ??= []).push(repeat);
+      expect(repeat.moved, `${view}: every held ↓ moves the cursor by the next frame`).toBe(repeat.presses);
+      const opens = await page.evaluate(() => (globalThis.__paneSwitchMarks ?? []).filter(mark => mark.name === 'session:open').length);
+      expect(opens, `${view}: holding ↓ opens nothing`).toBe(0);
+      expect(await page.evaluate(() => document.activeElement?.getAttribute('data-session-cursor')), `${view}: focus ends on the last row`).toBe(order[order.length - 1].id);
+      // The next launch opens in the Sessions sidebar.
+      if (view === 'all-machines') await page.evaluate(async () => { await window.electronAPI.preferences.set('sidebar_all_machines', 'false'); });
+    } finally {
+      writeReport();
+      await app.close().catch(() => undefined);
+    }
   }
 });

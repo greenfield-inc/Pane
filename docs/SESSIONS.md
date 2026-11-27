@@ -269,9 +269,12 @@ for a second, or you press **Enter** (which also moves focus into the message
 box), **Space**, start typing, or click into the Session: only then is the
 Session selected and its agent started. Passing over a Session never starts its
 agent or resumes a paused one; Enter or a click resumes it when **Resume a
-paused Pane when you open it** is on. Sessions whose agent runs in a terminal,
-Pane and project rows, the All machines view and a window showing another
-machine keep Enter. With the setting off, the arrows only move the cursor.
+paused Pane when you open it** is on. In the **All machines** view this
+computer's Session rows work the same way; another machine's rows keep Enter
+(the cursor stops on them, and nothing switches machines until you press Enter
+or click). Sessions whose agent runs in a terminal, Pane and project rows, and
+a window showing another machine keep Enter. With the setting off, the arrows
+only move the cursor.
 
 Drag a Session up or down in Pinned, in Sessions, or in the compact rail to
 change its place; a line shows where it will land. With a Session row focused,
@@ -1248,7 +1251,10 @@ every Pane in it. Pause leaves a chat tab running: the result counts it in
 `chatIdleReleaseMinutes` (30 by default), outside the Pane on screen and never
 while it works, holds a queued message or waits on the person. Opening the tab
 or sending it a message resumes it in its conversation, and it reports no
-`panel.paused`. A Session whose orchestrator is a chat tab therefore never reads as paused.
+`panel.paused`. A Session whose chat auto-pause paused reads as paused (its row
+shows the pause mark) once every Pane in it is paused too, and `runpane
+sessions resume` or **Resume** starts its chat again. Resting the sidebar
+cursor on it shows it without resuming it; Enter or a click resumes it.
 A paused terminal tab stays stopped through clicks, app restarts and updates until
 `runpane panels resume --panel <panel-id>`, `runpane panes resume --pane
 <pane-id> --yes` or `runpane sessions resume --session <session-id>` restarts

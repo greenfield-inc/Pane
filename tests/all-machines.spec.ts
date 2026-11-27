@@ -726,3 +726,84 @@ test('next and previous machine step through the switcher order and skip an offl
   await page.keyboard.press(previous);
   await expect(label('parsa-devbox')).toBeVisible();
 });
+
+// Arrow keys open chat Sessions (T-87) in All machines too (T-116): this computer's rows show at
+// once; another machine's rows keep Enter until the mirror (T-116 PR 6) can show them.
+const mixedReads = {
+  ...reads,
+  local: lists(
+    [project(1, 'acme-web', [pane('a1', 'fix-checkout-race', 1, '2026-10-30T09:10:00Z')])],
+    [session('s1', 'Spring sale launch', ['a1']), session('s2', 'Release notes', [])],
+  ),
+};
+
+const cursorRows = (page: Page) => page.locator('[data-testid="all-machines-session-row"] [data-sidebar-item][data-row-open]');
+
+test('arrow keys show this computer\'s Sessions at once in All machines; another machine\'s row keeps Enter, and passing it switches nothing (T-116)', async ({ page }) => {
+  await openAllMachines(page, 'light', { open: false, extra: { machineConnections: { machines, reads: mixedReads } } });
+  await expect(sessionRows(page)).toHaveCount(3);
+  const rows = cursorRows(page);
+  const labels = await rows.evaluateAll(buttons => buttons.map(button => ({ label: button.getAttribute('aria-label'), cursor: button.getAttribute('data-session-cursor') })));
+  // One predicate decides it: this computer's rows carry the cursor, build-box's does not.
+  expect(labels.filter(row => row.cursor !== null).map(row => row.cursor).sort()).toEqual(['s1', 's2']);
+  expect(labels.find(row => row.label?.endsWith('on build-box'))?.cursor).toBeNull();
+
+  // Walk every Session row with ↓ and back with ↑: focus moves each press, whatever machine the row is on,
+  // and a row of this computer's opens the Sessions view to show it while focus stays in the sidebar.
+  // (This mock serves no Session to show: the Electron switch benchmark checks what paints, T-116.)
+  await rows.first().focus();
+  await expect(page.getByText('Choose a Session')).toHaveCount(0);
+  // A Sessions API that records each call by name: the local rows' peeks show it is used,
+  // and a rest on a remote row must add no select or open.
+  await page.evaluate(() => {
+    const calls: string[] = [];
+    // The Sessions list comes back empty, as at startup: the cursor reads this computer's rows from the All machines read.
+    interface SessionAnswer { sessions?: never[]; selectedSessionId?: undefined; view?: null; panels?: never[]; layout?: null }
+    const emptyList: SessionAnswer = { sessions: [], selectedSessionId: undefined };
+    const answer = (name: string, data: SessionAnswer) => async () => { calls.push(name); return { success: true, data }; };
+    Object.assign(window, { __sessionCalls: calls });
+    Object.assign(window.electronAPI, { orchestrationSessions: {
+      list: answer('list', emptyList), select: answer('select', emptyList),
+      open: answer('open', { view: null, panels: [], layout: null }), peek: answer('peek', { view: null, panels: [], layout: null }),
+    } });
+  });
+  // SAFETY: the evaluate above defines __sessionCalls as a string array before any read.
+  const takeSessionCalls = () => page.evaluate(() => (window as typeof window & { __sessionCalls: string[] }).__sessionCalls.splice(0));
+  let restedOnRemote = false;
+  for (const [key, index] of [['ArrowDown', 1], ['ArrowDown', 2], ['ArrowUp', 1], ['ArrowUp', 0]] as const) {
+    await page.keyboard.press(key);
+    await expect(rows.nth(index)).toBeFocused();
+    if (labels[index].cursor) {
+      // This computer's row shows at once: the Sessions view, and one read-only peek, from the All machines read.
+      await expect(page.getByText('Choose a Session')).toBeVisible();
+      await expect.poll(takeSessionCalls).toContain('peek');
+    } else {
+      // Resting past the 1 s settle on build-box's row: the cursor just lands; nothing settles, selects or opens (D-6).
+      await page.waitForTimeout(1_100);
+      expect((await takeSessionCalls()).filter(name => name !== 'list'), 'a rest on another machine\'s row asks for nothing').toEqual([]);
+      await expect(rows.nth(index)).toBeFocused();
+      restedOnRemote = true;
+    }
+  }
+  expect(restedOnRemote, 'the walk passed build-box\'s row').toBe(true);
+  // Passing over build-box's row asked nothing of build-box and left the window on this computer.
+  expect(await (await mock(page)).evaluate(api => ({ runs: api.getMachineRuns(), memory: api.getNavigationMemory('build') }))).toEqual({ runs: [], memory: null });
+  await expect(page.getByRole('button', { name: 'Showing all machines. Switch machine' })).toBeVisible();
+
+  // Enter on build-box's row still opens it there, as before.
+  await page.getByRole('button', { name: 'Session Backup rotation on build-box' }).focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await mock(page)).evaluate(api => api.getNavigationMemory('build')))
+    .toEqual({ view: 'pane-chat', projectId: null, paneId: null, orchestrationSessionId: 's1' });
+});
+
+test('with "Arrow keys open chat Sessions" off, no All machines row follows the cursor (T-116)', async ({ page }) => {
+  await openAllMachines(page, 'light', { open: false, extra: { machineConnections: { machines, reads: mixedReads }, initialConfig: { appearanceMode: 'system', arrowKeysOpenSessions: false } } });
+  await expect(sessionRows(page)).toHaveCount(3);
+  await expect(page.locator('[data-testid="all-machines-session-row"] [data-session-cursor]')).toHaveCount(0);
+  // The arrows only move the cursor, as before.
+  await cursorRows(page).first().focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(cursorRows(page).nth(1)).toBeFocused();
+  await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
+});

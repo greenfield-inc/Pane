@@ -241,6 +241,18 @@ describe('the sidebar cursor (T-87)', () => {
     expect(store.getState().quietSessionId).toBeUndefined();
   });
 
+  it('settles a Session the list has not loaded with the record the cursor peeked, never through select (T-116)', async () => {
+    const open = vi.fn().mockResolvedValue({ success: true, data: { view: null, panels: [], layout: null } });
+    const store = await setupWithOpen(open);
+    store.setState({ sessions: [] });
+    // SAFETY: settle reads only the id, name, internal Session id and paused mark of a record.
+    const record = { id: 'b', name: 'B', internalSessionId: 'internal-b', paused: { at: '2026-11-25T00:00:00.000Z', by: 'manual' } } as OrchestrationSessionRecord;
+    await store.getState().settle('b', null, { resume: false, record });
+    expect(open).toHaveBeenCalledWith({ sessionId: 'b' }, { select: true, resume: false });
+    expect(select).not.toHaveBeenCalled();
+    expect(store.getState()).toMatchObject({ selectedSessionId: 'b', quietSessionId: 'b' });
+  });
+
   it('keeps a list that landed while the settle read, instead of the settle\'s own', async () => {
     const reply = deferred<{ success: true; data: { view: null; panels: never[]; layout: null; list: { sessions: OrchestrationSessionRecord[]; selectedSessionId: string } } }>();
     const open = vi.fn().mockReturnValue(reply.promise);

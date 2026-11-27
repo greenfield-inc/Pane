@@ -11,6 +11,7 @@ import type { ToolPanel, TerminalPanelState } from '../../../shared/types/panels
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { databaseService } from './database';
 import { panelManager } from './panelManager';
+import { decodeChatPanelState } from './chatTabs/state';
 import { setPaneRuntime, type PaneRuntime } from '../core/runtime';
 import type {
   OrchestrationLink,
@@ -2194,6 +2195,49 @@ describe('OrchestrationSessionManager', () => {
 
     chat.paused = undefined;
     expect(find(await fixture.manager.select({ sessionId: created.session.id }))?.paused).toBeUndefined();
+  });
+
+  it('reports a chat-only Session as paused when idle auto-pause paused its chat tab (T-134 QA F-1)', async () => {
+    const fixture = createFixture();
+    fixture.manager.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });
+    Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: true });
+    try {
+      const created = await fixture.manager.create({ name: 'Auto-paused chat', agent: 'claude' });
+      expect(created.panel.type).toBe('chat');
+      const find = (result: { sessions: OrchestrationSessionRecord[] }) => result.sessions.find(session => session.id === created.session.id);
+      expect(find(await fixture.manager.list())?.paused).toBeUndefined();
+
+      // ChatTabManager.pause marks only the chat tab's own state; the Pane has no terminal tab to mark.
+      const mark = { at: '2026-11-26T22:50:20.984Z', by: 'auto' as const };
+      const state = decodeChatPanelState(panelManager.getPanel(created.panel.id)?.state.customState);
+      if (!state) throw new Error('The chat tab has no state');
+      panelManager.commitChatTab(created.panel.id, { ...state, paused: mark });
+      expect(find(await fixture.manager.list())?.paused).toEqual(mark);
+
+      panelManager.commitChatTab(created.panel.id, { ...state, paused: undefined });
+      expect(find(await fixture.manager.list())?.paused).toBeUndefined();
+    } finally {
+      Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false });
+    }
+  });
+
+  it('still reports a chat Session as paused when its chat runs but its own Pane\'s terminal tabs are paused (T-134 review)', async () => {
+    const fixture = createFixture();
+    fixture.manager.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });
+    Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: true });
+    try {
+      const created = await fixture.manager.create({ name: 'Paused shells', agent: 'claude' });
+      expect(created.panel.type).toBe('chat');
+      // `sessions pause` paused the shell beside the chat and left the chat running.
+      const mark = { at: '2026-11-26T23:00:00.000Z', by: 'manual' as const };
+      const pane = fixture.sessions.get(created.session.internalSessionId);
+      if (!pane) throw new Error('The Session has no Pane');
+      pane.paused = mark;
+      const find = (result: { sessions: OrchestrationSessionRecord[] }) => result.sessions.find(session => session.id === created.session.id);
+      expect(find(await fixture.manager.list())?.paused).toEqual(mark);
+    } finally {
+      Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false });
+    }
   });
 
   it('supports exact-name selectors and rejects lost updates with an optimistic revision guard', async () => {

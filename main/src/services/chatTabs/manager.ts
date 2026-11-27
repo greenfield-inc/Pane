@@ -68,6 +68,8 @@ export interface ChatTabManagerOptions {
   onView?: (view: ChatTabView) => void;
   /** The tab was closed; nothing about it is published again (its Notify cards close). */
   onClosed?: (panelId: string) => void;
+  /** A tab's paused mark was set or cleared (a pause, a move, a resume): its Pane and Session may read as paused or not. */
+  onPausedChange?: (panelId: string, paused: boolean) => void;
   windowMessages?: number;
   /**
    * Conversations open in Pane tabs on this machine other than `panelId` (and the terminal it replaced),
@@ -1197,7 +1199,11 @@ export class ChatTabManager {
   }
 
   private update(panelId: string, change: (state: ChatPanelState) => ChatPanelState): void {
-    this.options.store.commit(panelId, change(this.required(panelId)));
+    const before = this.required(panelId);
+    const after = change(before);
+    this.options.store.commit(panelId, after);
+    const paused = after.paused !== undefined;
+    if ((before.paused !== undefined) !== paused) this.options.onPausedChange?.(panelId, paused);
   }
 }
 
