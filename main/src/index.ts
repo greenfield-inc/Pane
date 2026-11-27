@@ -144,6 +144,7 @@ import { readTailscaleStatus, tailnetLoginMatches, tailnetRelayKey } from './ser
 import { MACHINE_MIRROR_FOLDER } from '../../shared/types/machineMirror';
 import { RemoteMemberEvents } from './services/remoteMemberEvents';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
+import { registerMachineMirrorHandlers } from './ipc/machineMirror';
 import { followSavedMachines, prepareNotifyForQuit } from './ipc/notify';
 import { LeaderboardService } from './services/leaderboardService';
 import { registerLeaderboardHandlers } from './ipc/leaderboard';
@@ -1310,6 +1311,7 @@ async function initializeServices() {
     },
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
+  registerMachineMirrorHandlers(ipcMain, () => machineMirror, machineConnections);
   setDeviceMachines(machineConnections);
   const machines = machineConnections;
   powerMonitor.on('suspend', () => machines.suspend());

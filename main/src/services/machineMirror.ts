@@ -5,7 +5,7 @@ import { PaneError } from '../../../shared/paneError';
 import { RemoteRequestError } from '../../../shared/remoteClient/remoteDaemonClient';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { MachineConnectionsEvent, MachineResult, MachineState } from '../../../shared/types/machineConnections';
-import type { MachineMirrorIndexEntry, MachineMirrorIndexFile, MachineMirrorState } from '../../../shared/types/machineMirror';
+import type { MachineMirrorIndexEntry, MachineMirrorIndexFile, MachineMirrorListing, MachineMirrorState } from '../../../shared/types/machineMirror';
 import {
   SESSION_SNAPSHOT_CHANGED_CHANNEL,
   SESSION_SNAPSHOT_MESSAGE_LIMIT,
@@ -174,6 +174,16 @@ export class MachineMirror {
   /** The Sessions a machine's copy holds and their host revisions, from memory (for the arrow keys, PR 6). */
   index(machineId: string): Array<{ sessionId: string; revision: number }> {
     return [...(this.mirrors.get(machineId)?.index ?? [])].map(([sessionId, entry]) => ({ sessionId, revision: entry.revision }));
+  }
+
+  /** Every mirrored machine, how current it is and each Session's revision, for the renderer (T-116 PR 6). */
+  listings(): MachineMirrorListing[] {
+    return [...this.mirrors.keys()].flatMap(machineId => {
+      const state = this.state(machineId);
+      const mirror = this.mirrors.get(machineId);
+      if (!state || !mirror) return [];
+      return [{ state, sessions: Object.fromEntries([...mirror.index].map(([sessionId, entry]) => [sessionId, entry.revision])) }];
+    });
   }
 
   /** One Session's copy: from memory when it was read or changed lately, else from its file. */

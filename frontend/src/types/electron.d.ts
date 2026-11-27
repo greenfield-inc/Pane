@@ -119,6 +119,7 @@ interface MachineReadAnswers {
   'notify:remote-snapshot': NotifySharedState | null;
   'todos:snapshot': IPCResponse<TodosSnapshot>;
   'usage:get-report': IPCResponse<UsageReport>;
+  'orchestration-sessions:peek': IPCResponse<OrchestrationSessionOpenResult<Session>>;
 }
 
 // oxlint-disable-next-line typescript/no-explicit-any -- Generic type parameter default for flexible API responses
@@ -885,6 +886,15 @@ interface ElectronAPI {
     latency: (machineId: string) => Promise<MachineLatency>;
     /** Every machine's list, Notify and permission events, resyncs and online/offline changes. */
     onEvent: (callback: (event: MachineConnectionsEvent) => void) => () => void;
+  };
+
+  /** The desktop mirror of the owner's other machines (T-116 PR 6), and the one remote chat this window shows. */
+  machineMirror: {
+    list: () => Promise<import('../../../shared/types/machineMirror').MachineMirrorListing[]>;
+    session: (machineId: string, sessionId: string) => Promise<import('../../../shared/types/sessionSnapshot').SessionSnapshot | null>;
+    onChanged: (callback: (change: { machineId: string }) => void) => () => void;
+    followChat: (target: { machineId: string; panelId: string } | null) => void;
+    onChatEvent: (callback: (event: import('../../../shared/types/machineMirror').MachineChatEvent) => void) => () => void;
   };
 
   // Window state queries (invoke, not event subscriptions)

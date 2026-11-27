@@ -48,6 +48,8 @@ import type { PanelAgentStatusEvent } from '../../shared/types/agentStatus';
 import type { NotifyCommand, NotifyNavigateTarget, NotifySnapshot, NotifyWindowSize } from '../../shared/types/notify';
 import type { AutopilotDocument, AutopilotInstructionsView, AutopilotSnapshot, AutopilotStackCommand, AutopilotStackPushRequest } from '../../shared/types/autopilot';
 import type { MachineCommand, MachineConnectionsEvent, MachineLatency, MachineReadChannel, MachineResult, MachineState } from '../../shared/types/machineConnections';
+import { MACHINE_MIRROR_CHANNELS, type MachineChatEvent, type MachineMirrorListing } from '../../shared/types/machineMirror';
+import type { SessionSnapshot } from '../../shared/types/sessionSnapshot';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -427,6 +429,7 @@ function invokeIpc(channel: string, ...args: unknown[]) {
 }
 
 let machineEventListeners = 0;
+let machineMirrorListeners = 0;
 
 // Main has no network event; a reconnecting remote host retries when the renderer sees the network return.
 window.addEventListener('online', () => ipcRenderer.send('remote-daemon:network-online'));
@@ -1549,6 +1552,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.removeListener('machines:event', listener);
         if (--machineEventListeners === 0) ipcRenderer.send('machines:subscribe', false);
       };
+    },
+  },
+
+  // The desktop mirror of the owner's other machines (T-116 PR 6), and the one remote chat this window shows.
+  machineMirror: {
+    list: (): Promise<MachineMirrorListing[]> => ipcRenderer.invoke(MACHINE_MIRROR_CHANNELS.list),
+    session: (machineId: string, sessionId: string): Promise<SessionSnapshot | null> => ipcRenderer.invoke(MACHINE_MIRROR_CHANNELS.session, machineId, sessionId),
+    onChanged: (callback: (change: { machineId: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, change: { machineId: string }) => callback(change);
+      ipcRenderer.on(MACHINE_MIRROR_CHANNELS.changed, listener);
+      if (machineMirrorListeners++ === 0) ipcRenderer.send(MACHINE_MIRROR_CHANNELS.subscribe, true);
+      return () => {
+        ipcRenderer.removeListener(MACHINE_MIRROR_CHANNELS.changed, listener);
+        if (--machineMirrorListeners === 0) ipcRenderer.send(MACHINE_MIRROR_CHANNELS.subscribe, false);
+      };
+    },
+    /** The chat on another machine this window shows, or null; its events then arrive on `onChatEvent`. */
+    followChat: (target: { machineId: string; panelId: string } | null): void => ipcRenderer.send(MACHINE_MIRROR_CHANNELS.followChat, target),
+    onChatEvent: (callback: (event: MachineChatEvent) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, event: MachineChatEvent) => callback(event);
+      ipcRenderer.on(MACHINE_MIRROR_CHANNELS.chatEvent, listener);
+      return () => { ipcRenderer.removeListener(MACHINE_MIRROR_CHANNELS.chatEvent, listener); };
     },
   },
 

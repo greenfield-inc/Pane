@@ -64,6 +64,8 @@ export const REMOTE_READ_CHANNELS = new Set([
   'orchestration-sessions:archive-preview',
   // Host snapshots: reads only, creates no tab and starts no agent.
   'orchestration-sessions:snapshots',
+  // Reads a Session's view, tabs, layout and chat; creates no tab and starts no agent.
+  'orchestration-sessions:peek',
   'projects:get-all',
   'projects:get-running-script',
   'terminal:getAltScreenState',

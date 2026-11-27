@@ -97,6 +97,13 @@ const MACHINE_HEALTH_ACTION_CHANNELS = {
   'stop-app': MACHINE_HEALTH_STOP_APP_CHANNEL,
 } as const satisfies Record<MachineHealthAction, string>;
 const eventChannels = new Set<string>(MACHINE_EVENT_CHANNELS);
+/** A shown chat's events: its messages as they change, and its view (status, approvals, questions). */
+const FOLLOWED_CHAT_CHANNELS = ['chat-tab:event', 'chat-tab:view'] as const;
+type FollowedChatChannel = typeof FOLLOWED_CHAT_CHANNELS[number];
+const isFollowedChatChannel = (channel: string): channel is FollowedChatChannel => FOLLOWED_CHAT_CHANNELS.some(candidate => candidate === channel);
+const followedChatSchema = boundary.object({ panelId: boundary.nonEmptyString });
+/** One followed chat's event, as the host sent it on `channel`. */
+export type FollowedChatListener = (channel: FollowedChatChannel, payload: unknown) => void;
 const isMachineEventChannel = (channel: string): channel is MachineEventChannel => eventChannels.has(channel);
 const itemSchema = boundary.object({ kind: boundary.enumeration('pane', 'session'), id: boundary.nonEmptyString });
 const commandTypeSchema = boundary.object({
@@ -133,6 +140,8 @@ export class MachineConnections {
   /** Per computer: when the side check last proved its owner, and when it may run again after one that didn't. */
   private readonly sideChecks = new Map<string, { provedAt?: number; failures: number; retryAt: number }>();
   private readonly listeners = new Set<(event: MachineConnectionsEvent) => void>();
+  /** The chats a window shows from another machine (T-116 PR 6), keyed `machine\0panel`: only these chats' events are passed on. */
+  private readonly followedChats = new Map<string, Set<FollowedChatListener>>();
   private readonly createClient: CreateMachineClient;
   private readonly onConfigUpdated = () => this.refresh();
   private stopRetryOnArrival: (() => void) | null = null;
@@ -181,6 +190,35 @@ export class MachineConnections {
   subscribe(listener: (event: MachineConnectionsEvent) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
+  }
+
+  /**
+   * Passes on one chat's `chat-tab:event` and `chat-tab:view` from one machine (T-116 PR 6), for a
+   * window showing it read-only. They already arrive on the machine's stream; they never go on
+   * `machines:event`, so no other chat's content reaches the renderer. Returns the unfollow.
+   */
+  followChat(machineId: string, panelId: string, listener: FollowedChatListener): () => void {
+    const key = `${machineId}\0${panelId}`;
+    let listeners = this.followedChats.get(key);
+    if (!listeners) { listeners = new Set(); this.followedChats.set(key, listeners); }
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0 && this.followedChats.get(key) === listeners) this.followedChats.delete(key);
+    };
+  }
+
+  private passOnChat(machineId: string, channel: string, payload: unknown): void {
+    if (this.followedChats.size === 0 || !isFollowedChatChannel(channel)) return;
+    const panelId = decodeOptionalBoundary(payload, followedChatSchema)?.panelId;
+    const listeners = panelId ? this.followedChats.get(`${machineId}\0${panelId}`) : undefined;
+    for (const listener of [...listeners ?? []]) {
+      try {
+        listener(channel, payload);
+      } catch (error) {
+        console.warn('[MachineConnections] A chat listener failed:', reasonOf(error));
+      }
+    }
   }
 
   /**
@@ -333,7 +371,13 @@ export class MachineConnections {
         machineId: this.deps.configManager.getConfig().machineId,
         routes,
         prepareRoute: (route) => this.deps.routes?.prepare(route) ?? Promise.resolve(route.profile),
-        eventSink: { send: (channel, ...args) => { if (isCurrent() && isMachineEventChannel(channel)) this.emit({ type: 'event', machineId: id, channel, args }); } },
+        eventSink: {
+          send: (channel, ...args) => {
+            if (!isCurrent()) return;
+            if (isMachineEventChannel(channel)) this.emit({ type: 'event', machineId: id, channel, args });
+            else this.passOnChat(id, channel, args[0]);
+          },
+        },
         onConnectionStateChange: (status, _error, metadata) => {
           if (!isCurrent()) return;
           if (metadata?.hostRoutes) void this.deps.routes?.saveReport(id, metadata.routeId, metadata.hostRoutes);

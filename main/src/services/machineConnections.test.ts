@@ -100,6 +100,28 @@ describe('MachineConnections', () => {
     expect(events).toEqual([]);
   });
 
+  it('passes on only the chat a window follows, from its machine, and never on machines:event (T-116 PR 6)', () => {
+    const { machines, events, client } = setup(['studio-mac', 'build-box']);
+    events.length = 0;
+    const heard: Array<{ channel: string; payload: unknown }> = [];
+    const stop = machines.followChat('build-box', 'chat-1', (channel, payload) => heard.push({ channel, payload }));
+    const shown = { panelId: 'chat-1', generation: 2, revision: 7, index: 0, change: { type: 'append' } };
+
+    client('build-box').options.eventSink?.send('chat-tab:event', shown);
+    client('build-box').options.eventSink?.send('chat-tab:view', { panelId: 'chat-1', status: 'working' });
+    // Another chat on the same machine, and the same panel id on another machine, are not followed.
+    client('build-box').options.eventSink?.send('chat-tab:event', { ...shown, panelId: 'chat-2' });
+    client('studio-mac').options.eventSink?.send('chat-tab:event', shown);
+    stop();
+    client('build-box').options.eventSink?.send('chat-tab:event', shown);
+
+    expect(heard).toEqual([
+      { channel: 'chat-tab:event', payload: shown },
+      { channel: 'chat-tab:view', payload: { panelId: 'chat-1', status: 'working' } },
+    ]);
+    expect(events).toEqual([]);
+  });
+
   it('runs a rename on the named machine only', async () => {
     const { machines, client, connect } = setup(['studio-mac', 'build-box']);
     connect('build-box');

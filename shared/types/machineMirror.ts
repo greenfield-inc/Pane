@@ -48,3 +48,31 @@ export interface MachineMirrorIndexFile {
   lastSeenAt: string | null;
   sessions: Record<string, MachineMirrorIndexEntry>;
 }
+
+/** One mirrored machine as the renderer reads it (T-116 PR 6): how current it is, and each Session's host revision. */
+export interface MachineMirrorListing {
+  state: MachineMirrorState;
+  /** Session id → the snapshot revision held. */
+  sessions: Record<string, number>;
+}
+
+/** The renderer's channels for the mirror and for following a shown chat on another machine. */
+export const MACHINE_MIRROR_CHANNELS = {
+  /** Every mirrored machine's `MachineMirrorListing`. */
+  list: 'machine-mirror:list',
+  /** `(machineId, sessionId)` → the Session's `SessionSnapshot`, or null when it isn't mirrored. */
+  session: 'machine-mirror:session',
+  /** Pushed with `{ machineId }` when a machine's copy or state changed, to windows that sent `subscribe`. */
+  changed: 'machine-mirror:changed',
+  subscribe: 'machine-mirror:subscribe',
+  /** `(machineId, panelId)` or `(null)`: the one chat on another machine this window shows, whose events it gets. */
+  followChat: 'machine-chat:follow',
+  /** Pushed with `{ machineId, channel, payload }`: one of the followed chat's `chat-tab:event` or `chat-tab:view`. */
+  chatEvent: 'machine-chat:event',
+} as const;
+
+export interface MachineChatEvent {
+  machineId: string;
+  channel: 'chat-tab:event' | 'chat-tab:view';
+  payload: unknown;
+}

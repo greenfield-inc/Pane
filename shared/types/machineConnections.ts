@@ -63,6 +63,9 @@ export const MACHINE_READ_CHANNELS = [
   'orchestration-sessions:activity-list',
   // Host snapshots (T-116): the owner's other machines keep each chat Session ready ahead of opening.
   'orchestration-sessions:snapshots',
+  // One Session's view, tabs, layout and newest 200 messages, read-only (T-87): the arrow keys show a
+  // Session the mirror lacks, and fill a mirrored one's full window behind its first paint (T-116 PR 6).
+  'orchestration-sessions:peek',
   'projects:get-all',
   'projects:list-branches',
   'projects:detect-branch',

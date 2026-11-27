@@ -221,6 +221,24 @@ describe('MachineMirror', () => {
     expect(readSession(directory, 'mac', 'a').chat.transcript?.messages).toHaveLength(30);
   });
 
+  it('lists each mirrored machine for the renderer with its state and Session revisions, offline included (T-116 PR 6)', async () => {
+    const mac = fakeHost('mac');
+    mac.add('a', 3);
+    const link = fakeMachines([mac]);
+    const mirror = mirrorOf(link.machines);
+    await mirror.start();
+    link.online('mac');
+    await vi.advanceTimersByTimeAsync(0);
+    const revision = mirror.index('mac')[0]!.revision;
+
+    expect(mirror.listings()).toEqual([{ state: { machineId: 'mac', sync: 'live', lastSeenAt: '2026-11-26T12:00:00.000Z', sessionCount: 1 }, sessions: { a: revision } }]);
+
+    link.offline('mac');
+    expect(mirror.listings()).toEqual([{ state: { machineId: 'mac', sync: 'offline', lastSeenAt: '2026-11-26T12:00:00.000Z', sessionCount: 1 }, sessions: { a: revision } }]);
+    link.forget('mac');
+    expect(mirror.listings()).toEqual([]);
+  });
+
   it('batches a machine\'s notices for 250 ms into one read of what changed, sending only new messages', async () => {
     const mac = fakeHost('mac');
     mac.add('a', 10);
