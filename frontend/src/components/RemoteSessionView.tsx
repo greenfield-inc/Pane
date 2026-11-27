@@ -9,8 +9,21 @@ import { useAllMachinesStore } from '../stores/allMachinesStore';
 import { useMachineMirrorStore } from '../stores/machineMirrorStore';
 import { heldRemoteChat, remoteChatClient, remoteSessionKey, useRemoteSessionView, type RemoteSessionEntry, type RemoteSessionTarget } from '../stores/remoteSessionView';
 import type { MachineMirrorListing, MachineMirrorSync } from '../../../shared/types/machineMirror';
+import { SESSION_SNAPSHOT_MESSAGE_LIMIT } from '../../../shared/types/sessionSnapshot';
+import type { ChatTabView } from '../../../shared/types/chatTab';
 import type { MachineState } from '../../../shared/types/machineConnections';
 import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
+
+/** How long the cursor stays on a remote chat before all the messages held are drawn. */
+const REMOTE_FULL_WINDOW_REST_MS = 150;
+
+/** The newest messages a first paint draws: the window the mirror holds (D-3). */
+function firstPaint(chat: ChatTabView): ChatTabView {
+  const transcript = chat.transcript;
+  const extra = transcript ? transcript.messages.length - SESSION_SNAPSHOT_MESSAGE_LIMIT : 0;
+  if (!transcript || extra <= 0) return chat;
+  return { ...chat, transcript: { ...transcript, start: transcript.start + extra, messages: transcript.messages.slice(extra) } };
+}
 
 /** "14:02": when an offline machine was last heard from, in this computer's time. */
 function clockTime(iso: string | null | undefined): string | null {
@@ -62,16 +75,25 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
   const client = useMemo(() => remoteChatClient(machineId, machineName), [machineId, machineName]);
   const readAt = entry?.readAt ?? 0;
 
-  // The chat paints what is held at once; its own read (the 200-message fill) runs after that paint.
+  // The chat paints the newest 30 messages held at once (drawing 200 takes a long chat ~95 ms);
+  // the rest of what is held follows once the cursor stays, and again when the host's read lands.
   useMemo(() => {
     if (!chat) return;
     const viewer = chatTabViewer(client, chat.panelId);
     viewer.setStartOnRead(false);
-    viewer.prime(chat, performance.now());
+    viewer.prime(firstPaint(chat), performance.now());
   }, [client, chat]);
-
-  // The host's read (the 200-message fill) landed: the shown chat takes it in.
   const panelId = chat?.panelId;
+  useEffect(() => {
+    if (!panelId) return undefined;
+    const viewer = chatTabViewer(client, panelId);
+    const rest = setTimeout(() => { void viewer.refresh(); }, REMOTE_FULL_WINDOW_REST_MS);
+    return () => {
+      clearTimeout(rest);
+      // Left: the next visit paints the short window again. After the chat's own unsubscribe.
+      queueMicrotask(() => viewer.forgetMessages());
+    };
+  }, [client, panelId]);
   useEffect(() => {
     if (panelId && readAt > 0) void chatTabViewer(client, panelId).refresh();
   }, [client, panelId, readAt]);
