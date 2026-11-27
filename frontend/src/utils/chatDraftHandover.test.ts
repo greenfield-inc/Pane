@@ -78,3 +78,12 @@ describe('a handed-over Enter waits for the window\'s link (QA 1781 F-1)', () =>
     expect(pendingSendStep(pending, { edited: true, now: 500, sendDisabled: false, linkUp: true })).toBe('edited');
   });
 });
+
+describe('the note beside a handed-over text (QA 1781 F-2, D-22)', () => {
+  it('stays while the box holds that text and goes once it is edited or sent', async () => {
+    const { draftNoteStays } = await import('./chatDraftHandover');
+    expect(draftNoteStays({ text: 'ship it' }, 'ship it')).toBe(true);
+    expect(draftNoteStays({ text: 'ship it' }, 'ship it now')).toBe(false);
+    expect(draftNoteStays({ text: 'ship it' }, '')).toBe(false);
+  });
+});

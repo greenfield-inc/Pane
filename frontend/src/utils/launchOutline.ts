@@ -20,6 +20,8 @@ export interface LaunchDraft {
   sendBy?: number;
   /** Shown beside the text in the chat's box: why it is there unsent (T-132, QA 1781 F-1). */
   note?: string;
+  /** Shown instead of the chat's own reason if the Enter's deadline passes before it can send (D-22). */
+  expiredNote?: string;
 }
 
 /** How long the outline waits, from the app's start, for the app's first render and the launch chat. */

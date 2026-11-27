@@ -146,3 +146,14 @@ describe('the kept bar never promises a send its deadline has passed (review 178
     expect(text(html)).toContain('It goes in unsent: its 60 s to send have passed.');
   });
 });
+
+describe('the held view after the Enter\'s minute (QA 1781 F-2, D-22)', () => {
+  it('says it was not sent and that Enter sends it, never that it sends once the machine answers', async () => {
+    const { HeldComposerBox } = await import('./RemoteSessionView');
+    const html = renderToStaticMarkup(<HeldComposerBox target={{ machineId: 'build', sessionId: 's1' }} machineName="Build box" held={{ text: 'ship it', send: false, notSent: 'Not sent: Build box didn\'t answer within a minute. Press Enter to send.' }} failure={undefined} engagingCause="enter" waiting />);
+    expect(text(html)).toContain('Not sent: Build box didn\'t answer within a minute. Press Enter to send.');
+    expect(text(html)).not.toContain('once it does');
+    expect(html).not.toMatch(/<textarea[^>]*readonly=""/i);
+    expect(html).toContain('>ship it</textarea>');
+  });
+});

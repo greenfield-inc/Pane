@@ -53,6 +53,8 @@ export interface HeldText {
   send: boolean;
   /** When Enter was pressed plus its window: a chat that takes it later shows it unsent (SF-4). */
   sendBy?: number;
+  /** Why it isn't sending any more: the Enter's minute passed with no answer (QA 1781 F-2, D-22). */
+  notSent?: string;
 }
 
 interface RemoteEngageState {
@@ -194,8 +196,36 @@ function sessionName(target: EngageTarget): string {
 function keepUnsent(target: EngageTarget): void {
   useRemoteEngage.setState(state => {
     const held = state.held[engageKey(target)];
-    return held?.send ? { held: { ...state.held, [engageKey(target)]: { text: held.text, send: false } } } : {};
+    if (!held?.send) return {};
+    const kept: HeldText = { text: held.text, send: false };
+    if (held.notSent) kept.notSent = held.notSent;
+    return { held: { ...state.held, [engageKey(target)]: kept } };
   });
+}
+
+/** Each held Enter's minute, by Session. */
+const sendExpiries = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** The reason a held Enter stops sending once its minute passes with no answer (D-22). */
+function notSentReason(target: EngageTarget): string {
+  return `Not sent: ${machineName(target.machineId)} didn't answer within a minute. Press Enter to send.`;
+}
+
+/**
+ * An Enter held for a Session sends only within ENTER_WAITS_MS. Past it, the text stays, no longer
+ * sending, with why, so nothing promises a send that won't happen (QA 1781 F-2, D-22).
+ */
+function armSendExpiry(target: EngageTarget): void {
+  const key = engageKey(target);
+  clearTimeout(sendExpiries.get(key));
+  sendExpiries.set(key, setTimeout(() => {
+    sendExpiries.delete(key);
+    useRemoteEngage.setState(state => {
+      const held = state.held[key];
+      if (!held?.send) return {};
+      return { held: { ...state.held, [key]: { text: held.text, send: false, notSent: notSentReason(target) } } };
+    });
+  }, ENTER_WAITS_MS));
 }
 
 /** The Session's chat tab as the mirror holds it now: the live one there that takes what was typed. */
@@ -247,7 +277,7 @@ export function holdRemoteText(target: EngageTarget, text: string): void {
   useRemoteEngage.setState(state => {
     const key = engageKey(target);
     const held = { ...state.held };
-    if (text) held[key] = { text, send: held[key]?.send ?? false };
+    if (text) held[key] = { ...held[key], text, send: held[key]?.send ?? false };
     else delete held[key];
     return { held };
   });
@@ -264,7 +294,8 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
   const key = engageKey(target);
   const state = useRemoteEngage.getState();
   if (options.send && state.held[key]?.text.trim()) {
-    useRemoteEngage.setState({ held: { ...state.held, [key]: { ...state.held[key], send: true, sendBy: Date.now() + ENTER_WAITS_MS } } });
+    useRemoteEngage.setState({ held: { ...state.held, [key]: { text: state.held[key].text, send: true, sendBy: Date.now() + ENTER_WAITS_MS } } });
+    armSendExpiry(target);
   }
   if (sameTarget(state.engaging, target)) return;
   const machine = machineState(target.machineId);
@@ -359,13 +390,14 @@ export function setEngageLinkUp(up: boolean): void {
 }
 
 /** What the kept bar shows: text typed into a Session and not delivered, with why; none while an engage runs. */
-export function keptEngage(state: RemoteEngageState): (EngageTarget & { text: string; message: string; pending: boolean; sendsBy?: number }) | undefined {
+export function keptEngage(state: RemoteEngageState): (EngageTarget & { text: string; message: string; pending: boolean; sendsBy?: number; notSent?: string }) | undefined {
   const failure = state.failure;
   if (!failure || state.engaging) return undefined;
   const held = state.held[engageKey(failure)];
   if (!held) return undefined;
   const kept = { machineId: failure.machineId, sessionId: failure.sessionId, text: held.text, message: failure.message, pending: failure.pending === true };
   // An Enter waiting: the bar says whether it still sends, which depends on its deadline.
+  if (held.notSent) return { ...kept, notSent: held.notSent };
   return held.send && held.sendBy !== undefined ? { ...kept, sendsBy: held.sendBy } : kept;
 }
 
@@ -458,7 +490,11 @@ function deliverHeld(engaging: EngageTarget & { panelId?: string }, { focused, s
     sendBy: latest.sendBy ?? Date.now() + ENTER_WAITS_MS,
   };
   // Not where the person is typing: the chat says why the text is there unsent.
-  if (!focused) draft.note = 'Not sent yet: you typed this while the window switched to this machine. Press Enter to send it.';
+  // Not where the person is typing, or no longer sending: the chat says why the text is there unsent.
+  if (latest.notSent) draft.note = latest.notSent;
+  else if (!focused) draft.note = 'Not sent yet: you typed this while the window switched to this machine. Press Enter to send it.';
+  // If the chat itself can't send it before the deadline, it says the same as this view would (D-22).
+  if (draft.send) draft.expiredNote = notSentReason(target);
   handOverChatDraft(panelId, draft);
 }
 

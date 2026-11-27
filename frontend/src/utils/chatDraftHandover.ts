@@ -58,6 +58,11 @@ export function pendingSendStep(pending: { until: number }, { edited, now, sendD
   return 'send';
 }
 
+/** Whether the note on a handed-over text still applies: the box still holds that text, unsent. */
+export function draftNoteStays(note: { text: string }, composerText: string): boolean {
+  return composerText === note.text;
+}
+
 /** A chat tab that can take a handed-over draft; returns its cleanup. */
 export function acceptChatDraft(panelId: string, taker: (draft: LaunchDraft) => void): () => void {
   takers.set(panelId, taker);

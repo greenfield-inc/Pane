@@ -45,7 +45,7 @@ import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
 import { FindBar } from '../find/FindBar';
 import { useSurfaceFind } from '../find/surfaceFind';
 import { takeLaunchDraft, type LaunchDraft } from '../../utils/launchOutline';
-import { acceptChatDraft, chatTabShown, handOverChatDraft, pendingSendStep, sendDeadline } from '../../utils/chatDraftHandover';
+import { acceptChatDraft, chatTabShown, draftNoteStays, handOverChatDraft, pendingSendStep, sendDeadline } from '../../utils/chatDraftHandover';
 import { useWindowLink } from '../../stores/windowLink';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import '../agentChat/agentChat.css';
@@ -473,7 +473,10 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   // The launch outline's message box (index.html) hands over as this tab first paints: its text and
   // caret, focus when it had it, and an Enter pressed before the chat loaded, which sends that text
   // once (D-62) if the chat can send it soon after; an edit or a chat that stays unable drops it.
-  const launchSend = useRef<{ text: string; until: number } | null>(null);
+  const launchSend = useRef<{ text: string; until: number; expiredNote?: string } | null>(null);
+  // Why a handed-over text is in the box unsent. It stays until that text is edited or sent, not
+  // only until the chat's next read clears its error (QA 1781 F-2, D-22).
+  const [draftNote, setDraftNote] = useState<{ text: string; note: string } | null>(null);
   const linkUp = useWindowLink(state => state.up);
   /** Re-runs the launch send check: the handover can land after mount, once the box settles, and the send window closes. */
   const [launchTick, setLaunchTick] = useState(0);
@@ -486,8 +489,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       switchMark('chat:draft', { panelId, status: draft.send ? 'send' : 'text' });
       viewer.setDraft(draft.text);
       runtime.thread.composer.setText(draft.text);
-      if (draft.send) launchSend.current = { text: draft.text, until: sendDeadline(draft, LAUNCH_SEND_MS) };
-      if (draft.note) viewer.setError(draft.note);
+      if (draft.send) launchSend.current = { text: draft.text, until: sendDeadline(draft, LAUNCH_SEND_MS), expiredNote: draft.expiredNote };
+      setDraftNote(draft.note ? { text: draft.text, note: draft.note } : null);
       setLaunchTick(tick => tick + 1);
       const box = input();
       if (!box) return;
@@ -525,7 +528,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       switchMark('chat:draft-send', { panelId, status: step });
       launchSend.current = null;
       // The Enter pressed before the chat could send is not lost silently: the text stays, with why (T-132).
-      if (step === 'expired') viewer.setError('Not sent: the chat could not take your message in time (its connection may have dropped). It is still here; press Enter to send it.');
+      if (step === 'expired') setDraftNote({ text: pending.text, note: pending.expiredNote ?? 'Not sent: the chat could not take your message in time (its connection may have dropped). It is still here; press Enter to send it.' });
       return;
     }
     if (step === 'wait') {
@@ -537,6 +540,11 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     switchMark('chat:draft-send', { panelId, status: 'sent' });
     void runtime.thread.composer.send();
   }, [runtime, sendDisabled, linkUp, launchTick, viewer]);
+  useEffect(() => {
+    if (!draftNote) return undefined;
+    const composer = runtime.thread.composer;
+    return composer.subscribe(() => { if (!draftNoteStays(draftNote, composer.getState().text)) setDraftNote(null); });
+  }, [draftNote, runtime]);
   // Every refusal is shown (assistant-ui's own paste and picker swallow them), and a file
   // that failed while copying leaves no chip behind.
   useEffect(() => runtime.thread.composer.unstable_on('attachmentAddError', event => {
@@ -645,6 +653,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       {view?.banner && <ChatSwitchBanner banner={view.banner} busy={busy || !connected || readOnly}
         onPickAnother={() => setPicking(true)} onDismiss={() => void act(() => client.dismissBanner(panelId))} />}
       {snapshot.error && <div role="alert" className="chat-alert">{snapshot.error}</div>}
+      {draftNote && <div role="alert" className="chat-alert" data-testid="chat-draft-note">{draftNote.note}</div>}
       {picking && <ConversationPicker load={loadConversations} onResume={resumeConversation} onClose={() => setPicking(false)} />}
       {!!attachProblems.length && <div role="alert" className="chat-alert chat-attach-alert">
         <ul>{attachProblems.map((problem, index) => <li key={index}>{problem}</li>)}</ul>

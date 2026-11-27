@@ -447,3 +447,39 @@ describe('a dial that hangs on a dead link says it is pending (QA 1781 F-1)', ()
     expect(state().engaging?.waiting).toBeFalsy();
   });
 });
+
+describe('an Enter whose minute passes on a dead link says so, and never sends late (QA 1781 F-2, D-22)', () => {
+  it('at 60 s the held text stops sending and says why; landing later hands it over unsent with the same reason', async () => {
+    const { engage, handover, stopTaking, state } = await setup(async () => ({ ok: true }));
+    stopTaking();
+    engage.setEngageLinkUp(false);
+    engage.holdRemoteText(target, 'ship it');
+    engage.engageRemoteSession(target, 'enter', { send: true });
+    await vi.waitFor(() => expect(state().engaging?.switched).toBe(true));
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(state().held[engage.engageKey(target)]).toMatchObject({ send: true });
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(state().held[engage.engageKey(target)]).toMatchObject({ text: 'ship it', send: false, notSent: 'Not sent: Build box didn\'t answer within a minute. Press Enter to send.' });
+
+    engage.setEngageLinkUp(true);
+    const taken: LaunchDraft[] = [];
+    handover.acceptChatDraft('panel-b', draft => taken.push(draft));
+    handover.chatTabShown('panel-b');
+    expect(taken).toEqual([expect.objectContaining({ text: 'ship it', send: false, note: 'Not sent: Build box didn\'t answer within a minute. Press Enter to send.' })]);
+  });
+
+  it('Enter again after that sends it when the chat there can', async () => {
+    const { engage, handover, taken, state } = await setup(async () => ({ ok: true }));
+    engage.setEngageLinkUp(false);
+    engage.holdRemoteText(target, 'ship it');
+    engage.engageRemoteSession(target, 'enter', { send: true });
+    await vi.waitFor(() => expect(state().engaging?.switched).toBe(true));
+    await vi.advanceTimersByTimeAsync(61_000);
+    engage.engageRemoteSession(target, 'enter', { send: true });
+    expect(state().held[engage.engageKey(target)]).toMatchObject({ send: true });
+    expect(state().held[engage.engageKey(target)]?.notSent).toBeUndefined();
+    engage.setEngageLinkUp(true);
+    handover.chatTabShown('panel-b');
+    expect(taken).toEqual([expect.objectContaining({ text: 'ship it', send: true })]);
+  });
+});

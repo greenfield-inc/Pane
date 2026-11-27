@@ -256,8 +256,9 @@ export function HeldComposerBox({ target, machineName, held, failure, engagingCa
           }}
         />
       </div>
-      {waiting && held && <p role="status" className="chat-notice" data-testid="remote-engage-pending">Not sent yet: waiting for {machineName} to answer. {held.send ? 'It sends there once it does.' : 'It goes into the chat there once it does.'}</p>}
-      {!waiting && held?.send && engagingCause && <p role="status" className="chat-notice" data-testid="remote-engage-sending">Sends on {machineName} once it opens there.</p>}
+      {held?.notSent && <p role="alert" className="chat-notice" data-testid="remote-engage-not-sent">{held.notSent}</p>}
+      {!held?.notSent && waiting && held && <p role="status" className="chat-notice" data-testid="remote-engage-pending">Not sent yet: waiting for {machineName} to answer. {held.send ? 'It sends there once it does.' : 'It goes into the chat there once it does.'}</p>}
+      {!waiting && !held?.notSent && held?.send && engagingCause && <p role="status" className="chat-notice" data-testid="remote-engage-sending">Sends on {machineName} once it opens there.</p>}
     </div>
   );
 }
@@ -315,7 +316,7 @@ export function KeptBar({ kept, machineName, now = Date.now() }: { kept: NonNull
     <div role="region" aria-label={`Not sent to ${machineName}`} data-testid="engage-kept" data-pending={kept.pending || undefined}
       className="fixed bottom-4 right-4 z-fixed w-[420px] max-w-[calc(100vw-2rem)] rounded-lg border border-border-primary bg-surface-primary p-3 text-text-primary shadow-dropdown">
       <div className="mb-2 flex items-start gap-2">
-        <p role={kept.pending ? 'status' : 'alert'} className="min-w-0 flex-1 text-xs text-text-secondary">{kept.pending ? `${kept.message}${sends}` : `Not sent yet to ${machineName}: ${kept.message}`}</p>
+        <p role={kept.pending && !kept.notSent ? 'status' : 'alert'} className="min-w-0 flex-1 text-xs text-text-secondary">{kept.notSent ?? (kept.pending ? `${kept.message}${sends}` : `Not sent yet to ${machineName}: ${kept.message}`)}</p>
         <button type="button" className="flex-shrink-0 rounded p-0.5 text-text-tertiary hover:text-text-primary" aria-label="Discard what you typed" title="Discard what you typed"
           onClick={() => { holdRemoteText(target, ''); dismissKept(); }}>
           <X className="h-3.5 w-3.5" aria-hidden />

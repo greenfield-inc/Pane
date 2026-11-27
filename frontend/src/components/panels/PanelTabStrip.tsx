@@ -20,6 +20,7 @@ import { Kbd } from '../ui/Kbd';
 import { usePanelStore } from '../../stores/panelStore';
 import { showActionError } from '../../stores/errorStore';
 import { PanelTabStatusDot } from './PanelTabStatusDot';
+import { tabShowsPaused } from '../../utils/tabPaused';
 import type { PanelTabPresentationResolver } from '../../types/panelComponents';
 import { getPanelTabId, getPanelTabPanelId } from './panelTabIds';
 import { getPanelIcon } from './panelIcon';
@@ -481,7 +482,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                 isPaused && !isActive && "opacity-60",
               )}>
                 {(panel.type === 'terminal' || panel.type === 'chat') && (
-                  <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} paused={isPaused} />
+                  <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} paused={tabShowsPaused(panel)} />
                 )}
                 {presentation?.icon ?? getPanelIcon(panel.type, panel, compact ? 'w-3.5 h-3.5 flex-shrink-0' : 'w-4 h-4 flex-shrink-0')}
                 {/* Bold marks the primary group's strip: the group the top
