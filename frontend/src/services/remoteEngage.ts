@@ -285,6 +285,11 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
   boxRestores = 0;
   useRemoteEngage.setState({ engaging: { ...target, cause, panelId, switched: false }, failure: undefined });
   switchMark('engage:start', { machineId: target.machineId, sessionId: target.sessionId, status: cause });
+  // A dial that hangs (a dead link) says so: nothing is sent until the machine answers (QA 1781 F-1).
+  liveWait = setTimeout(() => {
+    liveWait = undefined;
+    if (ticket === engageTicket) useRemoteEngage.setState(state => (state.engaging && !state.engaging.switched ? { engaging: { ...state.engaging, waiting: true } } : {}));
+  }, LIVE_VIEW_WAIT_MS);
   const opening = openOnMachine(target.machineId, { kind: 'session', id: target.sessionId, name: sessionName(target) }, { quiet: cause === 'rest', reportErrors: false });
   notifySwitch(cause);
   void opening.then(outcome => {
@@ -318,7 +323,7 @@ function switched(target: EngageTarget, engagedPanelId: string | undefined): voi
   // The newest few only: the chat mounts there with its whole Session's workspace under the held
   // view, and drawing more is a long task while the switch finishes (D-6); its own read brings the rest.
   if (chat && liveClient) chatTabViewer(liveClient, chat.panelId).prime(firstPaintWindow(chat, LIVE_FIRST_PAINT_MESSAGES), performance.now());
-  useRemoteEngage.setState(state => (state.engaging ? { engaging: { ...state.engaging, panelId, switched: true } } : {}));
+  useRemoteEngage.setState(state => (state.engaging ? { engaging: { ...state.engaging, panelId, switched: true, waiting: false } } : {}));
   switchMark('engage:switched', { machineId: target.machineId, sessionId: target.sessionId });
   if (panelId && shownMeanwhile.has(panelId)) {
     land();

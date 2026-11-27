@@ -431,3 +431,19 @@ describe('a link cut as an engage starts never loses what was typed (QA 1781 F-1
     expect(taken).toEqual([expect.objectContaining({ text: 'ship it', send: true })]);
   });
 });
+
+describe('a dial that hangs on a dead link says it is pending (QA 1781 F-1)', () => {
+  it('marks the hold not sent yet once the dial has taken LIVE_VIEW_WAIT_MS, and clears it when the switch lands', async () => {
+    const switched = deferred<MachineSelectOutcome>();
+    const { engage, state } = await setup(() => switched.promise);
+    engage.holdRemoteText(target, 'ship it');
+    engage.engageRemoteSession(target, 'enter', { send: true });
+    await vi.advanceTimersByTimeAsync(engage.LIVE_VIEW_WAIT_MS - 10);
+    expect(state().engaging?.waiting).toBeFalsy();
+    await vi.advanceTimersByTimeAsync(20);
+    expect(state().engaging).toMatchObject({ switched: false, waiting: true });
+    switched.resolve({ ok: true });
+    await vi.waitFor(() => expect(state().engaging?.switched).toBe(true));
+    expect(state().engaging?.waiting).toBeFalsy();
+  });
+});
