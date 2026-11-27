@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import { createHash, randomUUID } from 'crypto';
+import { mkdirSync, watch, type FSWatcher } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
@@ -62,7 +63,9 @@ const SECTIONS = ['profiles', 'agents', 'skills', 'instructions', 'references'];
 const PANE_FILE = /^covers\/[a-z][a-z0-9_-]*\.(html|md)$/;
 /** Written by a bundled reinstall while it runs (bundledAgentFarm.ts); a failed one is cleared on rollback. */
 const INSTALLING_FILE = 'pane-installing.json';
-const receiptSchema = boundary.object({ name: boundary.string, layout: boundary.optional(boundary.number) });
+/** The folders of `<PANE_DIR>/agent-farm` a change outside Pane shows in: receipts, plugins and display overrides. */
+const WATCHED = new Set(['.plugins', 'plugins', 'profile-overrides']);
+const receiptSchema =boundary.object({ name: boundary.string, layout: boundary.optional(boundary.number) });
 
 /** An error that means the path isn't there, as opposed to a read that failed. */
 function notThere(error: NodeJS.ErrnoException | null | undefined): boolean {
@@ -478,6 +481,32 @@ export class ProfileSyncHost {
       if (this.on()) await this.refreshUnlocked(true, new Set([plugin]));
       return result;
     });
+  }
+
+  /**
+   * Calls `onChange` when a plugin, its Agent Farm receipt or a display override changes here, so a
+   * change made outside Pane (`agent-farm plugin install` in a terminal, an agent editing a plugin's
+   * files) is recorded and synced while Pane runs, not only at its next start (T-63 build 11). Pane's
+   * own changes call it too; the coordinator's debounce makes a burst one sync. Returns a stop.
+   */
+  watchOutside(onChange: () => void): () => void {
+    let watcher: FSWatcher;
+    try {
+      mkdirSync(this.configRoot, { recursive: true });
+      watcher = watch(this.configRoot, { recursive: true, persistent: false }, (_event, file) => {
+        // drafts/ (staging, transfers) and sync.json are Pane's own working files, not a plugin.
+        const top = file ? String(file).split(/[\\/]/)[0] : undefined;
+        if (top === undefined || WATCHED.has(top)) onChange();
+      });
+    } catch (error) {
+      console.warn(`[ProfileSync] Pane can't watch ${this.configRoot} (${reasonOf(error)}), so profiles changed outside Pane sync at its next start or save.`);
+      return () => undefined;
+    }
+    watcher.on('error', error => {
+      console.warn(`[ProfileSync] Pane stopped watching ${this.configRoot} (${reasonOf(error)}), so profiles changed outside Pane sync at its next start or save.`);
+      watcher.close();
+    });
+    return () => watcher.close();
   }
 
   /** What this computer last knew of its other computers (desktop only). */
