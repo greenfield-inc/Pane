@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { gotoApp } from './electronApiMock';
 import { dismissStartupDialogs, installSessionsFixture, paneFixture, sessionFixture } from './orchestrationSessionsFixture';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
@@ -887,9 +887,49 @@ test('Markdown reads at the chat\'s text size in a reading column (build 8 feedb
   expect(read.chatLine).toBe('1.5');
   expect(read.fontSize).toBe(read.chatSize);
   expect(read.lineHeight).toBeCloseTo(Number(read.chatLine), 2);
-  // A reading column of 36rem, about 75 characters a line, on a 1440 px window.
-  expect(read.width).toBeLessThanOrEqual(36 * 16);
-  expect(read.width).toBeGreaterThan(500);
+  // The reading column caps at 56rem; a 1440 px window leaves less room than that, so it fills it.
+  expect(read.width).toBeLessThanOrEqual(56 * 16);
+  expect(read.width).toBeGreaterThan(36 * 16);
+});
+
+test('Markdown, a cover file and a generated cover share one centred 56rem column, the width of an HTML plan (build 9 feedback 2 and 3)', async ({ page }) => {
+  await openProfilesTab(page);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  // Its width, and how far it sits from centre, inside the pane that holds it.
+  const column = (locator: Locator, pane: Locator) => Promise.all([locator.boundingBox(), pane.boundingBox()]).then(([box, outer]) => {
+    if (!box || !outer) throw new Error('The column is not on screen.');
+    return { width: box.width, offCentre: Math.abs((box.x + box.width / 2) - (outer.x + outer.width / 2)) };
+  });
+  const filePane = page.getByTestId('profiles-editor-pane');
+
+  // A cover file: the frame leaves the page's own 32 px margins, so its text runs 56rem wide.
+  await page.getByTestId('profile-row-greenfield-orchestrator').click();
+  const frame = page.getByTestId('profiles-html-preview');
+  await expect(page.frameLocator('[data-testid="profiles-html-preview"]').getByRole('heading', { name: 'Greenfield orchestrator' })).toBeVisible();
+  const frameBox = await column(frame, filePane);
+  expect(frameBox.width).toBeCloseTo(60 * 16, 0);
+  expect(frameBox.offCentre).toBeLessThan(2);
+  const textWidth = await frame.evaluate(element => {
+    // SAFETY: the locator is the preview's <iframe>.
+    const heading = (element as HTMLIFrameElement).contentDocument?.querySelector('h1');
+    return heading?.getBoundingClientRect().width ?? 0;
+  });
+  expect(textWidth).toBeCloseTo(56 * 16, 0);
+
+  // A Markdown file.
+  const tree = page.getByRole('tree', { name: 'greenfield/orchestrator files' });
+  await tree.getByTestId('profiles-tree-orchestrator/instructions').click();
+  await tree.getByTestId('profiles-file-instructions/standing-rules.md').click();
+  const markdown = await column(page.getByTestId('profiles-markdown-preview').locator('.markdown-preview').first(), filePane);
+  expect(markdown.width).toBeCloseTo(56 * 16, 0);
+  expect(markdown.offCentre).toBeLessThan(2);
+
+  // The cover Pane makes for a profile without a cover file.
+  await page.getByTestId('profiles-back').click();
+  await page.getByTestId('profile-row-greenfield-business').click();
+  const generated = await column(page.getByTestId('profiles-cover-column'), filePane);
+  expect(generated.width).toBeCloseTo(56 * 16, 0);
+  expect(generated.offCentre).toBeLessThan(2);
 });
 
 test('⌘F finds in a previewed file and in Edit, with next and previous (build 8 feedback 3)', async ({ page }) => {
@@ -969,5 +1009,27 @@ for (const theme of ['light', 'dark']) {
     await tree.getByTestId('profiles-tree-orchestrator/instructions').click();
     await page.evaluate(() => { document.documentElement.style.zoom = '1.3'; });
     await shot(page, `viewer-markdown-larger-${theme}`);
+  });
+}
+
+// PANE_PROFILES_SHOTS=<dir> saves build 9's reading column on a 1920 px window, light and dark: a Markdown
+// file, the profile's cover file and a generated cover. It uses only what build 8 has too, for before/after.
+for (const theme of ['light', 'dark']) {
+  test(`reading column screenshots, ${theme}`, async ({ page }) => {
+    test.skip(!shotsDir, 'set PANE_PROFILES_SHOTS to save screenshots');
+    await openProfilesTab(page, { theme });
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.getByTestId('profile-row-greenfield-orchestrator').click();
+    await expect(page.frameLocator('[data-testid="profiles-html-preview"]').getByRole('heading', { name: 'Greenfield orchestrator' })).toBeVisible();
+    await shot(page, `r5-cover-file-${theme}`);
+    const tree = page.getByRole('tree', { name: 'greenfield/orchestrator files' });
+    await tree.getByTestId('profiles-tree-orchestrator/instructions').click();
+    await tree.getByTestId('profiles-file-instructions/standing-rules.md').click();
+    await expect(page.getByTestId('profiles-markdown-preview').getByRole('heading', { name: 'Standing rules' })).toBeVisible();
+    await shot(page, `r5-markdown-${theme}`);
+    await page.getByTestId('profiles-back').click();
+    await page.getByTestId('profile-row-greenfield-business').click();
+    await expect(page.getByTestId('profiles-generated-cover')).toBeVisible();
+    await shot(page, `r5-generated-cover-${theme}`);
   });
 }

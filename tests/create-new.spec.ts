@@ -554,6 +554,31 @@ test('To lists profiles by title and description, light and dark', async ({ page
   }
 });
 
+test('New Session: To and Name sit 8 px apart, closer than the message box below them (build 9 feedback 5)', async ({ page }) => {
+  await openApp(page);
+  await page.getByTestId('new-orchestration-session').click();
+  // The To box, around its input.
+  const toBox = await to(page).locator('..').boundingBox();
+  const name = await dialog(page).getByLabel('Name', { exact: true }).boundingBox();
+  const message = await dialog(page).getByLabel('Message', { exact: true }).locator('..').boundingBox();
+  if (!toBox || !name || !message) throw new Error('The fields are not on screen.');
+  // 8 px between the two header fields (was 12), 12 px from Name down to the message box.
+  expect(Math.round(name.y - (toBox.y + toBox.height))).toBe(8);
+  expect(Math.round(message.y - (name.y + name.height))).toBe(12);
+});
+
+// PANE_PROFILES_SHOTS=<dir> saves the New Session dialog, light and dark (build 9 feedback 5).
+test('New Session dialog screenshots, light and dark', async ({ page }) => {
+  const folder = process.env.PANE_PROFILES_SHOTS;
+  test.skip(!folder, 'Set PANE_PROFILES_SHOTS to save the screenshots.');
+  for (const theme of ['light', 'dark']) {
+    await openApp(page, { initialConfig: { theme } });
+    await page.getByTestId('new-orchestration-session').click();
+    await page.waitForTimeout(400);
+    await dialog(page).screenshot({ path: `${folder}/r5-new-session-${theme}.png` });
+  }
+});
+
 // PANE_PROFILES_SHOTS=<dir> saves More options, light and dark, scrolled to its launch fields (build 8: no resume options).
 test('More options screenshots, light and dark', async ({ page }) => {
   const folder = process.env.PANE_PROFILES_SHOTS;

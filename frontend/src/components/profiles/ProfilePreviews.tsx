@@ -19,6 +19,12 @@ import { LINK_MODE_TEXT, coverFacts, sandboxedHtml, splitFrontMatter, subagentLa
  * key/value metadata, and the cover Pane makes for a profile or subagent without a cover file.
  */
 
+/**
+ * The reading column a Markdown file, an HTML page and a cover sit in: centred and 56rem (896 px)
+ * wide, the width Pane's HTML plans render at (build 9 feedback 2 and 3).
+ */
+const READING_COLUMN = 'mx-auto w-full max-w-[56rem]';
+
 /** Pane's theme colours as a page's base style, read from the window's tokens. */
 function themeCss(): string {
   const style = getComputedStyle(document.documentElement);
@@ -33,7 +39,12 @@ function themeCss(): string {
  */
 export function HtmlPage({ html, title, subagent }: { html: string; title: string; subagent?: ProfileSubagentNode }) {
   const page = useMemo(() => sandboxedHtml(html, themeCss()), [html]);
-  const frame = <iframe title={title} sandbox={SUMMARY_FRAME_SANDBOX} srcDoc={page} {...{ [FIND_FRAME_ATTRIBUTE]: '' }} className="min-h-0 w-full flex-1 border-0" data-testid="profiles-html-preview" />;
+  // The frame is the reading column plus the page's own 32 px side margins, so its text runs 56rem wide.
+  const frame = (
+    <div className="flex min-h-0 flex-1 justify-center">
+      <iframe title={title} sandbox={SUMMARY_FRAME_SANDBOX} srcDoc={page} {...{ [FIND_FRAME_ATTRIBUTE]: '' }} className="min-h-0 w-full max-w-[60rem] border-0" data-testid="profiles-html-preview" />
+    </div>
+  );
   if (!subagent) return frame;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -135,9 +146,9 @@ export function MarkdownWithMeta({ source }: { source: string }) {
   const { frontMatter, body } = useMemo(() => splitFrontMatter(source), [source]);
   const parsed = useParsedYaml(frontMatter);
   return (
-    // The chat's message text (build 8 feedback 1) in a reading column of about 75 characters (feedback 2).
+    // The chat's message text (build 8 feedback 1) in the reading column HTML plans use (build 9 feedback 2).
     <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6" data-testid="profiles-markdown-preview">
-      <div className="mx-auto w-full max-w-[36rem] [&_.markdown-preview]:px-0 [&_.markdown-preview]:text-[length:var(--chat-message-font-size)] [&_.markdown-preview]:leading-[var(--chat-message-line-height)]">
+      <div className={`${READING_COLUMN} [&_.markdown-preview]:px-0 [&_.markdown-preview]:text-[length:var(--chat-message-font-size)] [&_.markdown-preview]:leading-[var(--chat-message-line-height)]`}>
       {frontMatter !== null && (
         <div className="mb-4 rounded-lg border border-border-primary" data-testid="profiles-front-matter">
           <div className="border-b border-border-primary px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary">Metadata</div>
@@ -238,6 +249,7 @@ export function GeneratedCover({ plugin, profile, subagent, onOpenSubagent, onOp
   const runs = [variants ?? (harness ? agentLabel(harness) : undefined), model].filter(Boolean).join(' · ');
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6" data-testid="profiles-generated-cover">
+      <div className={READING_COLUMN} data-testid="profiles-cover-column">
       <div className="flex items-center gap-4">
         <ProfileAvatar profileRef={subagent ? subagent.profile : profile.ref} agent={harness} size={56} />
         <div className="min-w-0">
@@ -272,6 +284,7 @@ export function GeneratedCover({ plugin, profile, subagent, onOpenSubagent, onOp
           <div className="flex flex-wrap gap-1.5">{facts.references.map(item => <Chip key={item}>{item}</Chip>)}</div>
         </CoverSection>
       )}
+      </div>
     </div>
   );
 }

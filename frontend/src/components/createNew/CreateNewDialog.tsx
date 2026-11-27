@@ -499,6 +499,8 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
 
   const sessionMain = (
     <ModalBody className="space-y-3">
+      {/* To and Name are one header, a field-row gap apart (build 9 feedback 5); the message sits below them. */}
+      <div className="space-y-2" data-testid="create-new-header-fields">
       <div className="flex items-center gap-3">
         <span className="w-14 flex-none text-sm text-text-secondary" aria-hidden="true">To</span>
         <ToField ref={toRef} choices={choices} value={to} disabled={busy} profilesStatus={profilesStatus} onOpenChange={setToListOpen}
@@ -511,6 +513,7 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
           onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); messageRef.current?.focus(); } }}
           placeholder="Optional: named from your first message"
           className="h-9 min-w-0 flex-1 rounded-md border border-border-primary bg-bg-primary px-2.5 text-[13.5px] text-text-primary placeholder:text-text-muted focus:border-interactive focus:outline-none focus:ring-2 focus:ring-interactive" />
+      </div>
       </div>
       <div className={cn('rounded-lg border border-border-primary bg-bg-primary transition-colors focus-within:border-interactive focus-within:ring-2 focus-within:ring-interactive', dragging && 'border-interactive')}>
         <label htmlFor={messageId} className="sr-only">Message</label>
