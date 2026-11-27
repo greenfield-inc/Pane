@@ -1406,7 +1406,11 @@ export class RemotePaneClientController extends EventEmitter {
   /** Bumped by each switch the user starts and by a cancel; a switch that sees it change stops before disconnecting. */
   private activationGeneration = 0;
   /** Rejects the probes of the switch in flight, while it can still be stopped; null otherwise. */
-  private cancelPending: { profileId: string; cancel: () => void } | null = null;
+  private cancelPending: { profileId: string; cancel: () => void; beforeCommit?: boolean } | null = null;
+  /** A switch that was ready and then cancelled before its caller committed it (QA 1781 F-3). */
+  private cancelledBeforeCommit: string | null = null;
+  /** Shows the staged connection as the window's, once its caller commits the switch; null otherwise. */
+  private stagedPromotion: (() => void) | null = null;
   /** The connection a switch dials while the window keeps its own (`keepCurrentUntilReady`); null otherwise. */
   private stagedClient: RemotePaneClient | null = null;
   /** The SSH host and command behind each of the current check's run-on-host fixes. */
@@ -1680,7 +1684,14 @@ export class RemotePaneClientController extends EventEmitter {
         await dial({ retryOnInitialFailure: false, resolveOnReady: true });
       }
       if (generation !== this.activationGeneration) throw switchCancelled(profile);
-      if (this.cancelPending === dialing) this.cancelPending = null;
+      if (this.cancelPending === dialing) {
+        // Ready, but not shown until the caller commits it (its config written): an arrow until then
+        // still stops it, so the window stays where the person is (QA 1781 F-3).
+        this.cancelPending = this.activationCommitted ? { profileId: profile.id, beforeCommit: true, cancel: () => {
+          this.dropStagedClient();
+          this.cancelledBeforeCommit = profile.id;
+        } } : null;
+      }
       releaseSync();
       return this.getConnectionState();
     } catch (error) {
@@ -1695,8 +1706,24 @@ export class RemotePaneClientController extends EventEmitter {
 
   /** Called only after the selected host's config is committed. */
   commitActivation(): void {
+    // Committed: a cancel can no longer stop it (review 1781 R2-SF-2).
+    if (this.cancelPending?.beforeCommit) this.cancelPending = null;
+    const promote = this.stagedPromotion;
+    this.stagedPromotion = null;
+    promote?.();
     this.activationCommitted?.();
     this.activationCommitted = null;
+  }
+
+  /**
+   * Whether the switch to `profileId` was cancelled after its dial was ready and before it was
+   * committed (QA 1781 F-3). Its caller then writes the old machine back instead of committing; the
+   * window never showed the new one. Answers once.
+   */
+  takeCancelBeforeCommit(profileId: string): boolean {
+    if (this.cancelledBeforeCommit !== profileId) return false;
+    this.cancelledBeforeCommit = null;
+    return true;
   }
 
   acknowledgeRestore(rendererId: number, restoreId: number, error?: string): void {
@@ -2102,7 +2129,7 @@ export class RemotePaneClientController extends EventEmitter {
         retryOnInitialFailure: options.retryOnInitialFailure,
         resolveOnReady: options.resolveOnReady,
       });
-      if (staged) {
+      const promote = async (): Promise<void> => {
         // Dropped meanwhile (a cancel, or a newer switch): the window stays as it is.
         if (this.stagedClient !== client) { promoted(); await client.disconnect(); return; }
         this.stagedClient = null;
@@ -2121,6 +2148,15 @@ export class RemotePaneClientController extends EventEmitter {
         promoted();
         await tunnel?.close();
         await previous?.disconnect();
+      };
+      if (staged) {
+        // A caller that commits the switch shows it then, so a cancel until then still leaves the
+        // window where it is (QA 1781 F-3); with nobody to commit it, it shows now.
+        if (this.activationCommitted) {
+          this.stagedPromotion = () => { void promote().catch(error => console.warn('[Pane remote daemon] Could not close the old connection after a switch:', error)); };
+          return;
+        }
+        await promote();
       }
     } catch (error) {
       if (staged) {
@@ -2270,6 +2306,7 @@ export class RemotePaneClientController extends EventEmitter {
   private dropStagedClient(): void {
     const staged = this.stagedClient;
     this.stagedClient = null;
+    this.stagedPromotion = null;
     if (staged) void staged.disconnect();
   }
 

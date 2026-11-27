@@ -1138,6 +1138,24 @@ describe('remote daemon IPC', () => {
     expect(saved?.host.config).toMatchObject({ enabled: true, listenPort: 42199 });
   });
 
+  it('a switch cancelled after its dial was ready, before it commits, keeps the machine the window shows and commits nothing (QA 1781 F-3)', async () => {
+    const ipcMain = createIpcMainStub();
+    const configManager = createConfigManagerStub();
+    registerTestRemoteDaemonHandlers(ipcMain, { configManager });
+    const upsertProfile = ipcMain.handlers.get('remote-daemon:upsert-connection-profile');
+    const updateClientState = ipcMain.handlers.get('remote-daemon:update-client-state');
+    vi.spyOn(remotePaneClientController, 'activateProfile').mockResolvedValue({ mode: 'remote', status: 'restoring', activeProfileId: 'profile-1', activeProfileLabel: 'Mac mini', activeBaseUrl: 'http://127.0.0.1:42137', lastError: null });
+    const commit = vi.spyOn(remotePaneClientController, 'commitActivation').mockImplementation(() => undefined);
+    // An arrow came while the config was being written.
+    let writes = 0;
+    vi.spyOn(remotePaneClientController, 'takeCancelBeforeCommit').mockImplementation(() => { writes += 1; return writes === 2; });
+    await upsertProfile?.({}, { id: 'profile-1', label: 'Mac mini', baseUrl: 'http://127.0.0.1:42137', token: 'secret-token', transport: 'http+sse' });
+
+    await expect(updateClientState?.({}, { activeProfileId: 'profile-1', mode: 'remote' })).resolves.toMatchObject({ success: false, error: expect.stringContaining('cancelled') });
+    expect(configManager.getConfig().remoteDaemon?.client).toMatchObject({ mode: 'local', activeProfileId: null });
+    expect(commit).not.toHaveBeenCalled();
+  });
+
   it('keeps the saved client mode local when remote activation fails', async () => {
     const ipcMain = createIpcMainStub();
     const configManager = createConfigManagerStub();

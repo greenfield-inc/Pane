@@ -133,8 +133,22 @@ export function registerRemoteDaemonHandlers(
       const current = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
       const result = await transition(current);
       const next = normalizeRemoteDaemonConfig(result.next(getRemoteDaemonConfig(configManager.getConfig().remoteDaemon)));
+      // A switch whose dial was ready, cancelled before it was committed (an arrow, QA 1781 F-3): the
+      // window never showed the new machine, so the machine it shows is written back instead.
+      const switchedTo = next.client.mode === 'remote' && result.resyncRenderer ? next.client.activeProfileId : null;
+      const cancelledBeforeCommit = (): boolean => switchedTo !== null && remotePaneClientController.takeCancelBeforeCommit(switchedTo);
+      const stayPut = (latest: RemoteDaemonConfig): RemoteDaemonConfig => normalizeRemoteDaemonConfig({ ...latest, client: { ...latest.client, mode: current.client.mode, activeProfileId: current.client.activeProfileId } });
+      const refuse = (): PaneError => new PaneError('ERR_REMOTE_SWITCH_CANCELLED', 'The switch was cancelled before it finished.', 'Nothing to do: the window stays on the machine it shows.');
 
+      if (cancelledBeforeCommit()) {
+        await configManager.updateConfig({ remoteDaemon: stayPut(next) });
+        throw refuse();
+      }
       await configManager.updateConfig({ remoteDaemon: next });
+      if (cancelledBeforeCommit()) {
+        await configManager.updateConfig({ remoteDaemon: stayPut(getRemoteDaemonConfig(configManager.getConfig().remoteDaemon)) });
+        throw refuse();
+      }
       if (result.resyncRenderer) {
         if (next.client.mode === 'remote') remotePaneClientController.commitActivation();
         else requestRendererRemoteResync();
