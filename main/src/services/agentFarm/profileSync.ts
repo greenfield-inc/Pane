@@ -65,7 +65,7 @@ const PANE_FILE = /^covers\/[a-z][a-z0-9_-]*\.(html|md)$/;
 const INSTALLING_FILE = 'pane-installing.json';
 /** The folders of `<PANE_DIR>/agent-farm` a change outside Pane shows in: receipts, plugins and display overrides. */
 const WATCHED = new Set(['.plugins', 'plugins', 'profile-overrides']);
-const receiptSchema =boundary.object({ name: boundary.string, layout: boundary.optional(boundary.number) });
+const receiptSchema = boundary.object({ name: boundary.string, layout: boundary.optional(boundary.number) });
 
 /** An error that means the path isn't there, as opposed to a read that failed. */
 function notThere(error: NodeJS.ErrnoException | null | undefined): boolean {
