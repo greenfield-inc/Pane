@@ -4617,6 +4617,38 @@ describe('runpane IPC handlers', () => {
     });
   });
 
+  describe('runpane:panes:resume with chat tabs (T-134)', () => {
+    const chatTab = (id: string, paused: { at: string; by: 'auto' | 'move'; machine?: string }): ToolPanel => ({
+      ...terminalPanel, id, type: 'chat', title: 'Claude',
+      state: { isActive: false, customState: { agent: 'claude', launch: { kind: 'agent' }, cwd: session.worktreePath, status: 'stopped', paused } },
+    });
+
+    it('restarts a chat that idle auto-pause paused, and reports one a move holds as held without touching it', async () => {
+      const autoPaused = chatTab('chat-auto', { at: '2026-11-26T22:00:00.000Z', by: 'auto' });
+      const moveHeld = chatTab('chat-move', { at: '2026-11-26T22:00:00.000Z', by: 'move', machine: 'build-box' });
+      vi.mocked(panelManager.getPanel).mockImplementation((panelId: string) => [autoPaused, moveHeld].find(panel => panel.id === panelId));
+      vi.mocked(panelManager.getPanelsForSession).mockImplementation((sessionId: string) => (sessionId === session.id ? [autoPaused, moveHeld] : []));
+      const manager = getChatTabManager();
+      const running = vi.spyOn(manager, 'isRunning').mockReturnValue(false);
+      const view = vi.spyOn(manager, 'view').mockImplementation(panelId => ({ panelId, agent: 'claude', status: 'idle', permissions: [], questions: [], queue: [], messageCount: 0 }));
+      const ensure = vi.spyOn(manager, 'ensure').mockResolvedValue(undefined);
+      const restart = vi.spyOn(manager, 'restart').mockResolvedValue(undefined);
+      try {
+        const result = await createRegistry(createServices()).invoke('runpane:panes:resume', [{ paneId: session.id }]);
+
+        expect(ensure.mock.calls.map(([panelId]) => panelId)).toEqual(['chat-auto']);
+        expect(restart).not.toHaveBeenCalled();
+        expect(result).toMatchObject({ ok: false, action: 'resumed', panelIds: ['chat-auto'] });
+        expect(result.failed).toEqual([{ panelId: 'chat-move', error: expect.stringContaining('moving to build-box') }]);
+      } finally {
+        running.mockRestore();
+        view.mockRestore();
+        ensure.mockRestore();
+        restart.mockRestore();
+      }
+    });
+  });
+
   describe('runpane:panels:resume', () => {
     it('restarts a stopped panel in the same panel without focusing it', async () => {
       vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(false);

@@ -986,16 +986,17 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   /**
-   * The Session's own Pane's paused mark. Its agent in a chat tab counts: auto-pause and a move
-   * mark only the chat tab's state (T-134 QA F-1), so a chat-only Pane is paused when its chat is.
-   * Terminal tabs beside the chat must be paused too; the later mark of the two is the Pane's.
+   * The Session's own Pane's paused mark. Its terminal tabs' mark counts as before, even while the
+   * chat runs (`sessions pause` leaves chats running). Its agent's chat tab counts too: auto-pause
+   * and a move mark only the chat tab's state (T-134 QA F-1), so a chat-only Pane is paused when its
+   * chat is; with terminal tabs beside it, those must be paused too, and the later mark is the Pane's.
    */
   private ownPanePausedMark(record: OrchestrationSessionRecord): TerminalPausedMark | undefined {
     const paneMark = this.sessionManager.getSession(record.internalSessionId)?.paused;
     const agent = panelManager.getPanel(record.panelIds[record.agent]);
     if (agent?.type !== 'chat') return paneMark;
     const chatMark = decodeChatPanelState(agent.state.customState)?.paused;
-    if (!chatMark) return undefined;
+    if (!chatMark) return paneMark;
     const hasTerminals = databaseService.getPanelTypesForSession(record.internalSessionId).some(panel => panel.type === 'terminal');
     if (!hasTerminals) return chatMark;
     if (!paneMark) return undefined;
