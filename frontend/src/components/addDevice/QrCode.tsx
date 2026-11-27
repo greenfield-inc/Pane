@@ -2,10 +2,17 @@ import { useMemo } from 'react';
 import { create as createQr } from 'qrcode';
 import { Button } from '../ui/Button';
 
-/** A URL as a QR code, drawn as one SVG path. */
+/** The spec's quiet zone: phone cameras find a code faster with 4 blank modules around it. */
+const QUIET_ZONE = 4;
+
+/**
+ * A URL as a QR code, drawn as one SVG path. Level L: a code on a screen isn't scuffed or folded,
+ * and the lower level keeps a pairing link (about 120 bytes) at version 6 instead of 7, so each
+ * module is bigger and a phone reads it on a 1x monitor.
+ */
 export function QrCode({ url, label }: { url: string; label: string }) {
   const { size, path } = useMemo(() => {
-    const { modules } = createQr(url, { errorCorrectionLevel: 'M' });
+    const { modules } = createQr(url, { errorCorrectionLevel: 'L' });
     let d = '';
     for (let row = 0; row < modules.size; row += 1) {
       for (let col = 0; col < modules.size; col += 1) {
@@ -19,7 +26,7 @@ export function QrCode({ url, label }: { url: string; label: string }) {
       role="img"
       aria-label={label}
       data-url={url}
-      viewBox={`-2 -2 ${size + 4} ${size + 4}`}
+      viewBox={`${-QUIET_ZONE} ${-QUIET_ZONE} ${size + QUIET_ZONE * 2} ${size + QUIET_ZONE * 2}`}
       className="h-full w-full [shape-rendering:crispEdges]"
     >
       <path d={path} fill="currentColor" />
@@ -27,8 +34,12 @@ export function QrCode({ url, label }: { url: string; label: string }) {
   );
 }
 
-/** Cameras read dark modules on a light ground, so a code keeps these colors in every theme. */
-export const QR_PAPER = 'rounded-xl border border-border-secondary bg-white p-2 text-black';
+/** Cameras read dark modules on a light ground, so a code keeps these colors in every theme. The quiet zone is in the code itself. */
+export const QR_PAPER = 'rounded-xl border border-border-secondary bg-white text-black';
+
+/** A code's box, and the width of the column it sits in: big enough that a phone reads a pairing link on a 1x monitor. */
+export const QR_BOX = 'h-[264px] w-[264px]';
+export const QR_COLUMN = 'w-[264px]';
 
 /** For EU stores, under every App Store line here; remove it, and `EU_LINE` in `relay/src/api.rs`, when the app is on those stores. */
 function TestFlightLine() {
