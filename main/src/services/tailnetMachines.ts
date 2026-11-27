@@ -273,6 +273,23 @@ export async function lookupTailnetMachine(
   return { kind: 'found', peer: { dnsName: peer.dnsName, ip: peer.ip, online: peer.online, os: peer.os } };
 }
 
+/**
+ * Whether a saved machine's Tailscale owner is this computer's own Tailscale login (D-500), as this
+ * computer's Tailscale reports it. False when the machine is on another tailnet, missing from this
+ * one, or owned by another login (tagged devices have no owner login, so they are never listed);
+ * undefined when Tailscale here can't say (not installed, signed out, or unreadable), so a mark
+ * made earlier is kept rather than cleared.
+ */
+export async function tailnetLoginMatches(
+  machine: { name: string; domain: string },
+  readStatus: () => Promise<string | null>,
+): Promise<boolean | undefined> {
+  const tailnet = readTailnetPeers(await readStatus());
+  if (!tailnet.ok) return undefined;
+  if (tailnet.domain.toLowerCase() !== machine.domain.toLowerCase()) return false;
+  return tailnet.peers.find((candidate) => candidate.name.toLowerCase() === machine.name.toLowerCase())?.mine ?? false;
+}
+
 /** A machine by name on the current tailnet, as a candidate to call, with whether it is on this machine's own login. */
 export async function locateTailnetCandidate(name: string, readStatus: () => Promise<string | null>): Promise<{ candidate: TailnetCandidate; domain: string; mine: boolean; online: boolean }> {
   const tailnet = readTailnetPeers(await readStatus());

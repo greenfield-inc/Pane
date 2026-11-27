@@ -143,6 +143,16 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
     }
   };
 
+  const setMine = async (computerId: string, mine: boolean | null): Promise<string | null> => {
+    try {
+      await window.electronAPI.invoke('computers:set-mine', { computerId, mine });
+      await fetchConfig();
+      return null;
+    } catch (cause) {
+      return `This is my computer was not saved: ${ipcErrorMessage(cause, "Pane couldn't write its settings")}. Try again.`;
+    }
+  };
+
   const unlink = (machine: MachineEntry) => {
     const computer = machine.computer;
     if (!computer) return;
@@ -244,6 +254,7 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
                     onLink={() => openAddDevice('computer', { computerId: machine.computer?.id })}
                     onAddRoute={() => openAddDevice('computer', { computerId: machine.computer?.id })}
                     onReorder={(routeIds) => (machine.computer ? reorder(machine.computer.id, routeIds) : Promise.resolve(null))}
+                    onSetMine={(mine) => (machine.computer ? setMine(machine.computer.id, mine) : Promise.resolve(null))}
                     onUnlink={() => unlink(machine)}
                     onDetails={() => onOpenMachine(machine.id)}
                     localDetail={machine.kind === 'local'

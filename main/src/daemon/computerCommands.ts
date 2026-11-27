@@ -4,7 +4,7 @@ import { isRemotePaneCommand } from './commandRegistry';
 import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
-import type { ComputerOs, ComputerRoutesReport, RemoteComputer } from '../../../shared/types/remoteComputers';
+import { isWatchedComputer, type ComputerOs, type ComputerRoutesReport, type RemoteComputer } from '../../../shared/types/remoteComputers';
 import type { RelayComputer } from '../../../shared/types/relay';
 import type { AppConfig } from '../types/config';
 import { stopSshRoute } from './sshRoute';
@@ -26,6 +26,7 @@ const COMPUTER_COMMANDS = {
   removeRoute: 'computers:remove-route',
   routesReport: 'computers:routes-report',
   setPublicUrl: 'computers:set-public-url',
+  setMine: 'computers:set-mine',
 } as const;
 
 let currentSources: { config: ComputerCommandsConfig; sources: RoutesReportSources } | null = null;
@@ -139,6 +140,21 @@ export function registerComputerCommands(registry: PaneCommandRegistry, config: 
     await updateComputers((list) => (updated
       ? list.map((candidate) => (candidate.id === computerId ? updated : candidate))
       : list.filter((candidate) => candidate.id !== computerId)));
+    return updated;
+  });
+
+  // "This is my computer" (D-500): true or false wins over the Tailscale check; null goes back to it.
+  registry.register(COMPUTER_COMMANDS.setMine, async (request: PaneCommandValue) => {
+    onThisComputerOnly();
+    const { computerId, mine } = decodeBoundary(request, boundary.object({ computerId: boundary.nonEmptyString, mine: boundary.nullable(boundary.boolean) }));
+    const computer = find(computerId);
+    if (isWatchedComputer(computer)) {
+      throw new PaneError('ERR_COMPUTER_READ_ONLY', `This computer only watches ${computer.label}, so it can't be marked as yours and nothing changed.`, `Ask ${computer.label}'s owner for full access first.`);
+    }
+    const updated: RemoteComputer = { ...computer };
+    if (mine === null) delete updated.mineOverride;
+    else updated.mineOverride = mine;
+    await updateComputers((list) => list.map((candidate) => (candidate.id === computerId ? updated : candidate)));
     return updated;
   });
 

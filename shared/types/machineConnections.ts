@@ -33,6 +33,12 @@ export interface MachineState {
   workspaceEntries?: boolean;
   /** "read" when this computer only watches the machine (its saved token says so); absent for full access. */
   access?: ReadOnlyMark;
+  /**
+   * True when the saved machine is the person's own (D-500): its "This is my computer" switch is on,
+   * or, with the switch never set, its Tailscale owner is this computer's Tailscale login. Only these
+   * machines are mirrored. Absent for this computer and for every other machine.
+   */
+  mine?: true;
 }
 
 /** A saved machine's round trip: `ms` null when it did not answer; `routeId` the route it was measured over (`ComputerRoute.id`). */

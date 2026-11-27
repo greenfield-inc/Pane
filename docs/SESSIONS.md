@@ -1075,16 +1075,34 @@ starts no agent. Only the owner's own devices get an answer; teammates and Read
 only devices are refused with `SESSION_SNAPSHOTS_OWNER_ONLY`.
 
 The desktop keeps a mirror of these snapshots for each of the owner's other
-machines (`main/src/services/machineMirror.ts`). It is saved in
-`<PANE_DIR>/machine-mirror/<machine id>.json` (folder 0700, file 0600, at most
-one save every 2 s). It reads `snapshots` once when a machine connects or
-resyncs, then after its `session-snapshot:changed` notices, batched for 250 ms.
-Each read sends back `since`, `epoch` and `held`, so only changed messages
-cross. A machine stays at 25 MB at most; when it is over, the Sessions changed
-longest ago are left out first.
+machines (`main/src/services/machineMirror.ts`). Each machine has a folder,
+`<PANE_DIR>/machine-mirror/<machine id>/` (0700), holding an `index.json` and
+one `<session id>.json` per Session (each 0600, written to a temporary file
+and renamed; at most one save every 2 s per machine, the index last). Main
+keeps every machine's index in memory (each Session's revision, size and held
+window) and the 30 Sessions read or changed most recently, across all
+machines; any other Session is read from its file (under 10 ms for 100 KB).
+It reads `snapshots` once when a machine connects or resyncs, then after its
+`session-snapshot:changed` notices, batched for 250 ms. Each read sends back
+`since`, `epoch` and `held`, so only changed messages cross. A machine stays
+at 25 MB at most; when it is over, the Sessions changed longest ago (lowest
+snapshot revision) are left out first.
 
-Some machines are never copied, and their file is removed:
-- a machine this computer only watches (a Read only token);
+Only the person's own machines are mirrored (D-500). A saved computer is
+theirs when its Tailscale owner, as this computer's Tailscale reports it, is
+this computer's own Tailscale login. That is checked when the computer is
+opened and on each connect and saved on it as `mine: 'tailscale'`; when
+Tailscale here can't say, the last result is kept. A machine with no
+Tailscale name here (relay only, say) or owned by another login is not
+mirrored. **This is my computer** in Settings › Remote Access › Computers
+(`mineOverride`) wins over the check both ways: on mirrors the machine, off
+never does; **Use Tailscale** goes back to the check. The host's
+`SESSION_SNAPSHOTS_OWNER_ONLY` check stays as a second layer.
+
+Some machines are never copied, and their folder is removed:
+- a machine that is not the person's own (see above);
+- a machine this computer only watches (a Read only token), whatever the
+  switch says;
 - a machine whose host answers `SESSION_SNAPSHOTS_OWNER_ONLY` (tried again on
   its next connection);
 - a machine that is forgotten;

@@ -4,7 +4,7 @@ import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { MachineConnectionsEvent, MachineResult, MachineState } from '../../../shared/types/machineConnections';
-import type { MachineMirrorFile, MachineMirrorState } from '../../../shared/types/machineMirror';
+import type { MachineMirrorIndexEntry, MachineMirrorIndexFile, MachineMirrorState } from '../../../shared/types/machineMirror';
 import {
   SESSION_SNAPSHOT_CHANGED_CHANNEL,
   SESSION_SNAPSHOT_MESSAGE_LIMIT,
@@ -26,8 +26,9 @@ const DEFAULT_CAP_BYTES = 25 * 1024 * 1024;
 /** The file of a machine that hasn't answered for this long is removed. */
 const UNSEEN_LIMIT_MS = 30 * 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** Room for the file's own fields beside its Sessions when counting its size. */
-const FILE_OVERHEAD_BYTES = 256;
+/** Snapshots kept in memory across every machine, most recently read or changed (matching the renderer's `KEPT_SESSIONS`); the rest are read from their files. */
+export const MIRROR_MEMORY_SESSIONS = 30;
+const INDEX_FILE = 'index.json';
 
 /** What the mirror needs of the desktop's machine connections (`MachineConnections`). */
 export interface MirrorMachines {
@@ -49,7 +50,12 @@ interface Mirror {
   epoch: string | null;
   revision: number;
   lastSeenAt: string | null;
-  sessions: Map<string, { snapshot: SessionSnapshot; bytes: number }>;
+  /** Every Session copied, without its content: what `requestOf`, the cap and the notices need. */
+  index: Map<string, MachineMirrorIndexEntry>;
+  /** Snapshots changed since the last save; each leaves once its file is written. */
+  pending: Map<string, SessionSnapshot>;
+  /** Sessions dropped since the last save, whose files the next save deletes. */
+  removed: Set<string>;
   /** The connection (its `onlineSince`) this mirror last read on connect. */
   connectedAt?: string;
   reading: boolean;
@@ -84,23 +90,27 @@ const resultSchema = boundary.object({
   sessionIds: boundary.array(boundary.string),
   snapshots: boundary.array(boundary.json),
 });
-const fileSchema = boundary.object({
-  version: boundary.literal(1),
+const heldSchema = boundary.object({ generation: boundary.number, count: boundary.number, revision: boundary.number });
+const indexSchema = boundary.object({
+  version: boundary.literal(2),
   machineId: boundary.nonEmptyString,
   epoch: boundary.nullable(boundary.string),
   revision: boundary.number,
   lastSeenAt: boundary.nullable(boundary.string),
-  sessions: boundary.array(boundary.json),
+  sessions: boundary.record(boundary.object({ revision: boundary.number, bytes: boundary.number, held: boundary.optional(heldSchema) })),
 });
 const noticeSchema = boundary.object({ sessionId: boundary.nonEmptyString, revision: boundary.number });
 
 /**
  * The desktop mirror (T-116 PR 5): a copy of the chat Sessions on each of the owner's other
  * machines, read from their host snapshots (`orchestration-sessions:snapshots`) and kept in
- * `<PANE_DIR>/machine-mirror/<machine id>.json` (mode 0600, D-4). It reads once when a machine
- * connects or resyncs, and after its `session-snapshot:changed` notices, 250 ms at a time. A
- * machine this computer only watches, or whose host refuses it as not the owner, is never copied
- * (D-5); its file is removed, as is a forgotten machine's and one not seen for 30 days.
+ * `<PANE_DIR>/machine-mirror/<machine id>/` (folder 0700): an `index.json` and one file per Session,
+ * each 0600 (D-4). Main holds each machine's index and the 30 Sessions read or changed most
+ * recently (D-12); any other Session is read from its file. It reads once when a machine connects
+ * or resyncs, and after its `session-snapshot:changed` notices, 250 ms at a time. Only machines
+ * this computer marks as the person's own are copied (D-5, D-13); a machine it only watches, or
+ * whose host refuses it as not the owner, is never copied and its folder is removed, as is a
+ * forgotten machine's and one not seen for 30 days.
  */
 export class MachineMirror {
   private readonly mirrors = new Map<string, Mirror>();
@@ -108,6 +118,8 @@ export class MachineMirror {
   private readonly ignored = new Map<string, string | undefined>();
   private readonly listeners = new Set<(change: { machineId: string }) => void>();
   private readonly removals = new Set<Promise<void>>();
+  /** The snapshots kept in memory, every machine together, least recently used first; keyed `machine\0session`. */
+  private readonly recent = new Map<string, SessionSnapshot>();
   private readonly capBytes: number;
   private unsubscribe?: () => void;
   private sweep?: ReturnType<typeof setInterval>;
@@ -117,7 +129,7 @@ export class MachineMirror {
     this.capBytes = options.capBytes ?? DEFAULT_CAP_BYTES;
   }
 
-  /** Loads the saved copies of the owner's machines, removes the rest, and follows the machines from now on. */
+  /** Loads the saved indexes of the owner's machines, removes the rest, and follows the machines from now on. */
   async start(): Promise<void> {
     await this.loadSaved();
     // A folder made by an earlier build, or by hand, is made readable only by this user too.
@@ -153,15 +165,18 @@ export class MachineMirror {
     if (!mirror) return undefined;
     const machine = this.options.machines.list().find(entry => entry.id === machineId);
     const sync = machine?.status !== 'online' ? 'offline' : mirror.reading || mirror.due ? 'catching-up' : 'live';
-    return { machineId, sync, lastSeenAt: mirror.lastSeenAt, sessionCount: mirror.sessions.size };
+    return { machineId, sync, lastSeenAt: mirror.lastSeenAt, sessionCount: mirror.index.size };
   }
 
-  session(machineId: string, sessionId: string): SessionSnapshot | undefined {
-    return this.mirrors.get(machineId)?.sessions.get(sessionId)?.snapshot;
+  /** The Sessions a machine's copy holds and their host revisions, from memory (for the arrow keys, PR 6). */
+  index(machineId: string): Array<{ sessionId: string; revision: number }> {
+    return [...(this.mirrors.get(machineId)?.index ?? [])].map(([sessionId, entry]) => ({ sessionId, revision: entry.revision }));
   }
 
-  sessions(machineId: string): SessionSnapshot[] {
-    return [...(this.mirrors.get(machineId)?.sessions.values() ?? [])].map(entry => entry.snapshot);
+  /** One Session's copy: from memory when it was read or changed lately, else from its file. */
+  async session(machineId: string, sessionId: string): Promise<SessionSnapshot | undefined> {
+    const mirror = this.mirrors.get(machineId);
+    return mirror ? this.load(mirror, sessionId) : undefined;
   }
 
   /** A machine's copy or its state changed. Returns the unsubscribe. */
@@ -184,7 +199,7 @@ export class MachineMirror {
     }
     if (event.channel !== SESSION_SNAPSHOT_CHANGED_CHANNEL) return;
     const notice = decodeOptionalBoundary(event.args[0], noticeSchema);
-    if (!notice || (mirror.sessions.get(notice.sessionId)?.snapshot.revision ?? -1) >= notice.revision) return;
+    if (!notice || (mirror.index.get(notice.sessionId)?.revision ?? -1) >= notice.revision) return;
     mirror.due = true;
     mirror.batch ??= setTimeout(() => {
       mirror.batch = undefined;
@@ -240,7 +255,7 @@ export class MachineMirror {
       const checked = decodeBoundary(answer.data, resultSchema);
       for (const snapshot of checked.snapshots) decodeBoundary(snapshot, snapshotSchema);
       // SAFETY: the host's SessionSnapshotService wrote the answer, and its fields and each snapshot's identifying and merged fields were just checked.
-      this.apply(mirror, (result.data as { data: SessionSnapshotsResult }).data);
+      await this.apply(mirror, (result.data as { data: SessionSnapshotsResult }).data);
     } catch (error) {
       // A Pane without snapshots keeps opening its Sessions with Enter, as today.
       if (error instanceof PaneError && error.code === 'ERR_HOST_OUTDATED') {
@@ -261,19 +276,21 @@ export class MachineMirror {
     }
   }
 
-  private apply(mirror: Mirror, result: SessionSnapshotsResult): void {
+  private async apply(mirror: Mirror, result: SessionSnapshotsResult): Promise<void> {
     if (this.stopped) return;
     // A new run of the host sends each Session whole: nothing held from the old run is joined to it.
     const sameRun = mirror.epoch === result.epoch;
-    const listed = new Set(result.sessionIds);
-    for (const sessionId of [...mirror.sessions.keys()]) {
-      if (!listed.has(sessionId)) mirror.sessions.delete(sessionId);
-    }
-    for (const sent of result.snapshots) {
+    const joined = await Promise.all(result.snapshots.map(async sent => {
       // The host projects what it sends; the desktop projects it again, so it never stores more than the plan allows.
-      const snapshot = merged(sameRun ? mirror.sessions.get(sent.sessionId)?.snapshot : undefined, projectSnapshot(sent));
-      mirror.sessions.set(snapshot.sessionId, { snapshot, bytes: Buffer.byteLength(JSON.stringify(snapshot)) });
+      const projected = projectSnapshot(sent);
+      return merged(sameRun && joinsHeld(mirror.index.get(sent.sessionId), projected) ? await this.load(mirror, sent.sessionId) : undefined, projected);
+    }));
+    if (this.stopped || this.mirrors.get(mirror.machineId) !== mirror) return;
+    const listed = new Set(result.sessionIds);
+    for (const sessionId of [...mirror.index.keys()]) {
+      if (!listed.has(sessionId)) this.drop(mirror, sessionId);
     }
+    for (const snapshot of joined) this.store(mirror, snapshot);
     mirror.revision = result.revision;
     mirror.epoch = result.epoch;
     mirror.lastSeenAt = new Date().toISOString();
@@ -281,15 +298,73 @@ export class MachineMirror {
     this.scheduleSave(mirror);
   }
 
+  /** A Session's copy, newest first from memory, then its unsaved change, then its file. */
+  private async load(mirror: Mirror, sessionId: string): Promise<SessionSnapshot | undefined> {
+    const key = recentKey(mirror.machineId, sessionId);
+    const inMemory = (): SessionSnapshot | undefined => this.recent.get(key) ?? mirror.pending.get(sessionId);
+    if (!mirror.index.has(sessionId)) return undefined;
+    const held = inMemory();
+    if (held) {
+      this.remember(key, held);
+      return held;
+    }
+    const read = await this.readSession(mirror.machineId, sessionId);
+    // A change applied, or the Session dropped, while the file was read.
+    if (this.mirrors.get(mirror.machineId) !== mirror || !mirror.index.has(sessionId)) return undefined;
+    const newer = inMemory();
+    if (newer) return newer;
+    if (read) this.remember(key, read);
+    return read;
+  }
+
+  private async readSession(machineId: string, sessionId: string): Promise<SessionSnapshot | undefined> {
+    try {
+      const parsed = JSON.parse(await promises.readFile(this.sessionFileOf(machineId, sessionId), 'utf8'));
+      if (decodeBoundary(parsed, snapshotSchema).sessionId !== sessionId) throw new Error('it holds another Session');
+      // SAFETY: this mirror wrote the file from a projected snapshot, and its identifying and merged fields were just checked.
+      return parsed as SessionSnapshot;
+    } catch (error) {
+      console.warn(`[Machine mirror] Could not read ${machineId}'s copy of ${sessionId}; it loads from the machine instead:`, error instanceof Error ? error.message : error);
+      return undefined;
+    }
+  }
+
+  /** Puts a snapshot at the recent end of the memory list, dropping the least recent past 30. */
+  private remember(key: string, snapshot: SessionSnapshot): void {
+    this.recent.delete(key);
+    this.recent.set(key, snapshot);
+    for (const oldest of this.recent.keys()) {
+      if (this.recent.size <= MIRROR_MEMORY_SESSIONS) break;
+      this.recent.delete(oldest);
+    }
+  }
+
+  private store(mirror: Mirror, snapshot: SessionSnapshot): void {
+    const transcript = snapshot.chat.transcript;
+    const entry: MachineMirrorIndexEntry = { revision: snapshot.revision, bytes: Buffer.byteLength(JSON.stringify(snapshot)) };
+    if (transcript) entry.held = { generation: transcript.generation, count: transcript.start + transcript.messages.length, revision: transcript.revision };
+    mirror.index.set(snapshot.sessionId, entry);
+    mirror.pending.set(snapshot.sessionId, snapshot);
+    mirror.removed.delete(snapshot.sessionId);
+    this.remember(recentKey(mirror.machineId, snapshot.sessionId), snapshot);
+  }
+
+  private drop(mirror: Mirror, sessionId: string): void {
+    mirror.index.delete(sessionId);
+    mirror.pending.delete(sessionId);
+    mirror.removed.add(sessionId);
+    this.recent.delete(recentKey(mirror.machineId, sessionId));
+  }
+
   /** Leaves out the Sessions whose snapshot changed longest ago (lowest host revision) until the copy fits its cap. */
   private keepUnderCap(mirror: Mirror): void {
-    let total = FILE_OVERHEAD_BYTES + [...mirror.sessions.values()].reduce((sum, entry) => sum + entry.bytes + 1, 0);
+    let total = [...mirror.index.values()].reduce((sum, entry) => sum + entry.bytes, 0);
     if (total <= this.capBytes) return;
-    const oldestFirst = [...mirror.sessions.values()].sort((left, right) => left.snapshot.revision - right.snapshot.revision);
-    for (const entry of oldestFirst) {
+    const oldestFirst = [...mirror.index].sort(([, left], [, right]) => left.revision - right.revision);
+    for (const [sessionId, entry] of oldestFirst) {
       if (total <= this.capBytes) break;
-      mirror.sessions.delete(entry.snapshot.sessionId);
-      total -= entry.bytes + 1;
+      this.drop(mirror, sessionId);
+      total -= entry.bytes;
     }
   }
 
@@ -301,27 +376,35 @@ export class MachineMirror {
     }, Math.max(0, mirror.savedAt + SAVE_INTERVAL_MS - Date.now()));
   }
 
+  /** Writes each changed Session's file, deletes the dropped ones', then the index, so the index never names a file not yet written. */
   private saveNow(mirror: Mirror): void {
     mirror.savedAt = Date.now();
-    const file: MachineMirrorFile = {
-      version: 1, machineId: mirror.machineId, epoch: mirror.epoch, revision: mirror.revision, lastSeenAt: mirror.lastSeenAt,
-      sessions: [...mirror.sessions.values()].map(entry => entry.snapshot),
+    const written = [...mirror.pending];
+    const files = written.map(([sessionId, snapshot]) => ({ sessionId, contents: JSON.stringify(snapshot) }));
+    const removed = [...mirror.removed];
+    mirror.removed.clear();
+    const index: MachineMirrorIndexFile = {
+      version: 2, machineId: mirror.machineId, epoch: mirror.epoch, revision: mirror.revision, lastSeenAt: mirror.lastSeenAt,
+      sessions: Object.fromEntries(mirror.index),
     };
-    const contents = JSON.stringify(file);
-    mirror.writes = mirror.writes.then(() => this.write(mirror.machineId, contents)).catch(error => {
+    const indexContents = JSON.stringify(index);
+    const folder = this.folderOf(mirror.machineId);
+    mirror.writes = mirror.writes.then(async () => {
+      await promises.mkdir(folder, { recursive: true, mode: 0o700 });
+      for (const { sessionId, contents } of files) await writeAtomically(this.sessionFileOf(mirror.machineId, sessionId), contents);
+      for (const sessionId of removed) await promises.rm(this.sessionFileOf(mirror.machineId, sessionId), { force: true });
+      await writeAtomically(path.join(folder, INDEX_FILE), indexContents);
+      // Only what this save wrote leaves memory; a change since stays for the next save.
+      for (const [sessionId, snapshot] of written) {
+        if (mirror.pending.get(sessionId) === snapshot) mirror.pending.delete(sessionId);
+      }
+    }).catch(error => {
+      for (const sessionId of removed) if (!mirror.index.has(sessionId)) mirror.removed.add(sessionId);
       console.warn(`[Machine mirror] Could not save ${mirror.machineId}'s copy:`, error instanceof Error ? error.message : error);
     });
   }
 
-  private async write(machineId: string, contents: string): Promise<void> {
-    await promises.mkdir(this.options.directory, { recursive: true, mode: 0o700 });
-    const file = this.fileOf(machineId);
-    const temporary = `${file}.${process.pid}.tmp`;
-    await promises.writeFile(temporary, contents, { mode: 0o600 });
-    await promises.rename(temporary, file);
-  }
-
-  /** Drops a machine's copy and its file. */
+  /** Drops a machine's copy and its folder. */
   private forget(machineId: string): void {
     const mirror = this.mirrors.get(machineId);
     this.mirrors.delete(machineId);
@@ -329,8 +412,10 @@ export class MachineMirror {
       clearTimeout(mirror.batch);
       clearTimeout(mirror.save);
     }
+    const prefix = recentKey(machineId, '');
+    for (const key of [...this.recent.keys()]) if (key.startsWith(prefix)) this.recent.delete(key);
     const removal = (mirror?.writes ?? Promise.resolve())
-      .then(() => promises.rm(this.fileOf(machineId), { force: true }))
+      .then(() => promises.rm(this.folderOf(machineId), { recursive: true, force: true }))
       .catch(error => console.warn(`[Machine mirror] Could not remove ${machineId}'s copy:`, error instanceof Error ? error.message : error))
       .finally(() => this.removals.delete(removal));
     this.removals.add(removal);
@@ -343,6 +428,7 @@ export class MachineMirror {
     this.forget(machineId);
   }
 
+  /** Reads each saved machine's index; removes the folders of machines not copied, and files no index names. */
   private async loadSaved(): Promise<void> {
     let names: string[];
     try {
@@ -352,34 +438,38 @@ export class MachineMirror {
     }
     const mine = new Set(this.options.machines.list().filter(isMine).map(machine => machine.id));
     for (const name of names) {
-      const file = path.join(this.options.directory, name);
-      if (!name.endsWith('.json')) {
-        // A save interrupted part-way.
-        if (name.endsWith('.tmp')) await promises.rm(file, { force: true });
+      const entry = path.join(this.options.directory, name);
+      const stat = await promises.lstat(entry).catch(() => undefined);
+      if (!stat?.isDirectory()) {
+        // A whole-machine file from before the per-Session layout, or a save interrupted part-way.
+        await promises.rm(entry, { force: true });
         continue;
       }
-      const saved = await this.readSaved(file);
-      if (!saved || !mine.has(saved.machineId) || unseenTooLong(saved.lastSeenAt) || file !== this.fileOf(saved.machineId)) {
-        await promises.rm(file, { force: true });
+      const saved = await this.readIndex(entry);
+      if (!saved || !mine.has(saved.machineId) || unseenTooLong(saved.lastSeenAt) || entry !== this.folderOf(saved.machineId)) {
+        await promises.rm(entry, { recursive: true, force: true });
         continue;
       }
       const mirror = emptyMirror(saved.machineId);
       mirror.revision = saved.revision;
       mirror.epoch = saved.epoch;
       mirror.lastSeenAt = saved.lastSeenAt;
-      for (const snapshot of saved.sessions) mirror.sessions.set(snapshot.sessionId, { snapshot, bytes: Buffer.byteLength(JSON.stringify(snapshot)) });
+      mirror.index = new Map(Object.entries(saved.sessions));
+      const files = new Set([INDEX_FILE, ...[...mirror.index.keys()].map(sessionId => path.basename(this.sessionFileOf(saved.machineId, sessionId)))]);
+      for (const file of await promises.readdir(entry)) {
+        // A Session written before a crash kept the index from naming it, or a save interrupted part-way.
+        if (!files.has(file)) await promises.rm(path.join(entry, file), { recursive: true, force: true });
+      }
       this.mirrors.set(saved.machineId, mirror);
     }
   }
 
-  private async readSaved(file: string): Promise<MachineMirrorFile | undefined> {
+  private async readIndex(folder: string): Promise<MachineMirrorIndexFile | undefined> {
     try {
-      const parsed = JSON.parse(await promises.readFile(file, 'utf8'));
-      for (const session of decodeBoundary(parsed, fileSchema).sessions) decodeBoundary(session, snapshotSchema);
-      // SAFETY: this mirror wrote the file, and its fields and each Session's identifying fields were just checked.
-      return parsed as MachineMirrorFile;
+      const parsed = decodeBoundary(JSON.parse(await promises.readFile(path.join(folder, INDEX_FILE), 'utf8')), indexSchema);
+      return { ...parsed, version: 2 };
     } catch (error) {
-      console.warn(`[Machine mirror] Removing an unreadable copy (${path.basename(file)}):`, error instanceof Error ? error.message : error);
+      console.warn(`[Machine mirror] Removing an unreadable copy (${path.basename(folder)}):`, error instanceof Error ? error.message : error);
       return undefined;
     }
   }
@@ -390,8 +480,12 @@ export class MachineMirror {
     }
   }
 
-  private fileOf(machineId: string): string {
-    return path.join(this.options.directory, `${encodeURIComponent(machineId)}.json`);
+  private folderOf(machineId: string): string {
+    return path.join(this.options.directory, encodeURIComponent(machineId));
+  }
+
+  private sessionFileOf(machineId: string, sessionId: string): string {
+    return path.join(this.folderOf(machineId), `${encodeURIComponent(sessionId)}.json`);
   }
 
   private changed(machineId: string): void {
@@ -405,9 +499,12 @@ export class MachineMirror {
   }
 }
 
-/** The owner's own saved machines: never this computer, and never one it only watches (D-5). */
+/**
+ * The person's own saved machines, as this computer establishes them (D-13): never this computer,
+ * never one it only watches, and never one it has not marked as theirs (a teammate's, even with Full access).
+ */
 function isMine(machine: MachineState): boolean {
-  return machine.kind === 'remote' && machine.access !== 'read';
+  return machine.kind === 'remote' && machine.access !== 'read' && machine.mine === true;
 }
 
 function unseenTooLong(lastSeenAt: string | null): boolean {
@@ -415,8 +512,22 @@ function unseenTooLong(lastSeenAt: string | null): boolean {
   return Number.isNaN(seen) || Date.now() - seen > UNSEEN_LIMIT_MS;
 }
 
+function recentKey(machineId: string, sessionId: string): string {
+  return `${machineId}\0${sessionId}`;
+}
+
+/** A temporary file readable only by this user, then renamed over the file, so a reader sees the old copy or the new one. */
+async function writeAtomically(file: string, contents: string): Promise<void> {
+  const temporary = `${file}.${process.pid}.tmp`;
+  await promises.writeFile(temporary, contents, { mode: 0o600 });
+  await promises.rename(temporary, file);
+}
+
 function emptyMirror(machineId: string): Mirror {
-  return { machineId, epoch: null, revision: 0, lastSeenAt: null, sessions: new Map(), reading: false, again: false, due: false, savedAt: -Infinity, writes: Promise.resolve() };
+  return {
+    machineId, epoch: null, revision: 0, lastSeenAt: null, index: new Map(), pending: new Map(), removed: new Set(),
+    reading: false, again: false, due: false, savedAt: -Infinity, writes: Promise.resolve(),
+  };
 }
 
 /** Everything changed since the last read, with only the messages changed since the ones held; everything after a host restart. */
@@ -426,12 +537,15 @@ function requestOf(mirror: Mirror): SessionSnapshotsRequest {
   request.epoch = mirror.epoch;
   request.since = mirror.revision;
   const held: Record<string, SessionSnapshotHeld> = {};
-  for (const [sessionId, { snapshot }] of mirror.sessions) {
-    const transcript = snapshot.chat.transcript;
-    if (transcript) held[sessionId] = { generation: transcript.generation, count: transcript.start + transcript.messages.length, revision: transcript.revision };
-  }
+  for (const [sessionId, entry] of mirror.index) if (entry.held) held[sessionId] = entry.held;
   if (Object.keys(held).length > 0) request.held = held;
   return request;
+}
+
+/** Whether the held copy is needed to fill a window the host sent short: same conversation, fewer than 30 messages. */
+function joinsHeld(entry: MachineMirrorIndexEntry | undefined, next: SessionSnapshot): boolean {
+  const window = next.chat.transcript;
+  return entry?.held !== undefined && window !== undefined && window.generation === entry.held.generation && window.messages.length < SESSION_SNAPSHOT_MESSAGE_LIMIT;
 }
 
 /**

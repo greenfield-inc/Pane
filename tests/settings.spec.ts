@@ -783,6 +783,22 @@ test.describe('Settings', () => {
       await expect(page.getByRole('dialog', { name: 'Add a device' }).getByRole('tab', { name: 'Computer' })).toHaveAttribute('aria-selected', 'true');
     });
 
+    test('"This is my computer" says whether a computer\'s chats are kept here, and wins over Tailscale until reset', async ({ page }) => {
+      const content = await openRemoteAccess(page);
+      const row = content.getByTestId('machine-Build Box');
+      await row.getByRole('button', { name: 'Build Box routes and details' }).click();
+      const mine = row.getByRole('switch', { name: 'This is my computer' });
+      await expect(row.getByTestId('computer-mine')).toContainText('Not on your Tailscale login, so its chats are never kept here.');
+
+      await mine.click();
+      await expect(row.getByTestId('computer-mine')).toContainText('you turned it on, so its chats are kept here');
+      await row.getByRole('button', { name: 'Use Tailscale' }).click();
+      await expect(row.getByTestId('computer-mine')).toContainText('Not on your Tailscale login');
+      // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+      const calls = await page.evaluate(() => (window as typeof window & { __paneTestElectronMock: SettingsMock }).__paneTestElectronMock.getInvokeCalls('computers:set-mine'));
+      expect(calls.map((call) => call.args)).toEqual([[{ computerId: 'build-box', mine: true }], [{ computerId: 'build-box', mine: null }]]);
+    });
+
     test('with Tailscale signed out here, a computer reached only over Tailscale asks for a link', async ({ page }) => {
       const content = await openRemoteAccess(page, { tailnetMachines: { ok: false, reason: 'Tailscale is signed out', fix: 'Open Tailscale and sign in.' } });
       await expect(content.getByTestId('machine-Build Box').getByLabel('Tailscale, not available here')).toBeVisible();

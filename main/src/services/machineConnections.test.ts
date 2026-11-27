@@ -5,6 +5,8 @@ import { SharedCredentialSync } from './sharedCredentialSync';
 import { readingMachines } from '../daemon/readingMachines';
 import { createDefaultRemoteDaemonConfig, normalizeRemoteDaemonConfig, type RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
 import type { MachineConnectionsEvent } from '../../../shared/types/machineConnections';
+import type { RemoteComputer } from '../../../shared/types/remoteComputers';
+import type { AppConfig } from '../types/config';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 type ClientOptions = Parameters<CreateMachineClient>[1];
@@ -305,5 +307,104 @@ describe('SharedCredentialSync over MachineConnections', () => {
     expect(client('build-box').invoke).toHaveBeenCalledWith('credentials:shared:get', []);
     expect(client('tyler').invoke).not.toHaveBeenCalled();
     await sync.stop();
+  });
+});
+
+describe('MachineConnections: which saved computers are yours (D-500)', () => {
+  const tailscaleRoute = (name: string, token = `token-${name}`): RemoteComputer['routes'][number] => ({
+    id: `tailscale:https://${name}.tail1.ts.net:4800`, kind: 'tailscale', source: 'found', baseUrl: `https://${name}.tail1.ts.net:4800`, token, tailnetMachine: name, tailnetDomain: 'tail1.ts.net',
+  });
+  const relayRoute = (name: string): RemoteComputer['routes'][number] => ({
+    id: `relay:https://${name}.relay.example`, kind: 'relay', source: 'link', baseUrl: `https://${name}.relay.example`, token: `token-${name}`, relay: { computerId: `${name}-relay`, fingerprint: 'f' },
+  });
+
+  /** Saved computers whose config changes as the mark and the switch are saved; `logins` is who owns each Tailscale name, as Tailscale here reports it. */
+  function own(computers: RemoteComputer[], logins: Record<string, boolean | undefined>) {
+    const configManager = new ConfigManager();
+    const defaults = createDefaultRemoteDaemonConfig();
+    let config: AppConfig = { gitRepoPath: '', verbose: false, remoteDaemon: { ...defaults, client: { ...defaults.client, computers } } };
+    vi.spyOn(configManager, 'getConfig').mockImplementation(() => config);
+    const change = (id: string, update: (computer: RemoteComputer) => RemoteComputer) => {
+      const remote = config.remoteDaemon!;
+      config = { ...config, remoteDaemon: { ...remote, client: { ...remote.client, computers: remote.client.computers.map(computer => (computer.id === id ? update(computer) : computer)) } } };
+      configManager.emit('config-updated', config);
+    };
+    const checks: string[] = [];
+    const clients = new Map<string, ClientOptions>();
+    const machines = new MachineConnections({
+      configManager,
+      invokeLocal: vi.fn(async () => ({ success: true })),
+      createClient: (saved, options) => {
+        clients.set(saved.id, options);
+        return { invoke: vi.fn(async () => undefined), connect: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), retryNow: vi.fn(async () => undefined), suspend: vi.fn(), resume: vi.fn(), openPortStream: vi.fn(), measureLatency: vi.fn(async () => 4) };
+      },
+      ownership: {
+        check: async ({ name }) => { checks.push(name); return logins[name]; },
+        save: async (computerId, mine) => change(computerId, computer => {
+          const next = { ...computer };
+          if (mine) next.mine = 'tailscale';
+          else delete next.mine;
+          return next;
+        }),
+      },
+    });
+    machines.start();
+    started.push(machines);
+    const mine = (id: string) => machines.machineState(id)?.mine === true;
+    const connect = (id: string) => clients.get(id)?.onConnectionStateChange?.('connected');
+    const drop = (id: string) => clients.get(id)?.onConnectionStateChange?.('reconnecting');
+    return { machines, mine, connect, drop, checks, change, saved: (id: string) => config.remoteDaemon?.client.computers.find(computer => computer.id === id), logins };
+  }
+
+  it('marks a saved computer yours when its Tailscale owner is this computer\'s login, with no step from the person', async () => {
+    const { mine, saved } = own([{ id: 'studio', label: 'studio', routes: [tailscaleRoute('studio')] }], { studio: true });
+    await vi.waitFor(() => expect(mine('studio')).toBe(true));
+    expect(saved('studio')?.mine).toBe('tailscale');
+  });
+
+  it('never marks one owned by another login, or one with no Tailscale identity here (relay only)', async () => {
+    const { mine, checks, saved } = own([
+      { id: 'teammate', label: 'teammate', mine: 'tailscale', routes: [tailscaleRoute('teammate')] },
+      { id: 'linked', label: 'linked', routes: [relayRoute('linked')] },
+    ], { teammate: false });
+    await vi.waitFor(() => expect(checks).toEqual(['teammate']));
+    await vi.waitFor(() => expect(saved('teammate')?.mine).toBeUndefined());
+    expect(mine('teammate')).toBe(false);
+    expect(mine('linked')).toBe(false);
+  });
+
+  it('checks again on each connect, and keeps the mark when Tailscale here can\'t say', async () => {
+    const { mine, connect, drop, checks, logins } = own([{ id: 'studio', label: 'studio', routes: [tailscaleRoute('studio')] }], { studio: true });
+    await vi.waitFor(() => expect(mine('studio')).toBe(true));
+    logins.studio = undefined;
+    connect('studio');
+    await vi.waitFor(() => expect(checks).toHaveLength(2));
+    expect(mine('studio')).toBe(true);
+
+    logins.studio = false;
+    drop('studio');
+    connect('studio');
+    await vi.waitFor(() => expect(mine('studio')).toBe(false));
+    expect(checks).toHaveLength(3);
+  });
+
+  it('follows "This is my computer" over the Tailscale check, both ways', async () => {
+    const { mine, change } = own([
+      { id: 'studio', label: 'studio', routes: [tailscaleRoute('studio')] },
+      { id: 'linked', label: 'linked', routes: [relayRoute('linked')] },
+    ], { studio: true });
+    await vi.waitFor(() => expect(mine('studio')).toBe(true));
+
+    change('linked', computer => ({ ...computer, mineOverride: true }));
+    change('studio', computer => ({ ...computer, mineOverride: false }));
+
+    expect(mine('linked')).toBe(true);
+    expect(mine('studio')).toBe(false);
+  });
+
+  it('never counts a computer it only watches as yours, whatever the switch says', async () => {
+    const { mine } = own([{ id: 'shared', label: 'shared', mineOverride: true, mine: 'tailscale', routes: [tailscaleRoute('shared', 'pane_read_shared')] }], { shared: true });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(mine('shared')).toBe(false);
   });
 });

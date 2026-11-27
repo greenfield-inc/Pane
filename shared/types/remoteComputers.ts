@@ -53,6 +53,14 @@ export interface RemoteComputer {
   os?: ComputerOs;
   /** "Linked by <name>": who linked it, when a link did. */
   linkedBy?: string;
+  /**
+   * How this computer knows the saved one is the person's own (D-500): `tailscale` when its
+   * Tailscale owner is this computer's Tailscale login. Checked again each time it is opened or
+   * connects; absent when it has no Tailscale name here or another login owns it.
+   */
+  mine?: 'tailscale';
+  /** "This is my computer" in Settings › Remote Access, when the person set it; it wins over `mine` both ways. */
+  mineOverride?: boolean;
   routes: ComputerRoute[];
 }
 
@@ -92,17 +100,20 @@ const routeSchema: BoundarySchema<ComputerRoute> = boundary.object({
   ssh: boundary.optional(boundary.object({ host: boundary.nonEmptyString, remotePort: boundary.number })),
 });
 
-/** A saved computer with its routes and OS read separately, so a route or OS a later Pane added drops alone. */
+/** A saved computer with its routes, OS and ownership read separately, so a value a later Pane added drops alone. */
 const computerSchema = boundary.object({
   id: boundary.nonEmptyString,
   label: boundary.nonEmptyString,
   machineId: boundary.optional(boundary.nonEmptyString),
   os: boundary.optional(boundary.json),
   linkedBy: boundary.optional(boundary.nonEmptyString),
+  mine: boundary.optional(boundary.json),
+  mineOverride: boundary.optional(boundary.json),
   routes: boundary.array(boundary.json),
 });
 
 const osSchema = boundary.enumeration('macOS', 'Windows', 'Linux');
+const mineSchema = boundary.literal('tailscale');
 
 const reportSchema: BoundarySchema<ComputerRoutesReport> = boundary.object({
   machineId: boundary.nonEmptyString,
@@ -138,7 +149,7 @@ export function decodeComputers(value: JsonValue | undefined, log: (line: string
       log(`[computers] dropped saved computer ${index + 1}: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
-    const { os, routes: savedRoutes, ...fields } = saved;
+    const { os, mine, mineOverride, routes: savedRoutes, ...fields } = saved;
     const routes = savedRoutes.flatMap((route) => {
       try {
         return [decodeBoundary(route, routeSchema)];
@@ -154,6 +165,9 @@ export function decodeComputers(value: JsonValue | undefined, log: (line: string
     const computer: RemoteComputer = { ...fields, routes };
     const known = decodeOptionalBoundary(os, osSchema);
     if (known) computer.os = known;
+    if (decodeOptionalBoundary(mine, mineSchema)) computer.mine = 'tailscale';
+    const override = decodeOptionalBoundary(mineOverride, boundary.boolean);
+    if (override !== undefined) computer.mineOverride = override;
     return [computer];
   });
 }
@@ -247,6 +261,16 @@ export function routeFromProfile(profile: RemotePaneConnectionProfile, source?: 
  */
 export function isWatchedComputer(computer: Pick<RemoteComputer, 'routes'>): boolean {
   return computer.routes.some((route) => tokenAccess(route.token) === 'read');
+}
+
+/**
+ * Whether a saved computer is the person's own, so its chats may be mirrored here (D-500): never one
+ * this computer only watches; otherwise "This is my computer" when the person set it, else a
+ * Tailscale owner that is this computer's login.
+ */
+export function isOwnComputer(computer: Pick<RemoteComputer, 'routes' | 'mine' | 'mineOverride'>): boolean {
+  if (isWatchedComputer(computer)) return false;
+  return computer.mineOverride ?? computer.mine === 'tailscale';
 }
 
 /** One route of a computer in the shape the connection code takes: the profile id is the computer's. */

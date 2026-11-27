@@ -2,7 +2,7 @@ import type { WebSocket } from 'ws';
 import { MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL, MACHINE_HEALTH_CLEANUP_CHANNEL, MACHINE_HEALTH_IGNORE_LEAK_CHANNEL, MACHINE_HEALTH_PAUSE_IDLE_CHANNEL, MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_APP_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL } from '../../../shared/types/machineHealth';
 import os from 'os';
 import { RemotePaneClient, type RemoteRouteCandidate } from '../daemon/client/remotePaneClient';
-import { isWatchedComputer, primaryProfile, routeProfile, routesReachableHere, type ComputerRoutesReport, type RemoteComputer } from '../../../shared/types/remoteComputers';
+import { computerTailnetName, isOwnComputer, isWatchedComputer, primaryProfile, routeProfile, routesReachableHere, type ComputerRoutesReport, type RemoteComputer } from '../../../shared/types/remoteComputers';
 import type { ConfigManager } from './configManager';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { READ_ONLY_ACCESS_CODE } from '../../../shared/types/accessLevel';
@@ -45,6 +45,13 @@ export interface MachineConnectionsDeps {
   routes?: {
     prepare(route: RemoteRouteCandidate): Promise<RemotePaneConnectionProfile>;
     saveReport(computerId: string, routeId: string | undefined, report: ComputerRoutesReport): Promise<void>;
+  };
+  /** Marks a saved computer as the person's own when its Tailscale owner is this computer's login (D-500), on open and on each connect. */
+  ownership?: {
+    /** Whether the named Tailscale machine's owner is this computer's login; undefined when Tailscale here can't say. */
+    check(tailnet: { name: string; domain: string }): Promise<boolean | undefined>;
+    /** Saves the result as the computer's `mine` mark. */
+    save(computerId: string, mine: boolean): Promise<void>;
   };
 }
 
@@ -277,6 +284,12 @@ export class MachineConnections {
       const computer = wanted.get(id);
       if (computer && connectionKey(computer) === machine.key) {
         if (machine.state.label !== computer.label) { machine.state.label = computer.label; changed = true; }
+        const mine = isOwnComputer(computer);
+        if (mine !== (machine.state.mine === true)) {
+          if (mine) machine.state.mine = true;
+          else delete machine.state.mine;
+          changed = true;
+        }
         continue;
       }
       this.machines.delete(id);
@@ -301,7 +314,7 @@ export class MachineConnections {
       key: connectionKey(computer),
       profile,
       retryTimer: null,
-      state: { id, label: profile.label, kind: 'remote', status: 'connecting', offlineSince: null, ...(isWatchedComputer(computer) && { access: 'read' as const }) },
+      state: { id, label: profile.label, kind: 'remote', status: 'connecting', offlineSince: null, ...(isWatchedComputer(computer) && { access: 'read' as const }), ...(isOwnComputer(computer) && { mine: true as const }) },
       client: this.createClient(profile, {
         machineId: this.deps.configManager.getConfig().machineId,
         routes,
@@ -311,7 +324,9 @@ export class MachineConnections {
           if (!isCurrent()) return;
           if (metadata?.hostRoutes) void this.deps.routes?.saveReport(id, metadata.routeId, metadata.hostRoutes);
           if (metadata?.routeId && machine.state.routeId !== metadata.routeId) { machine.state.routeId = metadata.routeId; this.emitMachines(); }
+          const arrived = status === 'connected' && machine.state.status !== 'online';
           this.updateStatus(machine, status, metadata?.hostMachineId, metadata?.hostWorkspaceEntries);
+          if (arrived) void this.checkOwnership(id);
           if (status === 'connected') clearRetry(machine);
           if (status === 'error' && !machine.retryTimer) {
             machine.retryTimer = setTimeout(() => {
@@ -324,7 +339,30 @@ export class MachineConnections {
       }),
     };
     this.machines.set(id, machine);
+    void this.checkOwnership(id);
     void machine.client.connect().catch(() => undefined);
+  }
+
+  /**
+   * Checks again whether a saved computer's Tailscale owner is this computer's login, and saves the
+   * mark when it changed. A computer with no Tailscale name here has no mark. When Tailscale here
+   * can't say, the mark is left as it is.
+   */
+  private async checkOwnership(computerId: string): Promise<void> {
+    const ownership = this.deps.ownership;
+    if (!ownership) return;
+    const saved = () => this.deps.configManager.getConfig().remoteDaemon?.client.computers.find(computer => computer.id === computerId);
+    const computer = saved();
+    if (!computer) return;
+    const tailnet = computerTailnetName(computer);
+    try {
+      const matches = tailnet ? await ownership.check({ name: tailnet.machine, domain: tailnet.domain }) : false;
+      const now = saved();
+      if (matches === undefined || !now || matches === (now.mine === 'tailscale')) return;
+      await ownership.save(computerId, matches);
+    } catch (error) {
+      console.warn(`[MachineConnections] Could not check whether ${computer.label} is yours:`, reasonOf(error));
+    }
   }
 
   private async close(machine: RemoteMachine): Promise<void> {

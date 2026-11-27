@@ -1,12 +1,13 @@
-import type { SessionSnapshot } from './sessionSnapshot';
+import type { SessionSnapshotHeld } from './sessionSnapshot';
 
 /**
  * The desktop mirror (T-116 PR 5): this computer's copy of the chat Sessions on each of the owner's
  * other machines, kept from their host snapshots so a Session shows at once, and while its
- * machine is offline. One file per machine in `<PANE_DIR>/machine-mirror/`, mode 0600 (D-4).
+ * machine is offline. One folder per machine in `<PANE_DIR>/machine-mirror/` (0700): its
+ * `index.json` and one file per Session, each 0600 (D-4).
  */
 
-/** The folder in the Pane data folder that holds one mirror file per machine. */
+/** The folder in the Pane data folder that holds one mirror folder per machine. */
 export const MACHINE_MIRROR_FOLDER = 'machine-mirror';
 
 /** How current a machine's mirror is. */
@@ -26,14 +27,24 @@ export interface MachineMirrorState {
   sessionCount: number;
 }
 
-/** What a mirror file holds. */
-export interface MachineMirrorFile {
-  version: 1;
+/** What the mirror knows of one Session without reading its file: enough to ask the host for what changed. */
+export interface MachineMirrorIndexEntry {
+  /** The snapshot's host revision. */
+  revision: number;
+  /** The size of its file, counted against the machine's cap. */
+  bytes: number;
+  /** The transcript window held, sent back to the host as `held`; absent for a Session with no chat. */
+  held?: SessionSnapshotHeld;
+}
+
+/** A machine's `index.json`, in `<PANE_DIR>/machine-mirror/<machine id>/`, beside one file per Session. */
+export interface MachineMirrorIndexFile {
+  version: 2;
   machineId: string;
   /** The host run (`epoch`) of the last read; null before the first. */
   epoch: string | null;
   /** The host's `revision` from the last read, sent back as `since`. */
   revision: number;
   lastSeenAt: string | null;
-  sessions: SessionSnapshot[];
+  sessions: Record<string, MachineMirrorIndexEntry>;
 }

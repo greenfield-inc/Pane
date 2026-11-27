@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigManager } from './configManager';
-import { applyRoutesReport, decodeComputers, routesReachableHere, upsertComputer, type RemoteComputer } from '../../../shared/types/remoteComputers';
+import { applyRoutesReport, decodeComputers, isOwnComputer, routesReachableHere, upsertComputer, type RemoteComputer } from '../../../shared/types/remoteComputers';
 
 // Saved by v2.4.225: the same Mac once through Tailscale and once through the relay, plus a code host.
 const tailnetMac = {
@@ -108,6 +108,36 @@ describe('reading saved computers', () => {
       expect.stringContaining('nas: dropped a route'),
       expect.stringContaining('dropped nas: none of its routes'),
     ]);
+  });
+});
+
+describe('which saved computers are yours (D-500)', () => {
+  const link = { id: 'relay:https://x.runpane.net', kind: 'relay', source: 'link', baseUrl: 'https://x.runpane.net', token: 't', relay: { computerId: 'x', fingerprint: 'f' } };
+
+  it('keeps the Tailscale mark and the switch, and drops a value it can\'t read without dropping the computer', () => {
+    expect(decodeComputers([
+      { id: 'a', label: 'a', mine: 'tailscale', mineOverride: false, routes: [link] },
+      { id: 'b', label: 'b', mine: 'someday', mineOverride: 'yes', routes: [link] },
+    ], () => undefined)).toEqual([
+      { id: 'a', label: 'a', mine: 'tailscale', mineOverride: false, routes: [link] },
+      { id: 'b', label: 'b', routes: [link] },
+    ]);
+  });
+
+  it('is yours by the switch when set, else by the Tailscale mark, and never when only watched', () => {
+    const routes = decodeComputers([{ id: 'a', label: 'a', routes: [link] }])[0].routes;
+    expect(isOwnComputer({ routes, mine: 'tailscale' })).toBe(true);
+    expect(isOwnComputer({ routes })).toBe(false);
+    expect(isOwnComputer({ routes, mineOverride: true })).toBe(true);
+    expect(isOwnComputer({ routes, mine: 'tailscale', mineOverride: false })).toBe(false);
+    expect(isOwnComputer({ routes: [{ ...routes[0], token: 'pane_read_x' }], mine: 'tailscale', mineOverride: true })).toBe(false);
+  });
+
+  it('keeps the mark and the switch when a computer reports its routes', () => {
+    const relayRoute = { id: 'relay:https://k.runpane.net', kind: 'relay' as const, source: 'link' as const, baseUrl: 'https://k.runpane.net', token: 'tok', relay: { computerId: 'k', fingerprint: 'fp' } };
+    const saved: RemoteComputer = { id: 'k', label: 'k', machineId: 'k-install', mine: 'tailscale', mineOverride: true, routes: [relayRoute] };
+    const { computers } = applyRoutesReport([saved], 'k', relayRoute, { machineId: 'k-install', name: 'k', relay: { id: 'k', address: 'https://k.runpane.net', fingerprint: 'fp', local: [] } });
+    expect(computers[0]).toMatchObject({ mine: 'tailscale', mineOverride: true });
   });
 });
 

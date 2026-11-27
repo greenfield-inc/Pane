@@ -140,6 +140,7 @@ import { SharedCredentialSync } from './services/sharedCredentialSync';
 import { startSecretLeases } from './services/secretLeaseRuntime';
 import { MachineConnections, remoteMachineAccess } from './services/machineConnections';
 import { MachineMirror } from './services/machineMirror';
+import { readTailscaleStatus, tailnetLoginMatches } from './services/tailnetMachines';
 import { MACHINE_MIRROR_FOLDER } from '../../shared/types/machineMirror';
 import { RemoteMemberEvents } from './services/remoteMemberEvents';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
@@ -1300,6 +1301,11 @@ async function initializeServices() {
     routes: {
       prepare: (route) => remotePaneClientController.prepareRoute(route),
       saveReport: (computerId, routeId, report) => remotePaneClientController.saveRoutesReport(computerId, routeId, report),
+    },
+    // D-500: a saved computer is yours when its Tailscale owner is this computer's Tailscale login.
+    ownership: {
+      check: (tailnet) => tailnetLoginMatches(tailnet, readTailscaleStatus),
+      save: (computerId, mine) => remotePaneClientController.saveOwnership(computerId, mine),
     },
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);

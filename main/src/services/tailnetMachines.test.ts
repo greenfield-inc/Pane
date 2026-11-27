@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { discoverTailnetMachines, resolveTailnetMachineUrl, savedSecretKey, type WorkspaceProbe, type WorkspaceProbeResult } from './tailnetMachines';
+import { discoverTailnetMachines, resolveTailnetMachineUrl, savedSecretKey, tailnetLoginMatches, type WorkspaceProbe, type WorkspaceProbeResult } from './tailnetMachines';
 
 const status = {
   BackendState: 'Running',
@@ -158,5 +158,27 @@ describe('resolveTailnetMachineUrl', () => {
   it('says so when the machine is not on its tailnet any more', async () => {
     await expect(resolveTailnetMachineUrl({ name: 'gone', domain: 'tail1.ts.net' }, async () => JSON.stringify(status)))
       .rejects.toThrow('gone is not on your current tailnet (example.org).');
+  });
+});
+
+describe('tailnetLoginMatches', () => {
+  const read = (value: typeof status | null) => async () => (value === null ? null : JSON.stringify(value));
+
+  it('is true for a machine whose Tailscale owner is this computer\'s login, including one offline now', async () => {
+    expect(await tailnetLoginMatches({ name: 'my-mac', domain: 'tail1.ts.net' }, read(status))).toBe(true);
+    expect(await tailnetLoginMatches({ name: 'MY-LINUX', domain: 'TAIL1.ts.net' }, read(status))).toBe(true);
+  });
+
+  it('is false for another login\'s machine, a tagged one, a missing one, or one saved on another tailnet', async () => {
+    expect(await tailnetLoginMatches({ name: 'shared-box', domain: 'tail1.ts.net' }, read(status))).toBe(false);
+    expect(await tailnetLoginMatches({ name: 'ci', domain: 'tail1.ts.net' }, read(status))).toBe(false);
+    expect(await tailnetLoginMatches({ name: 'gone', domain: 'tail1.ts.net' }, read(status))).toBe(false);
+    expect(await tailnetLoginMatches({ name: 'my-mac', domain: 'tail2.ts.net' }, read(status))).toBe(false);
+  });
+
+  it('cannot say when Tailscale is missing, signed out or unreadable', async () => {
+    expect(await tailnetLoginMatches({ name: 'my-mac', domain: 'tail1.ts.net' }, read(null))).toBeUndefined();
+    expect(await tailnetLoginMatches({ name: 'my-mac', domain: 'tail1.ts.net' }, read({ ...status, BackendState: 'NeedsLogin' }))).toBeUndefined();
+    expect(await tailnetLoginMatches({ name: 'my-mac', domain: 'tail1.ts.net' }, async () => '{not json')).toBeUndefined();
   });
 });
