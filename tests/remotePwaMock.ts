@@ -375,7 +375,7 @@ export async function openConnectedRemotePwa(
  * with a remote PWA test reloads against a cold Vite server, which can take well
  * over the default 5 s to serve the app's modules again.
  */
-export const REMOTE_PWA_RELOAD_TIMEOUT_MS = 20_000;
+const REMOTE_PWA_RELOAD_TIMEOUT_MS = 20_000;
 
 /**
  * Reloads the PWA and waits until it has drawn its first screen: the panel tabs,
