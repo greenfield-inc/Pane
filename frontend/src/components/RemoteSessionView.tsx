@@ -40,17 +40,22 @@ export function RemoteSessionTileBody({ target, held = false }: { target: Remote
   const listing = useMachineMirrorStore(state => state.listings[machineId]);
   const machine = useAllMachinesStore(state => state.machines.find(candidate => candidate.id === machineId));
   const row = useAllMachinesStore(state => state.snapshots[machineId]?.sessions.find(session => session.id === sessionId));
-  return <RemoteSessionPanel target={target} entry={entry} listing={listing} machine={machine} row={row} held={held} />;
+  const chatPanelId = heldRemoteChat(entry)?.panelId;
+  const blockedRun = useRemoteSessionView(state => (chatPanelId ? state.earlierUnavailable[remoteSessionKey(machineId, chatPanelId)] : undefined));
+  const earlierBlocked = blockedRun !== undefined && blockedRun === heldRemoteChat(entry)?.generation;
+  return <RemoteSessionPanel target={target} entry={entry} listing={listing} machine={machine} row={row} earlierBlocked={earlierBlocked} held={held} />;
 }
 
 /** What `RemoteSessionTileBody` shows, from what the stores hold. */
-export function RemoteSessionPanel({ target, entry, listing, machine, row, held = false }: {
+export function RemoteSessionPanel({ target, entry, listing, machine, row, earlierBlocked, held = false }: {
   target: RemoteSessionTarget;
   entry: RemoteSessionEntry | undefined;
   listing: MachineMirrorListing | undefined;
   machine: MachineState | undefined;
   /** The All machines row's record, for a Session nothing was read of yet. */
   row: OrchestrationSessionSummary | undefined;
+  /** Its host said earlier messages can't be read until the chat runs there (D-19, QA F-2). */
+  earlierBlocked: boolean;
   /** Held over the main area while an engage switches (T-132): the newest 30 messages, never more. */
   held?: boolean;
 }) {
@@ -119,6 +124,9 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row, held 
       client={client}
       connected={online}
       machine={{ id: machineId, name: machineName, os: null, slot: 0, letters: '', local: false }}
+      // Read-only here: no /clear, and no Clear button.
+      clearable={false}
+      earlierNote={earlierBlocked ? `Older messages load once this chat is opened on ${machineName}.` : undefined}
       watchOnly={online ? { composer: <RemoteHeldComposer target={target} machineName={machineName} takesFocus={held} /> } : { note: `${machineName} is offline. This is what it last sent.` }}
     />;
   } else if (unknown) {

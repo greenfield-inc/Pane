@@ -569,6 +569,19 @@ describe('MachineConnections: which saved computers are yours (D-500)', () => {
     expect(mine('studio')).toBe(false);
   });
 
+  it("reads a chat's earlier messages only from your own machines (T-116 PR 6, D-19)", async () => {
+    const { machines, mine, connect } = own([
+      { id: 'linked', label: 'linked', mineOverride: true, routes: [relayRoute('linked')] },
+      { id: 'teammate', label: 'teammate', routes: [relayRoute('teammate')] },
+    ], {});
+    connect('linked');
+    connect('teammate');
+    await vi.waitFor(() => expect(mine('linked')).toBe(true));
+
+    await expect(machines.read('linked', 'chat-tab:history', ['chat-1', 100, 50])).resolves.toMatchObject({ machineId: 'linked' });
+    await expect(machines.read('teammate', 'chat-tab:history', ['chat-1', 100, 50])).rejects.toMatchObject({ code: 'MACHINE_READ_OWNER_ONLY' });
+  });
+
   it('never counts a computer it only watches as yours, whatever the switch says', async () => {
     const { mine } = own([{ id: 'shared', label: 'shared', mineOverride: true, mine: 'tailscale', routes: [tailscaleRoute('shared', 'pane_read_shared')] }], { shared: true });
     await new Promise(resolve => setImmediate(resolve));

@@ -4,7 +4,9 @@ import path from 'path';
 import { teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { teammateSecretRefusal } from '../../../shared/types/paneSecrets';
 import type { AppServices } from './types';
-import type { ChatAgent, ChatPanelState, ChatTabAnswer, ChatTabCreate, ChatTabFile } from '../../../shared/types/chatTab';
+import type { ChatAgent, ChatPanelState, ChatTabAnswer, ChatTabCreate, ChatTabFile, ChatTabHistoryRead } from '../../../shared/types/chatTab';
+import type { AgentChatMessage } from '../../../shared/types/agentChat';
+import type { ChatTabManager } from '../services/chatTabs/manager';
 import type { CreatePanelRequest, PanelOpener, ToolPanel } from '../../../shared/types/panels';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError } from '../../../shared/paneError';
@@ -38,6 +40,16 @@ import { PathResolver } from '../utils/pathResolver';
 
 /** Any agent id; the launcher refuses one this host cannot run, with the agents it can. */
 const chatReadOptionsSchema = boundary.object({ start: boundary.optional(boundary.boolean) });
+const historyOptionsSchema = boundary.object({ withStatus: boundary.optional(boundary.boolean) });
+
+/** `chat-tab:history`'s answer: with `{ withStatus: true }` the messages and whether earlier ones are unavailable yet (T-116 D-19), else the bare list. */
+export function historyAnswer(manager: Pick<ChatTabManager, 'history' | 'historyRead'>, panelId: string, before: PaneCommandValue, limit: PaneCommandValue, options?: PaneCommandValue): ChatTabHistoryRead | AgentChatMessage[] {
+  const at = decodeBoundary(before, boundary.number);
+  const count = decodeBoundary(limit, boundary.number);
+  return decodeOptionalBoundary(options ?? undefined, historyOptionsSchema)?.withStatus === true
+    ? manager.historyRead(panelId, at, count)
+    : manager.history(panelId, at, count);
+}
 const agentSchema = boundary.refine(boundary.nonEmptyString, id => /^[a-z0-9][a-z0-9._-]*$/i.test(id), 'expected an agent id');
 const imageSchema = boundary.object({ mimeType: boundary.string, data: boundary.string });
 const sendSchema = boundary.object({ operationId: boundary.nonEmptyString, text: boundary.string, images: boundary.optional(boundary.array(imageSchema)), now: boundary.optional(boundary.boolean) });
@@ -116,7 +128,9 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
     limit === undefined || limit === null ? undefined : decodeBoundary(limit, boundary.number),
     decodeOptionalBoundary(options ?? undefined, chatReadOptionsSchema)?.start !== false,
   ));
-  registry.register('chat-tab:history', (id: string, before: number, limit: number) => manager.history(panelId(id), decodeBoundary(before, boundary.number), decodeBoundary(limit, boundary.number)));
+  // `{ withStatus: true }` (T-116 D-19): `{ messages, unavailable }`, saying when earlier messages exist but
+  // can't be read until the chat runs. Without it, the bare list, as older desktops expect.
+  registry.register('chat-tab:history', (id: string, before: number, limit: number, options?: PaneCommandValue) => historyAnswer(manager, panelId(id), before, limit, options));
   registry.register('chat-tab:send', (id: string, request: PaneCommandValue) => manager.send(panelId(id), decodeBoundary(request, sendSchema)));
   registry.register('chat-tab:receipt', (id: string, operationId: string) => manager.receipt(panelId(id), decodeBoundary(operationId, boundary.nonEmptyString)) ?? null);
   registry.register('chat-tab:unqueue', (id: string, operationId: string) => { manager.unqueue(panelId(id), decodeBoundary(operationId, boundary.nonEmptyString)); return undefined; });

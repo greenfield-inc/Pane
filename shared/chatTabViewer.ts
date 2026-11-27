@@ -210,16 +210,19 @@ export class ChatTabViewer {
 
   /** The live events showed a gap or a new conversation run: the client may fetch fresher data first (`ChatTabClient.resync`). */
   private resync(): Promise<void> {
-    this.chatClient.resync?.(this.panelId);
-    return this.refresh();
+    if (this.loading) return this.loading;
+    return this.refresh(this.chatClient.resync?.(this.panelId));
   }
 
   /** A fresh snapshot of the newest window, then any events that arrived while it loaded. */
-  refresh(): Promise<void> {
+  refresh(fetching?: Promise<void> | void): Promise<void> {
     if (this.loading) return this.loading;
     const transport = this.transport;
     switchMark('chat:get:start', { panelId: this.panelId });
-    const read = this.startOnRead ? this.chatClient.get(this.panelId, PAGE * 2) : this.chatClient.get(this.panelId, PAGE * 2, { start: false });
+    // A client fetching fresher data first (`resync`): the read waits for it, and the events heard
+    // meanwhile queue and apply onto its answer, so one fetch closes a gap even while the chat streams.
+    const get = () => (this.startOnRead ? this.chatClient.get(this.panelId, PAGE * 2) : this.chatClient.get(this.panelId, PAGE * 2, { start: false }));
+    const read = fetching ? fetching.catch(() => undefined).then(get) : get();
     const loading: Promise<void> = read.then(view => {
       switchMark('chat:get:end', { panelId: this.panelId, status: view.status, start: view.transcript?.start, n: view.transcript?.messages.length });
       if (transport !== this.transport) return;
@@ -227,8 +230,13 @@ export class ChatTabViewer {
       // A copy older than the window shown (a held copy behind the live events, T-116 PR 6) never
       // replaces it: the conversation would jump backwards. The events that arrived meanwhile apply to
       // the newer window, so they are neither lost nor taken for a gap. A host's own read is never older.
+      // A window scrolled back from the newest is never kept as the newest: the older copy is taken,
+      // and read again for what it lacks.
       const shown = this.state.transcript;
-      if (transcript && shown && transcript.generation === shown.generation && transcript.revision < shown.revision) transcript = shown;
+      if (transcript && shown && transcript.generation === shown.generation && transcript.revision < shown.revision) {
+        if (this.state.hasNewer) this.resyncNeeded = true;
+        else transcript = shown;
+      }
       let gap = false;
       for (const event of this.pending) {
         if (!transcript) break;

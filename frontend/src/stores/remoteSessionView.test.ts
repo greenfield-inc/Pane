@@ -117,4 +117,92 @@ describe('a shown remote chat stays current (T-116 PR 6)', () => {
     expect(viewer.snapshot().transcript?.revision).toBe(5);
     expect(machineRead).not.toHaveBeenCalled();
   });
+
+  it('a chat entered mid-turn catches the live tail with one host read, and follows the stream with no more (review quick check SF)', async () => {
+    const { viewer } = await shown(5, 3);
+    // The host: message i lands at revision i + 3; a read takes 300 ms and answers what the host has when it arrives.
+    let hostCount = 10;
+    machineRead.mockImplementation((machineId: string) => {
+      const count = hostCount;
+      return new Promise(resolve => setTimeout(() => resolve({ machineId, data: { success: true, data: { view: null, panels: [], layout: null, chat: snap('b', 'rp', count + 2, count).chat } } }), 300));
+    });
+    const end = () => (viewer.snapshot().transcript?.start ?? 0) + (viewer.snapshot().transcript?.messages.length ?? 0);
+
+    // One message every 100 ms for 5 s; the first is 7 messages past what is held.
+    for (let step = 0; step < 50; step++) {
+      const index = hostCount;
+      hostCount += 1;
+      chatListeners.forEach(listener => listener(event(index, index + 3)));
+      await tick(100);
+    }
+
+    expect(machineRead).toHaveBeenCalledTimes(1);
+    expect(end()).toBe(hostCount);
+    expect(viewer.snapshot().transcript?.revision).toBe(hostCount + 2);
+  });
+
+  it('a host that fails every read is read once per gap the events open, and not at all once they stop', async () => {
+    const { viewer } = await shown(5, 3);
+    machineRead.mockImplementation((machineId: string) => new Promise(resolve => setTimeout(() => resolve({ machineId, data: { success: false, error: 'nope' } }), 50)));
+    for (let step = 0; step < 20; step++) {
+      chatListeners.forEach(listener => listener(event(10 + step, 13 + step)));
+      await tick(100);
+    }
+    const during = machineRead.mock.calls.length;
+    await tick(10_000);
+    expect(during).toBeLessThanOrEqual(20);
+    expect(machineRead.mock.calls.length).toBe(during);
+    expect(viewer.snapshot().transcript?.revision).toBe(5);
+  });
+
+  it("'Earlier messages' reads the host's earlier messages, one read at a time, and nothing from an offline machine (D-19)", async () => {
+    const { remote } = await shown(5, 3);
+    const earlier = [msg(0), msg(1)].map(message => ({ ...message, role: 'user' as const }));
+    let answer: (value: { machineId: string; data: typeof earlier }) => void = () => undefined;
+    machineRead.mockImplementation(() => new Promise(resolve => { answer = resolve; }));
+    const client = remote.remoteChatClient('build', 'Build');
+
+    const first = client.history('rp', 2, 100);
+    const second = client.history('rp', 2, 100);
+    expect(machineRead).toHaveBeenCalledTimes(1);
+    expect(machineRead).toHaveBeenCalledWith('build', 'chat-tab:history', ['rp', 2, 100, { withStatus: true }]);
+    answer({ machineId: 'build', data: earlier });
+    expect((await first).map(message => message.id)).toEqual(['m0', 'm1']);
+    expect((await second).map(message => message.id)).toEqual(['m0', 'm1']);
+
+    const { useAllMachinesStore } = await import('./allMachinesStore');
+    useAllMachinesStore.setState({ machines: [{ id: 'build', label: 'Build', kind: 'remote', status: 'offline', offlineSince: '2026-11-27T00:00:00.000Z', mine: true }] });
+    machineRead.mockClear();
+    await expect(client.history('rp', 2, 100)).rejects.toThrow(/offline/);
+    expect(machineRead).not.toHaveBeenCalled();
+  });
+
+  it("a host that can't read earlier messages until the chat runs is asked once per run, and the chat says so (QA F-2)", async () => {
+    const { remote, useMachineMirrorStore } = await shown(5, 3);
+    machineRead.mockImplementation(async (machineId: string) => ({ machineId, data: { messages: [], unavailable: true } }));
+    const client = remote.remoteChatClient('build', 'Build');
+
+    expect(await client.history('rp', 2, 100)).toEqual([]);
+    expect(remote.earlierUnavailable('build', 'rp', 1)).toBe(true);
+    expect(await client.history('rp', 2, 100)).toEqual([]);
+    expect(machineRead).toHaveBeenCalledTimes(1);
+
+    // The chat runs on the host (a new generation): earlier messages are read again.
+    const runCopy = snap('b', 'rp', 6, 2);
+    runCopy.chat.generation = 2;
+    runCopy.chat.transcript.generation = 2;
+    mirrorSession.mockResolvedValue(runCopy);
+    useMachineMirrorStore.setState({ listings: listing({ b: 6 }) });
+    await tick(20);
+    expect(remote.earlierUnavailable('build', 'rp', 2)).toBe(false);
+    machineRead.mockImplementation(async (machineId: string) => ({ machineId, data: { messages: [msg(0)] } }));
+    expect((await client.history('rp', 2, 100)).map(message => message.id)).toEqual(['m0']);
+    expect(machineRead).toHaveBeenCalledTimes(2);
+  });
+
+  it('an older host that answers a bare list still loads earlier messages', async () => {
+    const { remote } = await shown(5, 3);
+    machineRead.mockImplementation(async (machineId: string) => ({ machineId, data: [msg(0), msg(1)] }));
+    expect((await remote.remoteChatClient('build', 'Build').history('rp', 2, 100)).map(message => message.id)).toEqual(['m0', 'm1']);
+  });
 });
