@@ -404,3 +404,8 @@ a.chat-status-item:hover,button.chat-status-item:hover:not(:disabled),.chat-stat
 .chat-pane-line-text { min-width:0; overflow-wrap:anywhere; }
 .chat-pane-line .chat-message-actions { align-self:center; margin-left:auto; }
 @media (hover:hover) { .chat-pane-line:hover .chat-copy { opacity:1; } }
+/* T-139: any card collapsed to its header rows and a two-line preview of the message and each reply. */
+.chat-agent-preview-text { display:block; width:100%; padding:2px 14px 8px; font-size:14px; line-height:1.45; text-align:left; color:var(--chat-muted-foreground); cursor:pointer; }
+.chat-agent-preview-text>span { overflow:hidden; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; overflow-wrap:anywhere; }
+.chat-agent-preview-text:hover { color:var(--chat-foreground); }
+.chat-agent-card[data-collapsed=preview] .chat-agent-head { padding-bottom:2px; }
