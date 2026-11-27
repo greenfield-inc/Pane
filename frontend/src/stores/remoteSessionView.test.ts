@@ -94,6 +94,7 @@ describe('a shown remote chat stays current (T-116 PR 6)', () => {
     const { remote, viewer } = await shown(5, 3);
     for (let second = 0; second < 20; second++) {
       // Another Session on that machine changes in the cache, and so does this chat's own copy, in step with its events.
+      // SAFETY: the store reads only the chat of a held snapshot; this fixture has it.
       remote.useRemoteSessionView.setState(state => ({ entries: { ...state.entries, [remote.remoteSessionKey('build', 'other')]: { readAt: 0, snapshot: snap('other', 'po', second + 1, 1) as never } } }));
       await tick(1000);
     }
