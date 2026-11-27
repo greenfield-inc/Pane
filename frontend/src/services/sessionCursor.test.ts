@@ -158,3 +158,45 @@ describe('a paused chat (T-87)', () => {
     expect(settle).toHaveBeenCalledWith('b', null, { resume: false });
   });
 });
+
+describe('which rows the cursor shows at once (T-116)', () => {
+  it("this machine's rows show at once; another machine's keep Enter", async () => {
+    const { cursor, appConfig } = await setup();
+    expect(cursor.rowShowsInstantly('local')).toBe(true);
+    expect(cursor.rowShowsInstantly('build')).toBe(false);
+    expect(cursor.rowShowsInstantly('local', { ...appConfig, arrowKeysOpenSessions: false })).toBe(false);
+  });
+
+  it('a window showing another machine shows no row at once, not even this computer\'s', async () => {
+    const { cursor, appConfig } = await setup();
+    // SAFETY: the cursor reads only remoteDaemon and arrowKeysOpenSessions of the config.
+    const remote = { ...appConfig, remoteDaemon: { client: { mode: 'remote', activeProfileId: 'build', profiles: [{ id: 'build', label: 'build-box', baseUrl: 'https://build-box.example:8443', token: 'pairing-token', transport: 'http+sse' }] } } } as AppConfig;
+    expect(cursor.cursorFollowEnabled(remote)).toBe(false);
+    expect(cursor.rowShowsInstantly('local', remote)).toBe(false);
+  });
+
+  it("peeks a Session the Sessions list has not loaded from this machine's All machines rows", async () => {
+    const { cursor, store } = await setup();
+    const { useAllMachinesStore } = await import('../stores/allMachinesStore');
+    store.setState({ sessions: [records[0]] });
+    // SAFETY: the cursor reads only the local snapshot's Session records.
+    useAllMachinesStore.setState({ snapshots: { local: { sessions: records } } as never });
+    cursor.showSessionAtCursor('b');
+    expect(store.getState().cursorSessionId).toBe('b');
+    expect(peek).toHaveBeenCalledWith({ sessionId: 'b' });
+  });
+});
+
+describe('a load never holds the cursor (D-6)', () => {
+  it('a peek that never answers does not delay the next move, and its answer is dropped', async () => {
+    const { cursor, store } = await setup();
+    peek.mockReturnValue(new Promise(() => undefined));
+    cursor.showSessionAtCursor('b');
+    cursor.showSessionAtCursor('c');
+    expect(store.getState().cursorSessionId).toBe('c');
+    cursor.showSessionAtCursor('b');
+    expect(store.getState().cursorSessionId).toBe('b');
+    // b's first peek is still in flight: one peek per Session, not one per press.
+    expect(peek.mock.calls.filter(([request]) => request.sessionId === 'b')).toHaveLength(1);
+  });
+});

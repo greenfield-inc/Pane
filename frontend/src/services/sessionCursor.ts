@@ -8,9 +8,10 @@
  * with one `open` call. Passing over a Session starts nothing and saves nothing, and
  * the cursor never resumes a paused chat (Enter or a click does, as before).
  *
- * Only this machine's Sessions follow the cursor: the All machines view, worktree Pane
- * and project rows keep Enter, and so does a window showing another machine. A Session
- * whose agent runs in a terminal is shown only by Enter or a click, as before.
+ * Only this machine's Sessions follow the cursor (`rowShowsInstantly`), in its own sidebar
+ * and in the All machines view; another machine's rows, worktree Pane and project rows keep
+ * Enter, and so does every row in a window showing another machine. A Session whose agent
+ * runs in a terminal is shown only by Enter or a click, as before.
  */
 import { useConfigStore } from '../stores/configStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -18,9 +19,12 @@ import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStor
 import { useSessionStore } from '../stores/sessionStore';
 import { cachedSessionView, peekSessionView } from '../stores/sessionViewCache';
 import { usePanelStore } from '../stores/panelStore';
+import { useAllMachinesStore } from '../stores/allMachinesStore';
+import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { panePausedMark } from '../../../shared/types/panels';
 import type { AppConfig } from '../types/config';
+import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 
 /** How long the cursor rests on a row before its Session is selected and its agent starts. */
 const SETTLE_MS = 1000;
@@ -41,6 +45,21 @@ export function cursorFollowEnabled(config: AppConfig | null | undefined = useCo
 /** The same, for a component that should re-render when it changes. */
 export function useCursorFollowEnabled(): boolean {
   return useConfigStore(state => cursorFollowEnabled(state.config));
+}
+
+/**
+ * Whether a Session row on `machineId` shows its Session as the cursor passes, rather than
+ * waiting for Enter (T-116). Today only this computer's rows, in a window on this computer:
+ * a Session on another machine has nothing here to show until the window switches to it.
+ * Mirrored machines (T-116 PR 6) extend this, and every row asks it.
+ */
+export function rowShowsInstantly(machineId: string, config: AppConfig | null | undefined = useConfigStore.getState().config): boolean {
+  return cursorFollowEnabled(config) && machineId === LOCAL_MACHINE_ID;
+}
+
+/** The same, for a row that should re-render when it changes. */
+export function useRowShowsInstantly(machineId: string): boolean {
+  return useConfigStore(state => rowShowsInstantly(machineId, state.config));
 }
 
 let pending: string | undefined;
@@ -81,11 +100,20 @@ function listen(): void {
   });
 }
 
+/**
+ * This machine's record of a Session: from the Sessions list, or from the All machines
+ * view's read of this machine when the list has not loaded (that view does not load it).
+ */
+function sessionRecord(sessionId: string): OrchestrationSessionRecord | undefined {
+  return useOrchestrationSessionStore.getState().sessions.find(session => session.id === sessionId)
+    ?? useAllMachinesStore.getState().snapshots[LOCAL_MACHINE_ID]?.sessions.find(session => session.id === sessionId);
+}
+
 /** A Session whose agent runs in a terminal keeps Enter (known once it was read). */
 function isTerminalSession(sessionId: string): boolean {
   const entry = cachedSessionView(sessionId);
   if (entry) return entry.view.panel.type !== 'chat';
-  const record = useOrchestrationSessionStore.getState().sessions.find(session => session.id === sessionId);
+  const record = sessionRecord(sessionId);
   const agentPanel = record && usePanelStore.getState().panels[record.internalSessionId]?.find(panel => panel.id === record.panelIds[record.agent]);
   return agentPanel !== undefined && agentPanel.type !== 'chat';
 }
@@ -110,7 +138,7 @@ export function showSessionAtCursor(sessionId: string): void {
   pending = sessionId;
   sessions.showAtCursor(sessionId);
   timer = setTimeout(settleSessionCursor, SETTLE_MS);
-  const record = sessions.sessions.find(session => session.id === sessionId);
+  const record = sessionRecord(sessionId);
   if (!record || cachedSessionView(sessionId)) return;
   // One read-only peek per Session not held; a Session that turns out to be a terminal one goes back.
   void peekSessionView({ sessionId, internalSessionId: record.internalSessionId, hostId: hostIdOf(useConfigStore.getState().config) })

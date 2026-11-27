@@ -31,6 +31,7 @@ import { useNavigationStore } from '../../stores/navigationStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { commandOnMachine, openOnMachine, runOnMachine } from '../../utils/machineRowActions';
+import { SESSION_CURSOR_ATTRIBUTE, useRowShowsInstantly } from '../../services/sessionCursor';
 import { confirmMachineArchive } from '../archiveConfirm';
 import { savedOrderAfterMove, type AllMachinesPane, type AllMachinesSession, type MachineRef } from '../../utils/allMachinesTree';
 import { DropLine, useRowReorder, type ReorderList, type RowReorder } from '../../hooks/useRowReorder';
@@ -254,6 +255,8 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
   const moveLabel = session.move && session.move.state !== 'moved' ? moveMarkLabel(session.move) : null;
   const arriving = session.move?.state === 'arriving';
   const dimmed = Boolean(session.paused || moveLabel);
+  // The sidebar cursor shows this Session as it passes when it can show it here (T-116); other rows keep Enter.
+  const instant = useRowShowsInstantly(machine.id) && !arriving;
   return (
     <div className={cn('relative', row.offline && 'opacity-50')} data-row-key={row.key} {...reorder.drag} onKeyDown={reorder.onKeyDown}>
       <DropLine edge={reorder.indicator} />
@@ -272,6 +275,7 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
           data-row-open
           data-sidebar-item
           data-sidebar-key={`machine-session-${row.key}`}
+          {...{ [SESSION_CURSOR_ATTRIBUTE]: instant ? session.id : undefined }}
           onClick={() => { if (!arriving) void openOnMachine(machine.id, { kind: 'session', id: session.id, name: session.name }); }}
           aria-current={active ? 'page' : undefined}
           aria-disabled={arriving || undefined}

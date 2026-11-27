@@ -3,7 +3,7 @@ import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { clearSessionViewCache } from '../stores/sessionViewCache';
-import { dropSessionCursor } from '../services/sessionCursor';
+import { cursorFollowEnabled, dropSessionCursor, settleOnSession } from '../services/sessionCursor';
 import { isMachineDimmed, useAllMachinesStore } from '../stores/allMachinesStore';
 import { LOCAL_MACHINE_ID, type MachineCommand } from '../../../shared/types/machineConnections';
 import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
@@ -44,8 +44,10 @@ function openHere(target: MachineTarget): void {
   } else if (target.kind === 'session') {
     void useSessionStore.getState().setActiveSession(null);
     navigation.navigateToPaneChat();
-    // The store owns selection errors and shows them in the Session view.
-    useOrchestrationSessionStore.getState().select({ sessionId: target.id }).catch(() => undefined);
+    // The store owns selection errors and shows them in the Session view. With arrow keys
+    // opening Sessions (T-87), a click or Enter settles what the cursor showed: one open call.
+    const opened = cursorFollowEnabled() ? settleOnSession(target.id) : useOrchestrationSessionStore.getState().select({ sessionId: target.id });
+    opened.catch(() => undefined);
   } else if (target.kind === 'todo') {
     navigation.navigateToTodos({ number: target.id });
   } else {
