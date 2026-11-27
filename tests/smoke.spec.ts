@@ -1,7 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import { gotoApp, installElectronApiMock } from './electronApiMock';
-import { dropRemoteConnection, openConnectedRemotePwa, restoreRemoteConnection } from './remotePwaMock';
+import { dropRemoteConnection, openConnectedRemotePwa, reloadRemotePwa, restoreRemoteConnection } from './remotePwaMock';
 
 test.beforeEach(async ({ page }) => {
   await installElectronApiMock(page, {
@@ -439,7 +439,7 @@ test('remote terminal starts a shell that nobody has started since the computer 
 
   // Reopening the app on the shell tab mounts the terminal while the connection is still restoring.
   started = false;
-  await page.reload();
+  await reloadRemotePwa(page);
   await expect(page.getByRole('tab', { name: 'shell', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect.poll(() => started, { timeout: 10_000 }).toBe(true);
 });
