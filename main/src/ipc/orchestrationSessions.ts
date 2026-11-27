@@ -6,9 +6,10 @@ import type { AppServices } from './types';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionArchiveResult,
+  OrchestrationSessionListOptions,
   OrchestrationSessionSelector,
 } from '../../../shared/types/orchestrationSession';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { previewOrchestrationSessionArchive, updateOrchestrationSession } from './runpane';
 import { clientShowsChatTab } from './panels';
@@ -109,13 +110,13 @@ export function registerOrchestrationSessionHandlers(
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:promote');
 
 
-  commandRegistry.register('orchestration-sessions:list', async () => {
-    return invokeSafely(() => requireManager().list());
+  commandRegistry.register('orchestration-sessions:list', async (options?: PaneCommandValue) => {
+    return invokeSafely(() => requireManager().list(decodeListOptions(options)));
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:list');
 
-  commandRegistry.register('orchestration-sessions:select', async (value: PaneCommandValue) => {
-    return invokeSafely(() => requireManager().select(decodeSelector(value)));
+  commandRegistry.register('orchestration-sessions:select', async (value: PaneCommandValue, options?: PaneCommandValue) => {
+    return invokeSafely(() => requireManager().select(decodeSelector(value), decodeListOptions(options)));
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:select');
 
@@ -169,8 +170,8 @@ export function registerOrchestrationSessionHandlers(
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:archive-preview');
 
-  commandRegistry.register('orchestration-sessions:reorder', async (value: PaneCommandValue) => {
-    return invokeSafely(() => requireManager().reorder(decodeBoundary(value, reorderSchema).sessionIds));
+  commandRegistry.register('orchestration-sessions:reorder', async (value: PaneCommandValue, options?: PaneCommandValue) => {
+    return invokeSafely(() => requireManager().reorder(decodeBoundary(value, reorderSchema).sessionIds, decodeListOptions(options)));
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:reorder');
 
@@ -224,6 +225,13 @@ function selectorSchemaFields() {
     sessionId: boundary.optional(boundary.nonEmptyString),
     name: boundary.optional(boundary.nonEmptyString),
   };
+}
+
+const listOptionsSchema = boundary.object({ summary: boundary.optional(boundary.boolean) });
+
+/** A list's options; anything else (an older caller's extra argument) reads as a request for full records. */
+function decodeListOptions(value: PaneCommandValue | undefined): OrchestrationSessionListOptions {
+  return { summary: decodeOptionalBoundary(value, listOptionsSchema)?.summary === true };
 }
 
 function decodeSelector(value: PaneCommandValue): OrchestrationSessionSelector {

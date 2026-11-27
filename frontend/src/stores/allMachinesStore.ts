@@ -5,6 +5,7 @@ import { useErrorStore } from './errorStore';
 import { seedArrangement, type MachineRef, type MachineSnapshot, type MachineView, type SeededArrangement } from '../utils/allMachinesTree';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { machineLetter } from '../../../shared/utils/machineMarks';
+import { SESSION_LIST_SUMMARY } from '../../../shared/types/orchestrationSession';
 import type { MachineSelectOutcome } from '../hooks/useMachines';
 import {
   type MachineConnectionsEvent,
@@ -34,7 +35,8 @@ function answered<T>(response: IPCResponse<T>): T | undefined {
 /** Each list of a machine and the `machines:read` that fills it. */
 const READERS = {
   projects: async (id: string) => answered((await window.electronAPI.machines.read(id, 'sessions:get-all-with-projects')).data) ?? [],
-  sessions: async (id: string) => answered((await window.electronAPI.machines.read(id, 'orchestration-sessions:list')).data)?.sessions ?? [],
+  // Summaries (T-127): the feed shows no activity log or profile, and refetches on every Session change.
+  sessions: async (id: string) => answered((await window.electronAPI.machines.read(id, 'orchestration-sessions:list', [SESSION_LIST_SUMMARY])).data)?.sessions ?? [],
   statuses: async (id: string) => answered((await window.electronAPI.machines.read(id, 'panels:agent-statuses')).data) ?? [],
   // A host too old to have Session activity shows its Sessions idle.
   activity: async (id: string) => {

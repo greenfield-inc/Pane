@@ -1,6 +1,6 @@
 import { Archive, ArchiveRestore, ChevronDown, ChevronRight, MessageSquare, Monitor, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, RefreshCw, TerminalSquare, X } from 'lucide-react';
 import { useEffect, useMemo, type ReactNode } from 'react';
-import type { OrchestrationSessionRecord } from '../../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionSummary } from '../../../../shared/types/orchestrationSession';
 import type { TerminalPausedMark } from '../../../../shared/types/panels';
 import type { RemoteProjectWithSessions } from '../runtime/remoteRuntimeAdapter';
 import type { Session } from '../../types/session';
@@ -31,9 +31,9 @@ export interface RemoteSidebarActions {
   createPane: (project?: RemoteProjectWithSessions) => void;
   openSession: (sessionId: string) => void;
   createSession: () => void;
-  toggleSessionPinned: (session: OrchestrationSessionRecord) => void;
-  setSessionArchived: (session: OrchestrationSessionRecord, archived: boolean) => void;
-  setSessionPaused: (session: OrchestrationSessionRecord, paused: boolean) => void;
+  toggleSessionPinned: (session: OrchestrationSessionSummary) => void;
+  setSessionArchived: (session: OrchestrationSessionSummary, archived: boolean) => void;
+  setSessionPaused: (session: OrchestrationSessionSummary, paused: boolean) => void;
   reloadSessions: () => void;
   loadArchived: () => void;
   refresh: () => void;
@@ -119,7 +119,7 @@ export function RemoteSidebar({
   const selectedScope = useMemo(() => {
     if (!selectedPaneId || openSessionId) return null;
     const scopes: string[] = [];
-    const addSessionScopes = (list: OrchestrationSessionRecord[], placement: 'pinned' | 'sessions') => {
+    const addSessionScopes = (list: OrchestrationSessionSummary[], placement: 'pinned' | 'sessions') => {
       for (const session of list) {
         // A collapsed Session's Pane rows are hidden, so they cannot carry the highlight.
         if (!expandedSessionIds.has(session.id)) continue;
@@ -149,7 +149,7 @@ export function RemoteSidebar({
     />
   );
 
-  const sessionRow = (session: OrchestrationSessionRecord, placement: 'pinned' | 'sessions') => {
+  const sessionRow = (session: OrchestrationSessionSummary, placement: 'pinned' | 'sessions') => {
     const panes = session.associations
       .map(association => paneById.get(association.paneId))
       .filter((pane): pane is Session => pane !== undefined);

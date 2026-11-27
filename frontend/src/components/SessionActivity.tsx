@@ -1,10 +1,10 @@
-import type { OrchestrationSessionRecord, SessionActivity } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionSummary, SessionActivity } from '../../../shared/types/orchestrationSession';
 import { useSessionBlockedPaneCount } from '../hooks/useAgentStatus';
 import { useSessionActivity } from '../services/sessionActivitySync';
 import { cn } from '../utils/cn';
 
 interface SessionActivityProps {
-  session: OrchestrationSessionRecord;
+  session: OrchestrationSessionSummary;
   paneIds: readonly string[];
 }
 

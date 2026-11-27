@@ -16,7 +16,7 @@ import {
   useOrchestrationSessionStore,
   type OrchestrationSessionAvailability,
 } from '../stores/orchestrationSessionStore';
-import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 import type { OrchestrationSessionArchivedPanes, OrchestrationSessionUpdateInput } from '../../../shared/types/orchestrationSession';
 import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '../../../shared/types/orchestrationSession';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
@@ -88,7 +88,7 @@ function sessionOrderError(cause: unknown): string {
   return `The Session order was not saved, so the list is back in its previous order. ${sentence}${next}`;
 }
 
-function sessionTestId(session: OrchestrationSessionRecord, list: SessionOrderList): string {
+function sessionTestId(session: OrchestrationSessionSummary, list: SessionOrderList): string {
   const isLegacy = session.id === LEGACY_ORCHESTRATION_SESSION_ID;
   if (list === 'rail') return isLegacy ? 'compact-pane-chat' : `compact-orchestration-session-${session.id}`;
   if (isLegacy) return list === 'pinned' ? 'orchestration-pinned-pane-chat' : 'orchestration-pane-chat';
@@ -101,7 +101,7 @@ function dropEdge(event: { clientY: number; currentTarget: Element }): SessionDr
   return event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
 }
 
-function statusLabel(session: OrchestrationSessionRecord): string {
+function statusLabel(session: OrchestrationSessionSummary): string {
   if (session.blockers.length > 0) return 'Blocked';
   if (session.report) return 'Report available';
   return 'No report yet';
@@ -221,7 +221,7 @@ export function OrchestrationSessionNav({
   }, [refresh]);
 
   /** A person clicked this Session row: resume only its chat when Settings asks. */
-  const resumeChatOnOpen = useCallback((session: OrchestrationSessionRecord) => {
+  const resumeChatOnOpen = useCallback((session: OrchestrationSessionSummary) => {
     const chatPanels = usePanelStore.getState().getSessionPanels(session.internalSessionId);
     // Unloaded chat tabs may be paused; resuming a chat that is running changes nothing.
     const chatPaused = Boolean(session.paused) || chatPanels.length === 0 || panePausedMark(chatPanels) !== undefined;
@@ -248,7 +248,7 @@ export function OrchestrationSessionNav({
   }, [toggleStoredSessionExpanded]);
 
   const openSessionMenu = useCallback((
-    session: OrchestrationSessionRecord,
+    session: OrchestrationSessionSummary,
     x: number,
     y: number,
     trigger?: HTMLElement,
@@ -267,7 +267,7 @@ export function OrchestrationSessionNav({
     });
   }, []);
 
-  const handleSessionContextMenu = useCallback((event: ReactMouseEvent<HTMLElement>, session: OrchestrationSessionRecord) => {
+  const handleSessionContextMenu = useCallback((event: ReactMouseEvent<HTMLElement>, session: OrchestrationSessionSummary) => {
     event.preventDefault();
     event.stopPropagation();
     // Not a trigger: a right-click leaves focus where it was, but a dialog closes back to this row.
@@ -278,7 +278,7 @@ export function OrchestrationSessionNav({
     list === 'pinned' ? pinnedSessions : activeSessions
   ), [activeSessions, pinnedSessions]);
 
-  const moveSession = useCallback(async (session: OrchestrationSessionRecord, order: string[]) => {
+  const moveSession = useCallback(async (session: OrchestrationSessionSummary, order: string[]) => {
     setActionError(null);
     setOrderAnnouncement(`Moved ${session.name || 'Pane Chat'} to position ${order.indexOf(session.id) + 1} of ${order.length}`);
     try {
@@ -290,7 +290,7 @@ export function OrchestrationSessionNav({
     }
   }, [refresh, reorder]);
 
-  const handleSessionKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>, session: OrchestrationSessionRecord, list: SessionOrderList) => {
+  const handleSessionKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>, session: OrchestrationSessionSummary, list: SessionOrderList) => {
     if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
       event.preventDefault();
       if (isReadOnlyHost()) return;
@@ -322,7 +322,7 @@ export function OrchestrationSessionNav({
   }, [draggedSessionId]);
 
   /** Drag handlers for one Session in one list: the row starts the drag, the whole Session takes drops. */
-  const sessionDragProps = (session: OrchestrationSessionRecord, list: SessionOrderList) => {
+  const sessionDragProps = (session: OrchestrationSessionSummary, list: SessionOrderList) => {
     // Only a drag that started in this list, over a Session other than the dragged one.
     const fromThisList = () => {
       const origin = dragOrigin.current;
@@ -440,7 +440,7 @@ export function OrchestrationSessionNav({
   const sessionsVisible = availabilityIsVisible(availability);
   const hasPinnedContent = pinnedSessions.length > 0 || Boolean(pinnedPaneRows);
 
-  const renderSessionRow = (session: OrchestrationSessionRecord, placement: SessionRowPlacement): ReactNode => {
+  const renderSessionRow = (session: OrchestrationSessionSummary, placement: SessionRowPlacement): ReactNode => {
     const visibleAssociations = session.associations.filter(association => (
       !availablePaneIds || availablePaneIds.has(association.paneId)
     ));

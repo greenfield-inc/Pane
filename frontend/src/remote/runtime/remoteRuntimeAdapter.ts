@@ -9,9 +9,11 @@ import type {
   OrchestrationSessionListResult,
   OrchestrationSessionOverview,
   OrchestrationSessionRecord,
+  OrchestrationSessionSummary,
   OrchestrationSessionUpdateInput,
   OrchestrationSessionView,
 } from '../../../../shared/types/orchestrationSession';
+import { SESSION_LIST_SUMMARY } from '../../../../shared/types/orchestrationSession';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { FileDiffRequest } from '../../../../shared/types/gitDiff';
 import { BRANCH_SCOPE, decodeFileDiff, decodeManifest, type ChangeList } from '../../../../shared/gitDiffClient';
@@ -271,8 +273,9 @@ export class RemoteRuntimeAdapter {
     return this.invoke<void>('sessions:restore', [sessionId]);
   }
 
-  listOrchestrationSessions(): Promise<OrchestrationSessionListResult> {
-    return this.invoke<OrchestrationSessionListResult>('orchestration-sessions:list');
+  /** Summaries (T-127): no Session's activity log or profile; `openOrchestrationSession` reads the full record. */
+  listOrchestrationSessions(): Promise<OrchestrationSessionListResult<OrchestrationSessionSummary>> {
+    return this.invoke<OrchestrationSessionListResult<OrchestrationSessionSummary>>('orchestration-sessions:list', [SESSION_LIST_SUMMARY]);
   }
 
   /**

@@ -5,7 +5,7 @@ import path from 'path';
 import { readFileSync } from 'fs';
 import { createHash, X509Certificate } from 'crypto';
 import { EventEmitter } from 'events';
-import { type LookupFunction } from 'net';
+import net, { type LookupFunction } from 'net';
 import { hostname as getOsHostname } from 'os';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig, type RemotePaneConnectionState } from '../../../../shared/types/remoteDaemon';
@@ -1661,5 +1661,58 @@ describe('RemotePaneClient latency', () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+});
+
+describe('RemotePaneClient reads compressed answers (T-127)', () => {
+  const cleanups: Array<() => Promise<void> | void> = [];
+  afterEach(async () => {
+    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  });
+
+  /** A real host API answering `channel` with `answer`, reached through a relay that counts the bytes the host sends back. */
+  async function hostBehindRelay(channel: string, answer: JsonValue) {
+    const registry = new PaneCommandRegistry();
+    registry.register(channel, () => answer);
+    const hostConfig = createDefaultRemoteDaemonConfig();
+    hostConfig.host.config = { ...hostConfig.host.config, enabled: true, listenHost: '127.0.0.1', listenPort: 0 };
+    hostConfig.host.clients = [{ id: 'laptop', label: 'Laptop', createdAt: new Date(0).toISOString(), tokenHash: hashRemoteDaemonToken('link-token') }];
+    const host = new PaneRemoteHttpApiServer(registry, { getConfig: () => ({ remoteDaemon: hostConfig }) });
+    await host.start();
+    cleanups.push(() => host.stop());
+    const hostPort = host.getAddress()!.port;
+
+    let bytesFromHost = 0;
+    const sockets = new Set<import('net').Socket>();
+    const relay = net.createServer((client) => {
+      const upstream = net.connect(hostPort, '127.0.0.1');
+      sockets.add(client).add(upstream);
+      upstream.on('data', (chunk: Buffer) => { bytesFromHost += chunk.length; });
+      client.pipe(upstream).pipe(client);
+      client.on('error', () => upstream.destroy());
+      upstream.on('error', () => client.destroy());
+    });
+    await new Promise<void>(resolve => relay.listen(0, '127.0.0.1', () => resolve()));
+    cleanups.push(() => new Promise<void>((resolve) => {
+      for (const socket of sockets) socket.destroy();
+      relay.close(() => resolve());
+    }));
+    // SAFETY: a server listening on a host and port reports an AddressInfo.
+    const relayPort = (relay.address() as import('net').AddressInfo).port;
+    const client = new RemotePaneClient({ id: 'studio', label: 'Studio', baseUrl: `http://127.0.0.1:${relayPort}`, token: 'link-token', transport: 'http+sse' });
+    cleanups.push(() => client.disconnect());
+    return { client, bytesFromHost: () => bytesFromHost };
+  }
+
+  it('asks the host for gzip and reads the compressed answer, so a long list crosses the link small', async () => {
+    const sessions = Array.from({ length: 200 }, (_, index) => ({ id: `session-${index}`, name: `Session ${index}`, goal: 'Ship the small list. '.repeat(20) }));
+    const answer = { success: true, data: { sessions } };
+    const { client, bytesFromHost } = await hostBehindRelay('orchestration-sessions:list', answer);
+
+    const before = bytesFromHost();
+    await expect(client.invoke('orchestration-sessions:list', [{ summary: true }])).resolves.toEqual(answer);
+
+    const raw = Buffer.byteLength(JSON.stringify({ ok: true, result: answer }));
+    expect(bytesFromHost() - before).toBeLessThan(raw / 10);
   });
 });

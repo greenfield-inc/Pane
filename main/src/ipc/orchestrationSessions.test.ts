@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
 import { PaneError } from '../../../shared/paneError';
@@ -41,7 +41,7 @@ describe('orchestration-sessions:reorder', () => {
 
     const result = await registerWith(reorder).invokeRemote('orchestration-sessions:reorder', [{ sessionIds: ['b', 'a'] }]);
 
-    expect(reorder).toHaveBeenCalledWith(['b', 'a']);
+    expect(reorder).toHaveBeenCalledWith(['b', 'a'], { summary: false });
     expect(result).toEqual({ success: true, data: { sessions: [] } });
   });
 
@@ -81,5 +81,45 @@ describe('orchestration-sessions:update', () => {
       expect(result).toMatchObject({ success: false, error: expect.stringContaining(part) });
     }
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe('the Session list channels (T-127)', () => {
+  type ListingManager = Partial<Record<'list' | 'select' | 'reorder', Mock>>;
+
+  function registerWith(manager: ListingManager): PaneCommandRegistry {
+    const registry = new PaneCommandRegistry();
+    registerOrchestrationSessionHandlers(
+      // SAFETY: The handlers only call ipcMain.handle, and this test invokes the registry directly.
+      { handle: () => undefined } as IpcMain,
+      // SAFETY: These channels read only the manager's list, select and reorder.
+      { orchestrationSessionManager: manager } as AppServices,
+      registry,
+    );
+    return registry;
+  }
+
+  it('passes a summary request through to list, select and reorder', async () => {
+    const answer = async () => ({ sessions: [] });
+    const manager = { list: vi.fn(answer), select: vi.fn(answer), reorder: vi.fn(answer) };
+    const registry = registerWith(manager);
+
+    await registry.invokeRemote('orchestration-sessions:list', [{ summary: true }]);
+    await registry.invokeRemote('orchestration-sessions:select', [{ sessionId: 's1' }, { summary: true }]);
+    await registry.invokeRemote('orchestration-sessions:reorder', [{ sessionIds: ['a'] }, { summary: true }]);
+
+    expect(manager.list).toHaveBeenCalledWith({ summary: true });
+    expect(manager.select).toHaveBeenCalledWith({ sessionId: 's1' }, { summary: true });
+    expect(manager.reorder).toHaveBeenCalledWith(['a'], { summary: true });
+  });
+
+  it('asks for full records when a caller sends no options, or options it does not understand', async () => {
+    const list = vi.fn(async () => ({ sessions: [] }));
+    const registry = registerWith({ list });
+
+    await registry.invokeRemote('orchestration-sessions:list', []);
+    await registry.invokeRemote('orchestration-sessions:list', ['summary']);
+
+    expect(list.mock.calls).toEqual([[{ summary: false }], [{ summary: false }]]);
   });
 });

@@ -2,7 +2,7 @@ import { tokenAccess } from '../../../shared/types/accessLevel';
 import { setHostAccess, useReadOnlyHost } from '../stores/readOnlyHostStore';
 import { Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import type { OrchestrationSessionRecord, OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionSummary, OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
 import { pausedMarkOf, type PanelActivationRequest, type ToolPanel, type ToolPanelType } from '../../../shared/types/panels';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus, RemotePwaAffordances } from '../../../shared/types/remoteDaemon';
 import type { Session } from '../types/session';
@@ -149,7 +149,7 @@ export function RemotePwaApp() {
   const [mountedTerminalPanelIds, setMountedTerminalPanelIds] = useState<string[]>([]);
   /** The sidebar row the open Pane was tapped in, so only that copy is highlighted. */
   const [selectedPaneScope, setSelectedPaneScope] = useState<{ paneId: string; scope: string } | null>(null);
-  const [archivedSessionToast, setArchivedSessionToast] = useState<OrchestrationSessionRecord | null>(null);
+  const [archivedSessionToast, setArchivedSessionToast] = useState<OrchestrationSessionSummary | null>(null);
   /** The saved profile being reconnected to on open, until that attempt ends. */
   const [reconnectingProfile, setReconnectingProfile] = useState<RemotePaneConnectionProfile | null>(null);
   /** A pairing link that would join this browser's computers with another group, until the person answers. */

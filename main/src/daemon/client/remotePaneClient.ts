@@ -14,6 +14,7 @@ import { isIP, type LookupFunction } from 'net';
 import { hostname as getOsHostname, networkInterfaces } from 'os';
 import WebSocket, { type ClientOptions } from 'ws';
 import { Readable } from 'stream';
+import { createGunzip } from 'zlib';
 import { noopPaneEventSink, type PaneEventSink } from '../../core/eventSink';
 import type { ConfigManager } from '../../services/configManager';
 import type { AnalyticsManager } from '../../services/analyticsManager';
@@ -2384,6 +2385,8 @@ async function requestJson(
       ...options,
       headers: {
         ...options.headers,
+        // The host gzips answers of 1 KB or more when asked (T-127): a long Session list crosses a slow link in a tenth of the bytes.
+        'Accept-Encoding': 'gzip',
         'Content-Length': Buffer.byteLength(body),
       },
     }, (response) => {
@@ -2402,9 +2405,13 @@ async function requestJson(
   });
 }
 
+/** The answer's text, unzipped when the host compressed it. */
 async function readResponseBody(response: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of response) {
+  const encoding = String(response.headers['content-encoding'] ?? '').trim().toLowerCase();
+  const body = encoding === 'gzip' ? response.pipe(createGunzip()) : response;
+  if (body !== response) response.on('error', error => body.destroy(error));
+  for await (const chunk of body) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
   }
 

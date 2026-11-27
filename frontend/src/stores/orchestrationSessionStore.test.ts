@@ -148,7 +148,7 @@ describe('Session selection per desktop', () => {
 describe('Session order', () => {
   // SAFETY: Order tests read only record ids.
   const four = ['a', 'b', 'c', 'd'].map(id => ({ id, name: id.toUpperCase() } as OrchestrationSessionRecord));
-  const ids = (records: OrchestrationSessionRecord[]) => records.map(record => record.id);
+  const ids = (records: ReadonlyArray<{ id: string }>) => records.map(record => record.id);
   const reorder = vi.fn();
   async function orderStore() {
     vi.resetModules();

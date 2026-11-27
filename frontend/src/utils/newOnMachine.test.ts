@@ -7,6 +7,7 @@ import {
   createSessionOn,
   newMachines,
   readRepositories,
+  readSessionNames,
   rememberNewMachine,
   startingNewMachineId,
 } from './newOnMachine';
@@ -83,6 +84,14 @@ describe('reading and creating on the picked machine', () => {
   it("reads the picked machine's repositories", async () => {
     expect(await readRepositories({ id: 'build-box', name: 'build-box' })).toEqual([{ id: 4, name: 'infra' }]);
     expect(await readRepositories({ id: 'office-pc', name: 'office-pc' })).toEqual([{ id: 1, name: 'acme-web' }, { id: 2, name: 'blog' }]);
+  });
+
+  it("reads the picked machine's Session names from its summary list (T-127)", async () => {
+    const read = vi.fn(async (machineId: string, _channel: string, _args: unknown[]) => ({ machineId, data: { success: true, data: { sessions: [{ id: 's1', name: 'Session 3' }] } } }));
+    vi.stubGlobal('window', { ...window, electronAPI: { machines: { ...window.electronAPI.machines, read } } });
+
+    expect(await readSessionNames({ id: 'build-box', name: 'build-box' })).toEqual([{ name: 'Session 3' }]);
+    expect(read).toHaveBeenCalledWith('build-box', 'orchestration-sessions:list', [{ summary: true }]);
   });
 
   it("explains a machine that can't list its repositories", async () => {

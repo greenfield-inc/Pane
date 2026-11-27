@@ -10,6 +10,7 @@ import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult }
 import { contextBridge, ipcRenderer } from 'electron';
 import { createPreferencesApi } from '../../shared/types/preferences';
 import { isDaemonOwnedChannel } from '../../shared/types/daemon';
+import { SESSION_LIST_SUMMARY } from '../../shared/types/orchestrationSession';
 import { BROWSER_TAB_NOTICE_CHANNEL, BROWSER_VIEW_LIVE_CHANNEL, type BrowserTabNotice } from '../../shared/types/browser';
 import {
   WINDOW_CONTROLS_OVERLAY_ARG,
@@ -628,12 +629,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   orchestrationSessions: {
     runtimes: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:runtimes'),
-    list: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:list'),
-    select: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:select', selector),
+    // The renderer's list reads summaries (T-127); a Session's activity log and profile come with `get`.
+    list: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:list', SESSION_LIST_SUMMARY),
+    select: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:select', selector, SESSION_LIST_SUMMARY),
     create: (input: OrchestrationSessionCreateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:create', input, { chatTabs: true, chatAgents: true }),
     get: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:get', selector, { chatTabs: true, chatAgents: true }),
     update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:update', selector, input),
-    reorder: (sessionIds: string[]): Promise<IPCResponse> => invokeIpc('orchestration-sessions:reorder', { sessionIds }),
+    reorder: (sessionIds: string[]): Promise<IPCResponse> => invokeIpc('orchestration-sessions:reorder', { sessionIds }, SESSION_LIST_SUMMARY),
     setAgent: (selector: OrchestrationSessionSelector, agent: PaneChatAgent): Promise<IPCResponse> => invokeIpc('orchestration-sessions:set-agent', selector, agent),
     associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:associate', selector, association),
     detach: (selector: OrchestrationSessionSelector, paneId?: string): Promise<IPCResponse> => invokeIpc('orchestration-sessions:detach', selector, paneId),
