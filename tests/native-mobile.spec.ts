@@ -103,7 +103,8 @@ test('a secure-storage read failure does not overwrite the saved profiles', asyn
     if (!store) throw new Error('Native bridge fixture missing');
     store.get = async () => { throw new Error('Secure storage is locked'); };
   });
-  await page.goto('/remote.html');
-  await expect(page.getByText('Secure storage is locked')).toBeVisible();
+  // The first remote.html in a shard compiles it cold, as openConnectedRemotePwa allows for.
+  await page.goto('/remote.html', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await expect(page.getByText('Secure storage is locked')).toBeVisible({ timeout: 30_000 });
   expect(await page.evaluate(() => localStorage.getItem('pane.remotePwa.savedProfiles'))).toBe('existing encrypted profiles');
 });
