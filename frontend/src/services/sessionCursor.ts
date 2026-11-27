@@ -22,7 +22,7 @@ import { usePanelStore } from '../stores/panelStore';
 import { useAllMachinesStore } from '../stores/allMachinesStore';
 import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
-import { panePausedMark } from '../../../shared/types/panels';
+import { chatPausedMarkOf, panePausedMark } from '../../../shared/types/panels';
 import type { AppConfig } from '../types/config';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 
@@ -158,8 +158,9 @@ export function pauseSessionCursor(): void {
 
 /**
  * Settle now on what the cursor shows, by itself (the rest, typing, focus leaving the
- * sidebar): it is selected and its agent started, but a paused chat stays paused (the open
- * says `resume: false`, and main also checks, so a tab paused since it was read stays paused too).
+ * sidebar): it is selected and its agent started, but a paused chat stays paused. The open
+ * says `resume: true` only when this window knows the chat is not paused; otherwise it says
+ * `resume: false` and main decides from the tab itself (`isPaused`), starting a chat that is not.
  */
 export function settleSessionCursor(): void {
   clearTimer();
@@ -168,15 +169,25 @@ export function settleSessionCursor(): void {
   const sessions = useOrchestrationSessionStore.getState();
   // Only what the cursor still shows, with the setting on and the window on this machine.
   if (!sessionId || sessions.cursorSessionId !== sessionId || !cursorFollowEnabled()) return;
-  void sessions.settle(sessionId, hostIdOf(useConfigStore.getState().config), { resume: !chatPaused(sessionId), record: sessionRecord(sessionId) }).catch(() => undefined);
+  void sessions.settle(sessionId, hostIdOf(useConfigStore.getState().config), { resume: chatPaused(sessionId) === false, record: sessionRecord(sessionId) }).catch(() => undefined);
 }
 
-/** Whether the Session's chat is paused, from its record or the tabs this window holds for it. */
-function chatPaused(sessionId: string): boolean {
+/**
+ * Whether the Session's chat is paused: from its record, its chat tab's own mark (idle auto-pause
+ * marks only the chat tab, T-134 QA F-1) or its terminal tabs, as this window holds them, live
+ * tabs before the cursor's peek. Undefined when this window holds neither its record nor its chat tab.
+ */
+function chatPaused(sessionId: string): boolean | undefined {
   const record = sessionRecord(sessionId);
   if (record?.paused) return true;
-  const panels = cachedSessionView(sessionId)?.panels ?? (record ? usePanelStore.getState().panels[record.internalSessionId] : undefined);
-  return panels !== undefined && panePausedMark(panels) !== undefined;
+  const entry = cachedSessionView(sessionId);
+  const live = record ? usePanelStore.getState().panels[record.internalSessionId] : undefined;
+  const agentId = record ? record.panelIds[record.agent] : entry?.view.panel.id;
+  const chat = live?.find(panel => panel.id === agentId) ?? (entry?.view.panel.id === agentId ? entry?.view.panel : undefined);
+  if (chat && chatPausedMarkOf(chat)) return true;
+  const panels = live ?? entry?.panels;
+  if (panels && panePausedMark(panels)) return true;
+  return chat?.type === 'chat' ? false : undefined;
 }
 
 /** Forget what the cursor shows without selecting it. */
