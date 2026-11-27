@@ -504,8 +504,11 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   useEffect(() => {
     const pending = launchSend.current;
     if (!pending) return;
-    if (Date.now() > pending.until || runtime.thread.composer.getState().text !== pending.text) {
+    const edited = runtime.thread.composer.getState().text !== pending.text;
+    if (edited || Date.now() > pending.until) {
       launchSend.current = null;
+      // The Enter pressed before the chat could send is not lost silently: the text stays, with why (T-132).
+      if (!edited) viewer.setError('Not sent: the chat could not take your message in time (its connection may have dropped). It is still here; press Enter to send it.');
       return;
     }
     if (sendDisabled) {
@@ -515,7 +518,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     }
     launchSend.current = null;
     void runtime.thread.composer.send();
-  }, [runtime, sendDisabled, launchTick]);
+  }, [runtime, sendDisabled, launchTick, viewer]);
   // Every refusal is shown (assistant-ui's own paste and picker swallow them), and a file
   // that failed while copying leaves no chip behind.
   useEffect(() => runtime.thread.composer.unstable_on('attachmentAddError', event => {
