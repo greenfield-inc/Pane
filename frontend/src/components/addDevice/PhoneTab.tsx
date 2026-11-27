@@ -5,13 +5,13 @@ import type { PairingView } from '../../hooks/useRelayPairing';
 import { cn } from '../../utils/cn';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { Tooltip } from '../ui/Tooltip';
-import { QR_PAPER, QrCode, AppStoreLine } from './QrCode';
+import { QR_BOX, QR_COLUMN, QR_PAPER, QrCode, AppStoreLine } from './QrCode';
 import { AccessPicker } from './AccessPicker';
 import { RelayLimitNotice, RelayLimitTip } from './RelayLimitNotice';
 import { relayLimitSentence, relayLimitTime } from './relayLimit';
 
 /** The code box and its caption keep this footprint in every state. */
-const CODE_BOX = 'h-[200px] w-[200px]';
+const CODE_BOX = QR_BOX;
 
 const STEPS = [
   "Point your phone's camera at the code.",
@@ -125,7 +125,7 @@ export function PhoneTab({ view, paired, pairedReadOnly = false, renewed, onRetr
         </div>
       )}
       <div className="flex flex-col gap-6 sm:flex-row">
-        <div className="flex w-[200px] flex-none flex-col items-center gap-3 self-center sm:self-start">
+        <div className={cn(QR_COLUMN, 'flex flex-none flex-col items-center gap-3 self-center sm:self-start')}>
           <CodeBox view={view} onRetry={onRetry} />
           <p className="flex h-5 items-center justify-center whitespace-nowrap text-xs tabular-nums text-text-tertiary" aria-live="off">
             {caption(view, renewed)}

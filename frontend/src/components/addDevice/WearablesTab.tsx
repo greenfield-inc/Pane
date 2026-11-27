@@ -1,12 +1,12 @@
 import { cn } from '../../utils/cn';
-import { QR_PAPER, QrCode, AppStoreLine } from './QrCode';
+import { QR_BOX, QR_COLUMN, QR_PAPER, QrCode, AppStoreLine } from './QrCode';
 
 /** Add a device › Wearables: glasses pair through the phone app, so the code opens its Glasses screen. */
 export function WearablesTab({ domain }: { domain: string }) {
   return (
     <div className="flex flex-col gap-6 sm:flex-row">
-      <div className="flex w-[200px] flex-none flex-col items-center gap-3 self-center sm:self-start">
-        <div className={cn('h-[200px] w-[200px]', QR_PAPER)}>
+      <div className={cn(QR_COLUMN, 'flex flex-none flex-col items-center gap-3 self-center sm:self-start')}>
+        <div className={cn(QR_BOX, QR_PAPER)}>
           <QrCode url={`https://${domain}/glasses`} label="Code that opens Pane's Glasses screen" />
         </div>
         <p className="text-xs text-text-tertiary">Opens Pane › Glasses</p>
