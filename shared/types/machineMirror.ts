@@ -1,3 +1,4 @@
+import type { JsonValue } from '../validation/boundaryDecoder';
 import type { SessionSnapshotHeld } from './sessionSnapshot';
 
 /**
@@ -74,5 +75,6 @@ export const MACHINE_MIRROR_CHANNELS = {
 export interface MachineChatEvent {
   machineId: string;
   channel: 'chat-tab:event' | 'chat-tab:view';
-  payload: unknown;
+  /** As the host sent it; the renderer checks its fields before applying it. */
+  payload: JsonValue;
 }

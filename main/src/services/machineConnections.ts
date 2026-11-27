@@ -8,7 +8,8 @@ import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { READ_ONLY_ACCESS_CODE } from '../../../shared/types/accessLevel';
 import { READ_ONLY_HOST_ANSWERS } from '../../../shared/remoteClient/readOnlyHost';
 import { PaneError, reasonOf } from '../../../shared/paneError';
-import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../shared/validation/boundaryDecoder';
+import type { PaneEventArgument } from '../core/eventSink';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus } from '../../../shared/types/remoteDaemon';
 import type { OrchestrationPanelOverview } from '../../../shared/types/orchestrationSession';
 import { configuredAgentSchema } from '../../../shared/agents';
@@ -102,8 +103,8 @@ const FOLLOWED_CHAT_CHANNELS = ['chat-tab:event', 'chat-tab:view'] as const;
 type FollowedChatChannel = typeof FOLLOWED_CHAT_CHANNELS[number];
 const isFollowedChatChannel = (channel: string): channel is FollowedChatChannel => FOLLOWED_CHAT_CHANNELS.some(candidate => candidate === channel);
 const followedChatSchema = boundary.object({ panelId: boundary.nonEmptyString });
-/** One followed chat's event, as the host sent it on `channel`. */
-export type FollowedChatListener = (channel: FollowedChatChannel, payload: unknown) => void;
+/** One followed chat's event, as the host sent it on `channel` (plain JSON; the renderer checks its fields). */
+export type FollowedChatListener = (channel: FollowedChatChannel, payload: JsonValue) => void;
 const isMachineEventChannel = (channel: string): channel is MachineEventChannel => eventChannels.has(channel);
 const itemSchema = boundary.object({ kind: boundary.enumeration('pane', 'session'), id: boundary.nonEmptyString });
 const commandTypeSchema = boundary.object({
@@ -208,11 +209,15 @@ export class MachineConnections {
     };
   }
 
-  private passOnChat(machineId: string, channel: string, payload: unknown): void {
+  private passOnChat(machineId: string, channel: string, argument: PaneEventArgument): void {
     if (this.followedChats.size === 0 || !isFollowedChatChannel(channel)) return;
-    const panelId = decodeOptionalBoundary(payload, followedChatSchema)?.panelId;
+    const panelId = decodeOptionalBoundary(argument, followedChatSchema)?.panelId;
     const listeners = panelId ? this.followedChats.get(`${machineId}\0${panelId}`) : undefined;
-    for (const listener of [...listeners ?? []]) {
+    if (!listeners) return;
+    // Only a followed chat's event is decoded: the stream carries every chat's content.
+    const payload = decodeOptionalBoundary(argument, boundary.json);
+    if (payload === undefined) return;
+    for (const listener of [...listeners]) {
       try {
         listener(channel, payload);
       } catch (error) {

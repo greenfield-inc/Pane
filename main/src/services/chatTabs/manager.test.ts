@@ -907,10 +907,10 @@ describe('chat tab manager', () => {
     // Pane relaunched: the owner's other machine reads this chat Session's snapshot.
     const second = harness(store, {}, directory);
     const chatTab: ToolPanel = { id: 'p1', sessionId: 'pane-1', type: 'chat', title: 'Claude', state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
-    const record = { id: 's1', name: 'One', internalSessionId: 'pane-1', agent: 'claude', panelIds: { claude: 'p1' }, updatedAt: '2026-11-26T00:00:00.000Z' };
+    // SAFETY: the snapshot reads only the fields set here.
+    const record = { id: 's1', name: 'One', internalSessionId: 'pane-1', agent: 'claude', panelIds: { claude: 'p1' }, updatedAt: '2026-11-26T00:00:00.000Z' } as OrchestrationSessionSummary;
     const service = new SessionSnapshotService(hostSnapshotSources({
-      // SAFETY: the snapshot reads only the fields set here.
-      sessions: { list: async () => ({ sessions: [record as unknown as OrchestrationSessionSummary] }) },
+      sessions: { list: async () => ({ sessions: [record] }) },
       panels: { getPanelsForSession: () => [chatTab], getPanel: () => chatTab },
       chats: () => second.manager,
       storedLayout: () => null,
