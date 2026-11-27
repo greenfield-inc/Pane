@@ -245,6 +245,25 @@ describe('chat tab viewer reopen', () => {
     expect(viewers.map(viewer => ids(viewer).length)).toEqual([0, 3, 3, 3, 3, 3]);
   });
 
+  it('a closed chat shown again keeps its messages when the chat it replaces closes in the same switch (T-116 PR 6)', async () => {
+    const fake = host(3);
+    const [shownAgain, ...rest] = ['a', 'b', 'c', 'd', 'e'].map(panel => new ChatTabViewer(fake.client, panel));
+    const closers = [shownAgain, ...rest].map(viewer => viewer.subscribe(() => undefined));
+    const leaving = new ChatTabViewer(fake.client, 'f');
+    const closeLeaving = leaving.subscribe(() => undefined);
+    await settle();
+    closers.forEach(close => close());
+    expect(ids(shownAgain), 'held while closed').toHaveLength(3);
+
+    // The next chat renders (and is primed) before the one it replaces unmounts, then subscribes.
+    shownAgain.prime({ ...fake.view(), panelId: 'a' }, performance.now());
+    closeLeaving();
+    shownAgain.subscribe(() => undefined);
+
+    expect(ids(shownAgain)).toHaveLength(3);
+    expect(rest.map(viewer => ids(viewer).length)).toEqual([3, 3, 3, 3]);
+  });
+
   it('counts a chat closed before its first read lands toward the five', async () => {
     const fake = host(3);
     const viewers = ['a', 'b', 'c', 'd', 'e', 'f'].map(panel => new ChatTabViewer(fake.client, panel));

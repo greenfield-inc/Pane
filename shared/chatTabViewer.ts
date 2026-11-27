@@ -101,7 +101,11 @@ export class ChatTabViewer {
    * and replaces it, with any events that arrived meanwhile.
    */
   prime(view: ChatTabView, readAt: number): void {
-    if (view.panelId !== this.panelId || this.state.transcript || !view.transcript) return;
+    if (view.panelId !== this.panelId) return;
+    // About to be shown: the chat it replaces closes before this one subscribes, and must not push
+    // this one's kept messages out of the five (T-116 PR 6).
+    if (this.listeners.size === 0) removeClosed(this);
+    if (this.state.transcript || !view.transcript) return;
     this.state = { ...this.state, view: this.state.view ?? { ...view, transcript: undefined }, transcript: view.transcript, hasNewer: false };
     // Read this instant by the Session's call: the attach that follows reads again only after it paints.
     // A starting tab reads at once.
