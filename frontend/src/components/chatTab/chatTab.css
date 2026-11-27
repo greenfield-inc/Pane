@@ -409,3 +409,4 @@ a.chat-status-item:hover,button.chat-status-item:hover:not(:disabled),.chat-stat
 .chat-agent-preview-text>span { overflow:hidden; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; overflow-wrap:anywhere; }
 .chat-agent-preview-text:hover { color:var(--chat-foreground); }
 .chat-agent-card[data-collapsed=preview] .chat-agent-head { padding-bottom:2px; }
+.chat-agent-head-end { display:inline-flex; align-items:center; gap:6px; margin-left:auto; white-space:nowrap; }

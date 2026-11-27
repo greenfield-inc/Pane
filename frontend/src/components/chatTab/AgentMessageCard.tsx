@@ -125,8 +125,11 @@ function Card({ anchorId, messageRef, who, compactWho, meta, body, record, hint,
   const label = `${open ? 'Collapse' : 'Expand'} message${ref ? ` ${ref}` : ''}`;
   return <div className="chat-agent-row" data-outgoing={outgoing}>
     <div {...card} data-collapsed={previewed ? 'preview' : undefined}>
-      <div className="chat-agent-head">{who}<span className="chat-agent-spacer" />{meta}
-        <button type="button" className="chat-agent-toggle" aria-expanded={open} aria-label={label} title={label} onClick={() => setOpen(!open)}>{open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}</button>
+      <div className="chat-agent-head">{who}<span className="chat-agent-spacer" />
+        {/* M-n, time and the chevron wrap together, so the chevron never sits on a line of its own. */}
+        <span className="chat-agent-head-end">{meta}
+          <button type="button" className="chat-agent-toggle" aria-expanded={open} aria-label={label} title={label} onClick={() => setOpen(!open)}>{open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}</button>
+        </span>
       </div>
       {previewed ? <Preview text={body} onExpand={expand} /> : <div className="chat-agent-body">{POINTER.test(body) ? plainBody(body) : renderText(body)}</div>}
       {((status && status.state !== 'answered') || footHint || failed) && <div className="chat-agent-foot">{status && status.state !== 'answered' && <StatusPill status={status} />}{footHint}{failed && <Attempts attempts={failed} />}</div>}
