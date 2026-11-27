@@ -291,6 +291,8 @@ export let configManager: ConfigManager;
 let sharedCredentialSync: SharedCredentialSync | null = null;
 /** This computer's copy of the chat Sessions on the owner's other machines (T-116 PR 5). */
 let machineMirror: MachineMirror | null = null;
+/** Told once the mirror exists, so windows that subscribed earlier hear it (review SF-2). */
+let machineMirrorHandlers: { mirrorReady: () => void } | null = null;
 let machineConnections: MachineConnections | null = null;
 let logger: Logger;
 export let sessionManager: SessionManager;
@@ -1311,7 +1313,7 @@ async function initializeServices() {
     },
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
-  registerMachineMirrorHandlers(ipcMain, () => machineMirror, machineConnections);
+  machineMirrorHandlers = registerMachineMirrorHandlers(ipcMain, () => machineMirror, machineConnections);
   setDeviceMachines(machineConnections);
   const machines = machineConnections;
   powerMonitor.on('suspend', () => machines.suspend());
@@ -1702,6 +1704,7 @@ if (launchRemoteSetup) {
         read: (machineId, channel, args) => connections.read(machineId, channel, args),
       },
     });
+    machineMirrorHandlers?.mirrorReady();
     void machineMirror.start().catch(error => console.warn('[Machine mirror] Could not start:', error));
     sharedCredentialSync = new SharedCredentialSync(configManager, machineConnections);
     sharedCredentialSync.start();
