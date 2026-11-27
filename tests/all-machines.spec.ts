@@ -752,12 +752,40 @@ test('arrow keys show this computer\'s Sessions at once in All machines; another
   // and a row of this computer's opens the Sessions view to show it while focus stays in the sidebar.
   // (This mock serves no Session to show: the Electron switch benchmark checks what paints, T-116.)
   await rows.first().focus();
-  await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
+  await expect(page.getByText('Choose a Session')).toHaveCount(0);
+  // A Sessions API that records each call by name: the local rows' peeks show it is used,
+  // and a rest on a remote row must add no select or open.
+  await page.evaluate(() => {
+    const calls: string[] = [];
+    // The Sessions list comes back empty, as at startup: the cursor reads this computer's rows from the All machines read.
+    interface SessionAnswer { sessions?: never[]; selectedSessionId?: undefined; view?: null; panels?: never[]; layout?: null }
+    const emptyList: SessionAnswer = { sessions: [], selectedSessionId: undefined };
+    const answer = (name: string, data: SessionAnswer) => async () => { calls.push(name); return { success: true, data }; };
+    Object.assign(window, { __sessionCalls: calls });
+    Object.assign(window.electronAPI, { orchestrationSessions: {
+      list: answer('list', emptyList), select: answer('select', emptyList),
+      open: answer('open', { view: null, panels: [], layout: null }), peek: answer('peek', { view: null, panels: [], layout: null }),
+    } });
+  });
+  // SAFETY: the evaluate above defines __sessionCalls as a string array before any read.
+  const takeSessionCalls = () => page.evaluate(() => (window as typeof window & { __sessionCalls: string[] }).__sessionCalls.splice(0));
+  let restedOnRemote = false;
   for (const [key, index] of [['ArrowDown', 1], ['ArrowDown', 2], ['ArrowUp', 1], ['ArrowUp', 0]] as const) {
     await page.keyboard.press(key);
     await expect(rows.nth(index)).toBeFocused();
-    if (labels[index].cursor) await expect(page.getByTestId('pane-chat-agent-badge')).toBeVisible();
+    if (labels[index].cursor) {
+      // This computer's row shows at once: the Sessions view, and one read-only peek, from the All machines read.
+      await expect(page.getByText('Choose a Session')).toBeVisible();
+      await expect.poll(takeSessionCalls).toContain('peek');
+    } else {
+      // Resting past the 1 s settle on build-box's row: the cursor just lands; nothing settles, selects or opens (D-6).
+      await page.waitForTimeout(1_100);
+      expect((await takeSessionCalls()).filter(name => name !== 'list'), 'a rest on another machine\'s row asks for nothing').toEqual([]);
+      await expect(rows.nth(index)).toBeFocused();
+      restedOnRemote = true;
+    }
   }
+  expect(restedOnRemote, 'the walk passed build-box\'s row').toBe(true);
   // Passing over build-box's row asked nothing of build-box and left the window on this computer.
   expect(await (await mock(page)).evaluate(api => ({ runs: api.getMachineRuns(), memory: api.getNavigationMemory('build') }))).toEqual({ runs: [], memory: null });
   await expect(page.getByRole('button', { name: 'Showing all machines. Switch machine' })).toBeVisible();
