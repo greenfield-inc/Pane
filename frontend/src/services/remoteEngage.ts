@@ -32,7 +32,7 @@ export interface EngageTarget {
   sessionId: string;
 }
 
-export interface Engaging extends EngageTarget {
+interface Engaging extends EngageTarget {
   cause: EngageCause;
   /** The Session's chat tab, as the mirror holds it: the live one there that takes the text. */
   panelId?: string;
@@ -63,7 +63,7 @@ interface RemoteEngageState {
 export const useRemoteEngage = create<RemoteEngageState>(() => ({ held: {} }));
 
 /** How long the cursor rests on another machine's Session before it engages (D-2), as this computer's settle. */
-export const REST_ENGAGE_MS = 1000;
+const REST_ENGAGE_MS = 1000;
 /** How long, once the window is on that machine, the mirror's view waits for the chat there to paint. */
 export const LIVE_VIEW_WAIT_MS = 3000;
 
@@ -325,11 +325,6 @@ export function cancelRemoteEngage(): void {
   switchMark('engage:cancel', { machineId: engaging.machineId, sessionId: engaging.sessionId, status: engaging.switched ? 'after-switch' : 'switching' });
   // Too late once the window is on that machine: the Session there stays open.
   if (!engaging.switched) void API.remoteDaemon.cancelSwitch(engaging.machineId).catch(() => undefined);
-}
-
-/** Whether an engage keeps the mirror's view of `target` on screen. */
-export function isEngaging(target: EngageTarget): boolean {
-  return sameTarget(useRemoteEngage.getState().engaging, target);
 }
 
 const switchListeners = new Set<(cause: EngageCause) => void>();
