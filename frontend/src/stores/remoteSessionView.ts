@@ -6,7 +6,7 @@ import { boundary, decodeOptionalBoundary } from '../../../shared/validation/bou
 import type { ChatTabClient, ChatTabView } from '../../../shared/types/chatTab';
 import { decodeChatTabEvent, decodeChatTabView } from '../../../shared/types/chatTabDecoders';
 import type { OrchestrationSessionOpenResult } from '../../../shared/types/orchestrationSession';
-import type { SessionSnapshot } from '../../../shared/types/sessionSnapshot';
+import { SESSION_SNAPSHOT_MESSAGE_LIMIT, type SessionSnapshot } from '../../../shared/types/sessionSnapshot';
 import type { Session } from '../types/session';
 
 /**
@@ -221,6 +221,23 @@ function refused(machineName: string): Promise<never> {
 }
 
 const clients = new Map<string, ChatTabClient>();
+/** Remote chats the cursor has stayed on, keyed by machine and panel: their reads answer every message held. */
+const fullChats = new Set<string>();
+
+/** The cursor stayed on the chat (`full`), or left it: its next read answers everything held, or the newest 30 again. */
+export function showFullRemoteChat(machineId: string, panelId: string, full: boolean): void {
+  const key = remoteSessionKey(machineId, panelId);
+  if (full) fullChats.add(key);
+  else fullChats.delete(key);
+}
+
+/** The newest messages a first paint draws: the window the mirror holds (D-3). Drawing 200 takes a long chat ~95 ms. */
+export function firstPaintWindow(chat: ChatTabView): ChatTabView {
+  const transcript = chat.transcript;
+  const extra = transcript ? transcript.messages.length - SESSION_SNAPSHOT_MESSAGE_LIMIT : 0;
+  if (!transcript || extra <= 0) return chat;
+  return { ...chat, transcript: { ...transcript, start: transcript.start + extra, messages: transcript.messages.slice(extra) } };
+}
 
 /**
  * A read-only chat client for one machine's Sessions shown under the cursor: reads answer at once
@@ -233,12 +250,13 @@ export function remoteChatClient(machineId: string, machineName: string): ChatTa
   if (known) return known;
   const no = () => refused(machineName);
   const client: ChatTabClient = {
-    // What is held, at once: the host's read lands in the store once the cursor rests, and the shown chat reads again then.
+    // What is held, at once: the newest 30 messages until the cursor has stayed on the chat
+    // (`showFullRemoteChat`), so a chat passed over never draws 200; everything held after that.
     async get(panelId) {
       const sessionId = sessionOfChat(machineId, panelId);
       const chat = heldRemoteChat(sessionId ? cachedRemoteSession(machineId, sessionId) : undefined);
       if (!chat || chat.panelId !== panelId) throw new Error(`Pane has nothing of this chat from ${machineName} yet.`);
-      return chat;
+      return fullChats.has(remoteSessionKey(machineId, panelId)) ? chat : firstPaintWindow(chat);
     },
     // Scroll-back reads the host once the window has switched to it.
     history: async () => [],
