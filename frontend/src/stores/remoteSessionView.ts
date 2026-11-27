@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { mirrorListing, useMachineMirrorStore } from './machineMirrorStore';
+import { machineMirrorApi, mirrorListing, useMachineMirrorStore } from './machineMirrorStore';
 import { useAllMachinesStore } from './allMachinesStore';
 import { switchMark } from '../../../shared/switchMarks';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
@@ -99,7 +99,7 @@ function readMirror(machineId: string, sessionId: string): void {
   if (revision === undefined) return;
   const key = remoteSessionKey(machineId, sessionId);
   if (cachedRemoteSession(machineId, sessionId)?.snapshot?.revision === revision || mirrorReads.has(key)) return;
-  const api = window.electronAPI?.machineMirror;
+  const api = machineMirrorApi();
   if (!api) return;
   switchMark('remote:mirror:start', { machineId, sessionId });
   const read = api.session(machineId, sessionId)
@@ -259,14 +259,14 @@ export function remoteChatClient(machineId: string, machineName: string): ChatTa
     dismissBanner: no, files: async () => [], signIn: no,
     agents: () => window.electronAPI?.chatTab?.agents() ?? Promise.resolve([]),
     onEvent(callback) {
-      return window.electronAPI?.machineMirror?.onChatEvent(event => {
+      return machineMirrorApi()?.onChatEvent(event => {
         if (event.machineId !== machineId || event.channel !== 'chat-tab:event') return;
         const decoded = decodeOrDrop(() => decodeChatTabEvent(event.payload));
         if (decoded) callback(decoded);
       }) ?? (() => undefined);
     },
     onState(callback) {
-      return window.electronAPI?.machineMirror?.onChatEvent(event => {
+      return machineMirrorApi()?.onChatEvent(event => {
         if (event.machineId !== machineId || event.channel !== 'chat-tab:view') return;
         const decoded = decodeOrDrop(() => decodeChatTabView(event.payload));
         if (decoded) callback(decoded);

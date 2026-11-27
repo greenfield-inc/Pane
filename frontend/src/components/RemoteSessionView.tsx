@@ -6,7 +6,7 @@ import { cn } from '../utils/cn';
 import { chatTabViewer, firstPaintWindow } from '../../../shared/chatTabViewer';
 import { switchMark } from '../../../shared/switchMarks';
 import { useAllMachinesStore } from '../stores/allMachinesStore';
-import { useMachineMirrorStore } from '../stores/machineMirrorStore';
+import { machineMirrorApi, useMachineMirrorStore } from '../stores/machineMirrorStore';
 import { heldRemoteChat, remoteChatClient, showFullRemoteChat, remoteSessionKey, useRemoteSessionView, type RemoteSessionEntry, type RemoteSessionTarget } from '../stores/remoteSessionView';
 import type { MachineMirrorListing, MachineMirrorSync } from '../../../shared/types/machineMirror';
 import type { MachineState } from '../../../shared/types/machineConnections';
@@ -95,7 +95,7 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
   // While shown and the machine answers, the chat follows the host's events for it, and only for it.
   const followed = online && chat ? chat.panelId : undefined;
   useEffect(() => {
-    const api = window.electronAPI?.machineMirror;
+    const api = machineMirrorApi();
     if (!followed || !api) return undefined;
     api.followChat({ machineId, panelId: followed });
     return () => api.followChat(null);

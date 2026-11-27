@@ -14,11 +14,24 @@ interface MachineMirrorStoreState {
 export const useMachineMirrorStore = create<MachineMirrorStoreState>(() => ({ listings: {} }));
 
 let following = false;
+
+type MachineMirrorApi = Window['electronAPI']['machineMirror'];
+
+/**
+ * The preload's mirror channels, or undefined when this window has none (a test double, a build
+ * from before T-116 PR 6): then nothing is mirrored and other machines' rows keep Enter.
+ */
+export function machineMirrorApi(): MachineMirrorApi | undefined {
+  const api: Partial<MachineMirrorApi> | undefined = window.electronAPI?.machineMirror;
+  const { list, session, onChanged, followChat, onChatEvent } = api ?? {};
+  if (!list || !session || !onChanged || !followChat || !onChatEvent) return undefined;
+  return { list, session, onChanged, followChat, onChatEvent };
+}
 let reading: Promise<void> | undefined;
 let again = false;
 
 function readListings(): Promise<void> {
-  const api = window.electronAPI?.machineMirror;
+  const api = machineMirrorApi();
   if (!api) return Promise.resolve();
   if (reading) {
     again = true;
@@ -41,7 +54,7 @@ function readListings(): Promise<void> {
 
 /** Starts following the mirror, once per window; later calls do nothing. */
 export function followMachineMirror(): void {
-  const api = window.electronAPI?.machineMirror;
+  const api = machineMirrorApi();
   if (following || !api) return;
   following = true;
   api.onChanged(() => { void readListings(); });
