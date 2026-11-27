@@ -69,11 +69,14 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
   const readAt = entry?.readAt ?? 0;
 
   // The chat paints the newest 30 messages held at once (drawing 200 takes a long chat ~95 ms);
-  // the rest of what is held follows once the cursor stays, and again when the host's read lands.
+  // the rest of what is held follows once the cursor stays. A newer copy (the mirror caught up, the
+  // host's read landed) reaches the chat through its client's onReconnect.
   useMemo(() => {
     if (!chat) return;
     const viewer = chatTabViewer(client, chat.panelId);
     viewer.setStartOnRead(false);
+    // Left, it keeps nothing and pushes none of this computer's kept chats out; the next visit paints the mirror's window.
+    viewer.setKeepOnClose(false);
     viewer.prime(firstPaintWindow(chat), performance.now());
   }, [client, chat]);
   const panelId = chat?.panelId;
@@ -87,13 +90,8 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
     return () => {
       clearTimeout(rest);
       showFullRemoteChat(machineId, panelId, false);
-      // Left: the next visit paints the short window again. After the chat's own unsubscribe.
-      queueMicrotask(() => viewer.forgetMessages());
     };
   }, [client, machineId, panelId]);
-  useEffect(() => {
-    if (panelId && readAt > 0) void chatTabViewer(client, panelId).refresh();
-  }, [client, panelId, readAt]);
 
   // While shown and the machine answers, the chat follows the host's events for it, and only for it.
   const followed = online && chat ? chat.panelId : undefined;
@@ -123,6 +121,9 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
     />;
   } else if (unknown) {
     body = <RemoteNote>Messages load when this Session is opened on {machineName}.</RemoteNote>;
+  } else if (entry?.read && !entry.read.view) {
+    // The host has nothing to show yet (the Session's tab doesn't exist until it is opened there).
+    body = <RemoteNote>This Session opens on {machineName} when you press Enter.</RemoteNote>;
   } else if (entry?.error && !online) {
     body = <RemoteNote>{machineName} is offline, and Pane has no copy of this Session yet.</RemoteNote>;
   } else if (entry?.error) {

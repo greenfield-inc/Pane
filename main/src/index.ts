@@ -144,7 +144,7 @@ import { readTailscaleStatus, tailnetLoginMatches, tailnetRelayKey } from './ser
 import { MACHINE_MIRROR_FOLDER } from '../../shared/types/machineMirror';
 import { RemoteMemberEvents } from './services/remoteMemberEvents';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
-import { registerMachineMirrorHandlers } from './ipc/machineMirror';
+import { registerMachineMirrorHandlers, type MachineMirrorHandlers } from './ipc/machineMirror';
 import { followSavedMachines, prepareNotifyForQuit } from './ipc/notify';
 import { LeaderboardService } from './services/leaderboardService';
 import { registerLeaderboardHandlers } from './ipc/leaderboard';
@@ -291,6 +291,8 @@ export let configManager: ConfigManager;
 let sharedCredentialSync: SharedCredentialSync | null = null;
 /** This computer's copy of the chat Sessions on the owner's other machines (T-116 PR 5). */
 let machineMirror: MachineMirror | null = null;
+/** Told once the mirror exists, so windows that subscribed earlier hear it (review SF-2). */
+let machineMirrorHandlers: MachineMirrorHandlers | null = null;
 let machineConnections: MachineConnections | null = null;
 let logger: Logger;
 export let sessionManager: SessionManager;
@@ -1311,7 +1313,7 @@ async function initializeServices() {
     },
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
-  registerMachineMirrorHandlers(ipcMain, () => machineMirror, machineConnections);
+  machineMirrorHandlers = registerMachineMirrorHandlers(ipcMain, () => machineMirror, machineConnections);
   // A switch to a machine this connection heard from in the last 30 s skips the connection checklist.
   remotePaneClientController.setRecentAnswers((computerId, ms) => machineConnections?.answeredWithin(computerId, ms) ?? null);
   setDeviceMachines(machineConnections);
@@ -1704,6 +1706,7 @@ if (launchRemoteSetup) {
         read: (machineId, channel, args) => connections.read(machineId, channel, args),
       },
     });
+    machineMirrorHandlers?.mirrorReady();
     void machineMirror.start().catch(error => console.warn('[Machine mirror] Could not start:', error));
     sharedCredentialSync = new SharedCredentialSync(configManager, machineConnections);
     sharedCredentialSync.start();
