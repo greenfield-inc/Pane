@@ -77,9 +77,29 @@ let engageTicket = 0;
 const shownMeanwhile = new Set<string>();
 let listening = false;
 
+/**
+ * While an engage that was typed runs, a printable key that finds focus on nothing (the page body:
+ * a view the switch replaced had it) still goes into the held text, and focus goes back to the
+ * held box. No key typed meanwhile is lost.
+ */
+function onStrayKey(event: KeyboardEvent): void {
+  const engaging = useRemoteEngage.getState().engaging;
+  if (!engaging || event.key.length !== 1 || event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+  const active = document.activeElement;
+  if (active && active !== document.body && active.isConnected) return;
+  event.preventDefault();
+  holdRemoteText(engaging, (useRemoteEngage.getState().held[engageKey(engaging)]?.text ?? '') + event.key);
+  const box = document.querySelector<HTMLTextAreaElement>(`[data-testid="engage-hold"] textarea[data-remote-composer]`);
+  if (box) {
+    box.focus({ preventScroll: true });
+    box.setSelectionRange(box.value.length + 1, box.value.length + 1);
+  }
+}
+
 function listen(): void {
   if (listening) return;
   listening = true;
+  if (typeof window.addEventListener === 'function') window.addEventListener('keydown', onStrayKey, true);
   onChatTabShown(panelId => {
     const engaging = useRemoteEngage.getState().engaging;
     if (!engaging || engaging.panelId !== panelId) return;

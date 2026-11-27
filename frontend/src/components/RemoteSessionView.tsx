@@ -119,7 +119,7 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row, held 
       client={client}
       connected={online}
       machine={{ id: machineId, name: machineName, os: null, slot: 0, letters: '', local: false }}
-      watchOnly={online ? { composer: <RemoteHeldComposer target={target} machineName={machineName} /> } : { note: `${machineName} is offline. This is what it last sent.` }}
+      watchOnly={online ? { composer: <RemoteHeldComposer target={target} machineName={machineName} takesFocus={held} /> } : { note: `${machineName} is offline. This is what it last sent.` }}
     />;
   } else if (unknown) {
     body = <RemoteNote>Messages load when this Session is opened on {machineName}.</RemoteNote>;
@@ -174,34 +174,36 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row, held 
  * engages the Session, and the text is held here, still editable, until the chat there takes it.
  * Enter sends it there once the switch lands. A failed switch keeps the text with the reason.
  */
-function RemoteHeldComposer({ target, machineName }: { target: RemoteSessionTarget; machineName: string }) {
+function RemoteHeldComposer({ target, machineName, takesFocus }: { target: RemoteSessionTarget; machineName: string; takesFocus: boolean }) {
   const key = engageKey(target);
   const held = useRemoteEngage(state => state.held[key]);
   const failure = useRemoteEngage(state => (state.failure && engageKey(state.failure) === key ? state.failure.message : undefined));
   const engagingCause = useRemoteEngage(state => (state.engaging && engageKey(state.engaging) === key ? state.engaging.cause : undefined));
-  return <HeldComposerBox target={target} machineName={machineName} held={held} failure={failure} engagingCause={engagingCause} />;
+  return <HeldComposerBox target={target} machineName={machineName} held={held} failure={failure} engagingCause={engagingCause} takesFocus={takesFocus} />;
 }
 
 /** What `RemoteHeldComposer` draws, from what the engage store holds for the Session. */
-export function HeldComposerBox({ target, machineName, held, failure, engagingCause }: {
+export function HeldComposerBox({ target, machineName, held, failure, engagingCause, takesFocus = false }: {
   target: RemoteSessionTarget;
   machineName: string;
   held: HeldText | undefined;
   failure: string | undefined;
   engagingCause: EngageCause | undefined;
+  /** The box held over the main area: the one that takes focus while the switch runs (the tile's goes with the switch). */
+  takesFocus?: boolean;
 }) {
   const key = engageKey(target);
   const box = useRef<HTMLTextAreaElement>(null);
-  // Typed on the sidebar row, or into this box before the hold over the main area drew it: the
-  // newest box takes focus, the caret at the end.
+  // Typed on the sidebar row, or into the tile's box before the hold over the main area drew it:
+  // the held box takes focus, the caret at the end.
   useLayoutEffect(() => {
     const input = box.current;
-    if (engagingCause !== 'type' || !input || document.activeElement === input) return;
+    if (!takesFocus || engagingCause !== 'type' || !input || document.activeElement === input) return;
     const active = document.activeElement;
     if (active instanceof HTMLTextAreaElement && !active.hasAttribute('data-remote-composer')) return;
     input.focus({ preventScroll: true });
     input.setSelectionRange(input.value.length, input.value.length);
-  }, [engagingCause]);
+  }, [engagingCause, takesFocus]);
   const text = held?.text ?? '';
   return (
     <div className="chat-composer" data-pane-part="chat-composer">

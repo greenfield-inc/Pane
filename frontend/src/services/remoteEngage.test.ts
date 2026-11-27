@@ -9,6 +9,7 @@ function deferred<T>() {
 }
 
 const saveNavigationMemory = vi.fn(async () => ({ success: true }));
+const keyListeners: Array<(event: KeyboardEvent) => void> = [];
 const cancelSwitch = vi.fn(async () => ({ success: true, data: { cancelled: true } }));
 
 /**
@@ -18,7 +19,7 @@ const cancelSwitch = vi.fn(async () => ({ success: true, data: { cancelled: true
 async function setup(switchMachine: (machineId: string) => Promise<MachineSelectOutcome>, { online = true } = {}) {
   vi.resetModules();
   vi.stubGlobal('window', {
-    addEventListener: vi.fn(),
+    addEventListener: vi.fn((type: string, listener: (event: KeyboardEvent) => void) => { if (type === 'keydown') keyListeners.push(listener); }),
     electronAPI: {
       uiState: { saveNavigationMemory, getPaneLayout: vi.fn(async () => ({ success: true, data: null })) },
       remoteDaemon: { cancelSwitch },
@@ -57,6 +58,7 @@ const target = { machineId: 'build', sessionId: 'b' };
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
+  keyListeners.length = 0;
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -230,5 +232,19 @@ describe('typing, Enter or a click engages, and what was typed arrives once (T-1
     expect(state().engaging).toBeUndefined();
     handover.acceptChatDraft('panel-b', draft => taken.push(draft));
     expect(taken).toEqual([expect.objectContaining({ text: 'later' })]);
+  });
+
+  it('a key typed while the switch has left focus on nothing still goes into the held text', async () => {
+    const switched = deferred<MachineSelectOutcome>();
+    const { engage, state } = await setup(() => switched.promise);
+    const body = {};
+    vi.stubGlobal('document', { body, activeElement: body, querySelector: () => null });
+    engage.holdRemoteText(target, 'ab');
+    engage.engageRemoteSession(target, 'type');
+    const preventDefault = vi.fn();
+    // SAFETY: the listener reads only these fields of a keydown.
+    for (const listener of keyListeners) listener({ key: 'c', metaKey: false, ctrlKey: false, altKey: false, isComposing: false, preventDefault } as unknown as KeyboardEvent);
+    expect(state().held[engage.engageKey(target)]?.text).toBe('abc');
+    expect(preventDefault).toHaveBeenCalled();
   });
 });
