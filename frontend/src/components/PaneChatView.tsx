@@ -3,7 +3,7 @@ import { useApprovalColumnStore } from '../stores/approvalColumnStore';
 import { SessionApprovalColumn, SessionApprovalsButton } from './approvals/SessionApprovals';
 import { openNewSessionApprovals } from './approvals/useSessionApprovals';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Info, RefreshCw, Settings, Terminal, X } from 'lucide-react';
 import { API } from '../utils/api';
 import type { Session } from '../types/session';
@@ -465,7 +465,8 @@ function SessionTile({
   // Arrow keys open chat Sessions (T-87): the tile paints from the Session view cache.
   const cached = useCursorFollowEnabled() && !inline;
   // Another machine's Session under the cursor shows, read-only, in the focused tile (T-116 PR 6).
-  const remoteTarget = useRemoteSessionView(state => state.target);
+  // Deferred: drawing it never holds the next key press (D-6); a newer press interrupts the draw.
+  const remoteTarget = useDeferredValue(useRemoteSessionView(state => state.target));
   const remote = cached && isFocused ? remoteTarget : undefined;
   const visit = useOrchestrationSessionStore(state => state.selectionVisits[sessionId] ?? 0);
   const [view, setView] = useState<OrchestrationSessionView<Session> | null>(null);
