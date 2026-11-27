@@ -1388,6 +1388,28 @@ describe('RemotePaneClientController switches fast (T-128)', () => {
     await controller.switchToLocalMode();
   });
 
+  // T-132: a 1 s rest starts the switch to a machine heard from moments ago, which skips the
+  // checklist; an arrow press while it dials must still leave the window where it is (D-6).
+  it('a switch cancelled while it dials a machine heard from moments ago leaves the window on this computer', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const config = createDefaultRemoteDaemonConfig();
+    const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [{ id: `public:${server.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: server.baseUrl, token: 'test-token' }] };
+    config.client.computers = [studio];
+    const controller = createController();
+    let cancelled: boolean | undefined;
+    controller.initialize({ configManager: createConfigManagerStub(config), rendererEventSink: { send() {
+      if (cancelled === undefined && controller.getConnectionState().status === 'connecting') cancelled = controller.cancelActivation('studio-mac');
+    } } });
+    controller.setRecentAnswers(() => ({ routeId: studio.routes[0].id, baseUrl: server.baseUrl }));
+
+    await expect(controller.activateProfile(primaryProfile(studio))).rejects.toMatchObject({ code: 'ERR_REMOTE_SWITCH_CANCELLED' });
+    expect(cancelled).toBe(true);
+    await waitFor(() => controller.getConnectionState().status === 'local');
+    expect(controller.getConnectionState()).toMatchObject({ mode: 'local', activeProfileId: null, check: null });
+    expect(controller.cancelActivation('studio-mac')).toBe(false);
+  });
+
   it('a switch cancelled part-way leaves the window on its old machine, with no checklist left open', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);

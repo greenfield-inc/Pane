@@ -1642,6 +1642,10 @@ export class RemotePaneClientController extends EventEmitter {
     // close or redial the switch's connection (#1767's rig: the landing never armed). The switch
     // syncs to config itself when it fails; its caller holds syncs until it commits config.
     const releaseSync = this.holdConfigSync();
+    // The dial can be cancelled too (T-132): a 1 s rest dials a machine heard from moments ago
+    // with no checklist, and an arrow press meanwhile leaves the window where it is (D-6).
+    const dialing = { profileId: profile.id, cancel: () => undefined };
+    this.cancelPending = dialing;
     try {
       try {
         await this.connectProfile(profile, { retryOnInitialFailure: false, resolveOnReady: true, firstRoute: recent, quietInitialFailure: Boolean(recent) });
@@ -1650,9 +1654,12 @@ export class RemotePaneClientController extends EventEmitter {
         if (!recent || generation !== this.activationGeneration) throw error;
         await this.connectProfile(profile, { retryOnInitialFailure: false, resolveOnReady: true });
       }
+      if (generation !== this.activationGeneration) throw switchCancelled(profile);
+      if (this.cancelPending === dialing) this.cancelPending = null;
       releaseSync();
       return this.getConnectionState();
     } catch (error) {
+      if (this.cancelPending === dialing) this.cancelPending = null;
       releaseSync(false);
       await this.syncToConfig().catch((syncError) => {
         console.error('[Pane remote daemon] Failed to restore saved client state after activation error', syncError);
