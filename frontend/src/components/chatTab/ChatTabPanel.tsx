@@ -9,7 +9,7 @@ import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/t
 import type { ChatTabClient, ChatTabSend } from '../../../../shared/types/chatTab';
 import { chatTurns, messageTime, steeredMessageId, waitingToolIds, workerNotes, workingAgents, type ChatWorkerLine, type WorkingAgent } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
-import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
+import { chatTabViewer, firstPaintWindow, type ChatTabViewer } from '../../../../shared/chatTabViewer';
 import { switchMark } from '../../../../shared/switchMarks';
 import { useSessionShow } from '../../contexts/SessionShowContext';
 import { toAssistantMessage } from '../agentChat/convertMessage';
@@ -235,7 +235,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const primed = show.entry?.chat?.panelId === panelId ? show.entry.chat : undefined;
   useMemo(() => {
     viewer.setStartOnRead(show.startsAgents);
-    if (primed && show.entry) viewer.prime(primed, show.entry.readAt);
+    // Only passed over by the cursor: the newest 30 first, so a key repeat never waits on 200 (D-6); its own read brings the rest.
+    if (primed && show.entry) viewer.prime(show.peeking ? firstPaintWindow(primed) : primed, show.entry.readAt);
   }, [viewer, show.peeking, show.entry, primed]);
   const catalog = useChatAgents(client);
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);

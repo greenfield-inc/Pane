@@ -199,7 +199,8 @@ function SessionWorkspace() {
   const selectionRevision = useOrchestrationSessionStore(state => state.selectionRevision);
   const select = useOrchestrationSessionStore(state => state.select);
   // The sidebar cursor's Session shows in the focused tile only, and is never saved into the layout (T-87).
-  const cursorSessionId = useOrchestrationSessionStore(state => state.cursorSessionId);
+  // Deferred, as another machine's Session is: drawing it never holds the next key press (D-6).
+  const cursorSessionId = useDeferredValue(useOrchestrationSessionStore(state => state.cursorSessionId));
   const layout = useSessionWorkspaceLayoutStore(state => state.layout);
   const applyLayout = useSessionWorkspaceLayoutStore(state => state.apply);
   const hydrateLayout = useSessionWorkspaceLayoutStore(state => state.hydrate);

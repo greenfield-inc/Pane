@@ -29,6 +29,8 @@ const HISTORY_PAGE = 500;
 /** Closed chats that keep their newest messages, so reopening one paints them at once. */
 const KEPT_CLOSED = 5;
 const KEPT_MESSAGES = 200;
+/** Messages a chat passed over by the cursor draws first (see firstPaintWindow). */
+const FIRST_PAINT_MESSAGES = 30;
 /** How long a window prime() painted counts as just read (T-87): the Session's call and this mount are one switch. */
 const PRIMED_FRESH_MS = 1000;
 /** How long after a primed window paints its catch-up read runs. */
@@ -370,4 +372,16 @@ export class ChatTabViewerRegistry {
     else viewer.rebind(client);
     return viewer;
   }
+}
+
+/**
+ * The newest messages a first paint draws while a chat is only passed over (T-116 PR 6, D-6): 30,
+ * the window another machine's mirror holds (D-3). Drawing 200 takes a long chat ~95 ms, which a
+ * key repeat would wait behind.
+ */
+export function firstPaintWindow(chat: ChatTabView): ChatTabView {
+  const transcript = chat.transcript;
+  const extra = transcript ? transcript.messages.length - FIRST_PAINT_MESSAGES : 0;
+  if (!transcript || extra <= 0) return chat;
+  return { ...chat, transcript: { ...transcript, start: transcript.start + extra, messages: transcript.messages.slice(extra) } };
 }
