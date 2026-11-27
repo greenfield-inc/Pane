@@ -331,9 +331,9 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
     armSendExpiry(target);
   }
   if (sameTarget(state.engaging, target)) {
-    // Typing into a Session an Enter, click or rest already engages (keys on its row right after
-    // the Enter) makes it a typed engage: the held box takes focus and the keys that follow, so
-    // none goes wherever the switch's restore puts focus (#1781, build 11).
+    // Keys typed into a Session that an Enter, click or rest is already engaging (on its row, right
+    // after the Enter) make it a typed engage. The held box then takes focus and the keys that
+    // follow, so no key goes where the switch's restore puts focus (#1781, build 11).
     const engaging = useRemoteEngage.getState().engaging;
     if (cause === 'type' && engaging && engaging.cause !== 'type') useRemoteEngage.setState({ engaging: { ...engaging, cause: 'type' } });
     return;
@@ -366,6 +366,8 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
   notifySwitch(cause);
   void opening.then(outcome => {
     if (ticket !== engageTicket) return;
+    // The engage as it stands now: typing since it began made it a typed one (review 1781 enter R-A).
+    const current = useRemoteEngage.getState().engaging?.cause ?? cause;
     if (outcome.kind === 'opened') {
       switched(target, panelId);
       return;
@@ -380,7 +382,7 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
       const chat = panelId ?? mirroredChatPanel(target);
       if (chat) undelivered.set(chat, target);
       // Typing when it failed: the kept bar takes focus and the keys that follow (M-280).
-      keysToKept = cause === 'type' || cause === 'enter';
+      keysToKept = current === 'type' || current === 'enter';
       // One plain line, never a host's raw error body or a proxy's HTML page.
       useRemoteEngage.setState({ failure: { ...target, panelId: chat, message: switchFailureReason(outcome.reason, machineName(target.machineId)) }, keptFocus: keysToKept });
     }

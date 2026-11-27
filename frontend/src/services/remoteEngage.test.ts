@@ -157,6 +157,21 @@ describe('typing at once after an Enter engage (#1781, build 11)', () => {
     expect(taken).toEqual([expect.objectContaining({ text, focused: true, send: false })]);
     expect(state().held[engage.engageKey(target)]).toBeUndefined();
   });
+
+  it('a switch that fails after the typing began: the kept bar takes focus and the keys that follow (M-280, review 1781 enter R-A)', async () => {
+    const switched = deferred<MachineSelectOutcome>();
+    const { engage, state } = await setup(() => switched.promise);
+    const body = {};
+    vi.stubGlobal('document', { body, activeElement: body, querySelector: () => null, querySelectorAll: () => [] });
+    engage.engageRemoteSession(target, 'click');
+    for (const key of 'qa-') {
+      engage.holdRemoteText(target, (state().held[engage.engageKey(target)]?.text ?? '') + key);
+      engage.engageRemoteSession(target, 'type');
+    }
+    switched.resolve({ ok: false, error: 'Build box answered 503.' });
+    await vi.waitFor(() => expect(state().failure).toBeDefined());
+    expect(state().keptFocus).toBe(true);
+  });
 });
 
 describe('typing, Enter or a click engages, and what was typed arrives once (T-132)', () => {
