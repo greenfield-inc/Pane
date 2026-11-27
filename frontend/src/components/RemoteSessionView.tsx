@@ -64,11 +64,17 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
 
   // The chat paints what is held at once; its own read (the 200-message fill) runs after that paint.
   useMemo(() => {
-    if (!chat?.transcript) return;
+    if (!chat) return;
     const viewer = chatTabViewer(client, chat.panelId);
     viewer.setStartOnRead(false);
     viewer.prime(chat, performance.now());
   }, [client, chat]);
+
+  // The host's read (the 200-message fill) landed: the shown chat takes it in.
+  const panelId = chat?.panelId;
+  useEffect(() => {
+    if (panelId && readAt > 0) void chatTabViewer(client, panelId).refresh();
+  }, [client, panelId, readAt]);
 
   // While shown and the machine answers, the chat follows the host's events for it, and only for it.
   const followed = online && chat ? chat.panelId : undefined;

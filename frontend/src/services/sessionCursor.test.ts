@@ -296,6 +296,17 @@ describe("another machine's Sessions under the cursor (T-116 PR 6)", () => {
     expect(machineRead).toHaveBeenCalledWith('build', 'orchestration-sessions:peek', [{ sessionId: 'y' }, { chatTabs: true, chatAgents: true }]);
   });
 
+  it("fills a mirrored Session's newest 200 messages with one host read once the cursor rests, and none for rows passed over", async () => {
+    const { cursor } = await setup();
+    await mirrored();
+    cursor.showSessionAtCursor('b', 'build');
+    vi.advanceTimersByTime(30);
+    cursor.showSessionAtCursor('c', 'build');
+    vi.advanceTimersByTime(1000);
+    expect(machineRead).toHaveBeenCalledTimes(1);
+    expect(machineRead).toHaveBeenCalledWith('build', 'orchestration-sessions:peek', [{ sessionId: 'c' }, { chatTabs: true, chatAgents: true }]);
+  });
+
   it('reads nothing from a machine that is offline: it shows what the mirror last had', async () => {
     const { cursor } = await setup();
     await mirrored();

@@ -45,8 +45,8 @@ export const useRemoteSessionView = create<RemoteSessionViewState>(() => ({ entr
 
 /** How long the cursor stays on a row before its host is read: rows passed over at key-repeat speed are never read. */
 const REMOTE_READ_REST_MS = 150;
-/** A host read this recent needs no second one (the chat's own read after it painted, say). */
-const FRESH_READ_MS = 1000;
+/** A host read this recent needs no second one: the mirror and the followed chat keep a shown Session current. */
+const FRESH_READ_MS = 30_000;
 /** Entries kept, the least recently shown first out (as the Session view cache's 30). */
 const KEPT_ENTRIES = 30;
 /** What `peek` takes after the selector: a desktop shows chat tabs and every chat agent. */
@@ -168,10 +168,9 @@ export function showRemoteSession(target: RemoteSessionTarget): void {
     useRemoteSessionView.setState({ target: { ...target } });
   }
   const { machineId, sessionId } = target;
-  if (mirrorListing(machineId)?.sessions[sessionId] !== undefined) {
-    readMirror(machineId, sessionId);
-    return;
-  }
+  // The mirror's copy paints at once; the host's read (its newest 200 messages, or all a Session
+  // the mirror lacks has) waits until the cursor stays.
+  readMirror(machineId, sessionId);
   const held = cachedRemoteSession(machineId, sessionId);
   if (held?.read && performance.now() - held.readAt < FRESH_READ_MS) return;
   restTimer = setTimeout(() => {
@@ -185,19 +184,6 @@ export function clearRemoteSession(): void {
   clearTimeout(restTimer);
   restTimer = undefined;
   if (useRemoteSessionView.getState().target) useRemoteSessionView.setState({ target: undefined });
-}
-
-/** Resolves true once the cursor has stayed on the Session for `ms`, false as soon as it has moved on. */
-function restOn(machineId: string, sessionId: string, ms: number): Promise<boolean> {
-  return new Promise(resolve => {
-    const timer = setTimeout(() => { stop(); resolve(isTarget(machineId, sessionId)); }, ms);
-    const stop = useRemoteSessionView.subscribe(state => {
-      if (sameTarget(state.target, { machineId, sessionId })) return;
-      clearTimeout(timer);
-      stop();
-      resolve(false);
-    });
-  });
 }
 
 /** Which Session of a machine a chat tab belongs to, from what is held. */
@@ -237,8 +223,8 @@ function refused(machineName: string): Promise<never> {
 const clients = new Map<string, ChatTabClient>();
 
 /**
- * A read-only chat client for one machine's Sessions shown under the cursor: reads come from what
- * is held and, once the cursor rests, the host's one `peek`; events come from the one chat this
+ * A read-only chat client for one machine's Sessions shown under the cursor: reads answer at once
+ * from what is held (the mirror's copy, or the host's one `peek` once it landed); events come from the one chat this
  * window follows on that machine (`machine-chat:follow`). Anything that acts on the chat is refused:
  * engaging (typing, Enter, a click) switches the window first, in PR 7.
  */
@@ -247,13 +233,9 @@ export function remoteChatClient(machineId: string, machineName: string): ChatTa
   if (known) return known;
   const no = () => refused(machineName);
   const client: ChatTabClient = {
+    // What is held, at once: the host's read lands in the store once the cursor rests, and the shown chat reads again then.
     async get(panelId) {
       const sessionId = sessionOfChat(machineId, panelId);
-      const held = sessionId ? cachedRemoteSession(machineId, sessionId) : undefined;
-      const fresh = held?.read?.chat?.panelId === panelId && performance.now() - held.readAt < FRESH_READ_MS;
-      if (sessionId && !fresh && machineOnline(machineId) && await restOn(machineId, sessionId, REMOTE_READ_REST_MS)) {
-        await readRemoteSession(machineId, sessionId);
-      }
       const chat = heldRemoteChat(sessionId ? cachedRemoteSession(machineId, sessionId) : undefined);
       if (!chat || chat.panelId !== panelId) throw new Error(`Pane has nothing of this chat from ${machineName} yet.`);
       return chat;
