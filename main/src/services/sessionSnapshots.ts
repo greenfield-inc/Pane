@@ -169,14 +169,17 @@ export class SessionSnapshotService implements PaneEventSink {
         continue;
       }
       const held = sameRun ? request.held?.[record.id] : undefined;
-      snapshots.push(projectSnapshot({
+      const snapshot: SessionSnapshot = {
         sessionId: record.id,
         revision: sessionRevision,
         session: record,
         chat: { ...chat, transcript: chat.transcript && changedSince(chat.transcript, chat.messageCount, held, this.chats.get(chatPanelId)) },
         tabs: this.sources.tabs(record.internalSessionId),
         layout: this.sources.layout(record.internalSessionId),
-      }));
+      };
+      // A chat whose agent hasn't run since this Pane started has no transcript here yet; that says nothing of its messages.
+      if (!chat.transcript) snapshot.transcriptUnknown = true;
+      snapshots.push(projectSnapshot(snapshot));
     }
     return { revision, epoch: this.epoch, sessionIds, snapshots };
   }

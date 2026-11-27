@@ -1069,6 +1069,12 @@ changed.
 restart or with the clock set back, has `since` and `held` ignored, so every
 Session is sent whole.
 
+After a restart, a chat whose agent hasn't run yet has no transcript on the
+host: Pane reads a conversation only by starting its agent, and a snapshot
+never does. Its snapshot then has no `chat.transcript`, `messageCount` 0 and
+`transcriptUnknown: true`, which means "not known yet", not "empty". Once the
+chat is opened there, its snapshot's revision rises and carries its messages.
+
 A change also sends `session-snapshot:changed` `{ sessionId, revision }` on the
 event stream, at most once a second per Session. Reading creates no tab and
 starts no agent. Only the owner's own devices get an answer; teammates and Read
