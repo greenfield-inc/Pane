@@ -144,7 +144,13 @@ export function registerRemoteDaemonHandlers(
         await configManager.updateConfig({ remoteDaemon: stayPut(next) });
         throw refuse();
       }
-      await configManager.updateConfig({ remoteDaemon: next });
+      try {
+        await configManager.updateConfig({ remoteDaemon: next });
+      } catch (error) {
+        // Not committed: the connection it dialed closes and the window stays where it is.
+        if (switchedTo !== null) remotePaneClientController.abandonActivation(switchedTo);
+        throw error;
+      }
       if (cancelledBeforeCommit()) {
         await configManager.updateConfig({ remoteDaemon: stayPut(getRemoteDaemonConfig(configManager.getConfig().remoteDaemon)) });
         throw refuse();
@@ -712,7 +718,9 @@ export function registerRemoteDaemonHandlers(
   ipcMain.handle('remote-daemon:cancel-switch', async (_event, computerId: PaneCommandValue) => {
     try {
       const id = decodeBoundary(computerId, boundary.nonEmptyString);
-      return { success: true, data: { cancelled: remotePaneClientController.cancelActivation(id) } };
+      // `committed`: too late, the window is going there; `nothing`: no such switch was running (R4-SF-1).
+      const outcome = remotePaneClientController.cancelSwitch(id);
+      return { success: true, data: { cancelled: outcome === 'cancelled', outcome } };
     } catch (error) {
       return { success: false, error: getErrorMessage(error, 'Failed to cancel the machine switch') };
     }

@@ -1407,6 +1407,10 @@ export class RemotePaneClientController extends EventEmitter {
   private activationGeneration = 0;
   /** Rejects the probes of the switch in flight, while it can still be stopped; null otherwise. */
   private cancelPending: { profileId: string; cancel: () => void; beforeCommit?: boolean } | null = null;
+  /** The switch whose dial is ready and waits for its caller to commit it; null otherwise. */
+  private committing: string | null = null;
+  /** The last switch its caller committed, and when: a cancel after it was too late (R4-SF-1). */
+  private lastCommit: { profileId: string; at: number } | null = null;
   /** A switch that was ready and then cancelled before its caller committed it (QA 1781 F-3). */
   private cancelledBeforeCommit: string | null = null;
   /** Shows the staged connection as the window's, once its caller commits the switch; null otherwise. */
@@ -1684,6 +1688,7 @@ export class RemotePaneClientController extends EventEmitter {
         await dial({ retryOnInitialFailure: false, resolveOnReady: true });
       }
       if (generation !== this.activationGeneration) throw switchCancelled(profile);
+      this.committing = profile.id;
       if (this.cancelPending === dialing) {
         // Ready, but not shown until the caller commits it (its config written): an arrow until then
         // still stops it, so the window stays where the person is (QA 1781 F-3).
@@ -1706,6 +1711,37 @@ export class RemotePaneClientController extends EventEmitter {
 
   /** Called only after the selected host's config is committed. */
   commitActivation(): void {
+    if (this.committing) this.lastCommit = { profileId: this.committing, at: Date.now() };
+    this.settleActivation();
+  }
+
+  /**
+   * What a cancel of the switch to `profileId` found (review 1781 R4-SF-1): `cancelled` it stopped
+   * it; `committed` it came too late, the switch committed moments ago; `nothing` there was no such
+   * switch to stop (the press never reached one). Only `committed` means the window is going there.
+   */
+  cancelSwitch(profileId: string): 'cancelled' | 'committed' | 'nothing' {
+    if (this.cancelActivation(profileId)) return 'cancelled';
+    const committed = this.lastCommit;
+    if (committed?.profileId === profileId && Date.now() - committed.at < RECENT_COMMIT_MS) return 'committed';
+    return 'nothing';
+  }
+
+  /**
+   * The caller could not commit the switch to `profileId` (its config write failed): its staged
+   * connection closes and the window stays on the machine it shows; a sync to config follows.
+   */
+  abandonActivation(profileId: string): void {
+    if (this.committing !== profileId) return;
+    this.committing = null;
+    if (this.cancelPending?.profileId === profileId) this.cancelPending = null;
+    if (this.cancelledBeforeCommit === profileId) this.cancelledBeforeCommit = null;
+    this.dropStagedClient();
+  }
+
+  /** Ends the wait for a commit: a commit, or a newer connection or a disconnect taking over. */
+  private settleActivation(): void {
+    this.committing = null;
     // Committed: a cancel can no longer stop it (review 1781 R2-SF-2).
     if (this.cancelPending?.beforeCommit) this.cancelPending = null;
     const promote = this.stagedPromotion;
@@ -1978,7 +2014,7 @@ export class RemotePaneClientController extends EventEmitter {
     const staged = options.keepCurrentUntilReady === true && this.activeClient !== null;
     if (staged) {
       this.dropStagedClient();
-      this.commitActivation();
+      this.settleActivation();
     } else {
       await this.disconnectActiveClient();
     }
@@ -2312,7 +2348,7 @@ export class RemotePaneClientController extends EventEmitter {
 
   private async disconnectActiveClient(): Promise<void> {
     this.dropStagedClient();
-    this.commitActivation();
+    this.settleActivation();
     this.pendingRestore?.reject(new Error('Connection changed'));
     this.pendingRestore = null;
     const client = this.activeClient;
@@ -2829,6 +2865,9 @@ function getErrorMessage(cause: unknown, fallback: string): string {
 function retriesRequest(channel: string): boolean {
   return REMOTE_READ_CHANNELS.has(channel) || REMOTE_DEDUPLICATED_CHANNELS.has(channel);
 }
+
+/** How long after a commit a cancel of that switch is answered `committed` (it raced the commit). */
+const RECENT_COMMIT_MS = 10_000;
 
 function switchCancelled(profile: RemotePaneConnectionProfile): PaneError {
   return new PaneError('ERR_REMOTE_SWITCH_CANCELLED', `The switch to ${profile.label} was cancelled by a newer one.`, 'Nothing to do: the window stays on the machine it shows, and the newer switch runs.');

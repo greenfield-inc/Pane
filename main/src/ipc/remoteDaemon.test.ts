@@ -1156,6 +1156,33 @@ describe('remote daemon IPC', () => {
     expect(commit).not.toHaveBeenCalled();
   });
 
+  it('a cancel says whether it stopped the switch, came after it committed, or found nothing (review 1781 R4-SF-1)', async () => {
+    const ipcMain = createIpcMainStub();
+    registerTestRemoteDaemonHandlers(ipcMain, { configManager: createConfigManagerStub() });
+    const cancel = ipcMain.handlers.get('remote-daemon:cancel-switch');
+    vi.spyOn(remotePaneClientController, 'cancelSwitch').mockReturnValueOnce('committed').mockReturnValueOnce('nothing').mockReturnValueOnce('cancelled');
+    await expect(cancel?.({}, 'build-box')).resolves.toEqual({ success: true, data: { cancelled: false, outcome: 'committed' } });
+    await expect(cancel?.({}, 'build-box')).resolves.toEqual({ success: true, data: { cancelled: false, outcome: 'nothing' } });
+    await expect(cancel?.({}, 'build-box')).resolves.toEqual({ success: true, data: { cancelled: true, outcome: 'cancelled' } });
+  });
+
+  it('a switch whose config write fails is abandoned, its staged connection closed, and nothing committed (review 1781 round 4)', async () => {
+    const ipcMain = createIpcMainStub();
+    const configManager = createConfigManagerStub();
+    registerTestRemoteDaemonHandlers(ipcMain, { configManager });
+    const upsertProfile = ipcMain.handlers.get('remote-daemon:upsert-connection-profile');
+    const updateClientState = ipcMain.handlers.get('remote-daemon:update-client-state');
+    await upsertProfile?.({}, { id: 'profile-1', label: 'Mac mini', baseUrl: 'http://127.0.0.1:42137', token: 'secret-token', transport: 'http+sse' });
+    vi.spyOn(remotePaneClientController, 'activateProfile').mockResolvedValue({ mode: 'remote', status: 'restoring', activeProfileId: 'profile-1', activeProfileLabel: 'Mac mini', activeBaseUrl: 'http://127.0.0.1:42137', lastError: null });
+    const commit = vi.spyOn(remotePaneClientController, 'commitActivation').mockImplementation(() => undefined);
+    const abandon = vi.spyOn(remotePaneClientController, 'abandonActivation').mockImplementation(() => undefined);
+    vi.spyOn(configManager, 'updateConfig').mockRejectedValueOnce(new Error('disk full'));
+
+    await expect(updateClientState?.({}, { activeProfileId: 'profile-1', mode: 'remote' })).resolves.toMatchObject({ success: false });
+    expect(abandon).toHaveBeenCalledWith('profile-1');
+    expect(commit).not.toHaveBeenCalled();
+  });
+
   it('keeps the saved client mode local when remote activation fails', async () => {
     const ipcMain = createIpcMainStub();
     const configManager = createConfigManagerStub();

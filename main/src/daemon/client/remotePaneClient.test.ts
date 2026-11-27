@@ -2030,6 +2030,31 @@ describe('a switch from a window on another machine keeps that machine until the
     await controller.switchToLocalMode();
   });
 
+  // Review 1781 R4-SF-1: the renderer goes back only when the switch really committed, never when
+  // main had nothing to stop (the open never reached a switch).
+  it('answers what a cancel found: stopped, already committed, or nothing to stop', async () => {
+    const { controller, build } = await onStudio({ renderers: true });
+    expect(controller.cancelSwitch('build-box')).toBe('nothing');
+    await controller.activateProfile(primaryProfile(build));
+    controller.commitActivation();
+    expect(controller.cancelSwitch('build-box')).toBe('committed');
+    expect(controller.cancelSwitch('studio-mac')).toBe('nothing');
+    await controller.switchToLocalMode();
+  });
+
+  // Review 1781 round 4: a switch whose config write failed is never committed; its staged
+  // connection closes and the window stays on its machine.
+  it('abandoning a switch that was never committed closes its staged connection', async () => {
+    const { controller, build } = await onStudio({ renderers: true });
+    await controller.activateProfile(primaryProfile(build));
+    controller.abandonActivation('build-box');
+    controller.commitActivation();
+    await sleep(50);
+    expect(controller.getActiveRemoteClient()?.profile.id).toBe('studio-mac');
+    expect(controller.cancelSwitch('build-box')).toBe('nothing');
+    await controller.switchToLocalMode();
+  });
+
   it('a switch committed with no cancel moves the window then, and a cancel after that is refused', async () => {
     const { controller, build } = await onStudio({ renderers: true });
     await controller.activateProfile(primaryProfile(build));
