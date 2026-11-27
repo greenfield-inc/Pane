@@ -15,6 +15,7 @@ import {
   type SessionSnapshotsResult,
 } from '../../../shared/types/sessionSnapshot';
 import type { ChatTabTranscript } from '../../../shared/types/chatTab';
+import { projectSnapshot } from './sessionSnapshots';
 
 /** Notices from one machine that arrive within this long are read together (the All machines feed's pace). */
 const BATCH_MS = 250;
@@ -119,6 +120,8 @@ export class MachineMirror {
   /** Loads the saved copies of the owner's machines, removes the rest, and follows the machines from now on. */
   async start(): Promise<void> {
     await this.loadSaved();
+    // A folder made by an earlier build, or by hand, is made readable only by this user too.
+    if (process.platform !== 'win32') await promises.chmod(this.options.directory, 0o700).catch(() => undefined);
     this.unsubscribe = this.options.machines.subscribe(event => this.onEvent(event));
     this.sweep = setInterval(() => this.removeUnseen(), DAY_MS);
     this.sweep.unref?.();
@@ -259,6 +262,7 @@ export class MachineMirror {
   }
 
   private apply(mirror: Mirror, result: SessionSnapshotsResult): void {
+    if (this.stopped) return;
     // A new run of the host sends each Session whole: nothing held from the old run is joined to it.
     const sameRun = mirror.epoch === result.epoch;
     const listed = new Set(result.sessionIds);
@@ -266,7 +270,8 @@ export class MachineMirror {
       if (!listed.has(sessionId)) mirror.sessions.delete(sessionId);
     }
     for (const sent of result.snapshots) {
-      const snapshot = merged(sameRun ? mirror.sessions.get(sent.sessionId)?.snapshot : undefined, sent);
+      // The host projects what it sends; the desktop projects it again, so it never stores more than the plan allows.
+      const snapshot = merged(sameRun ? mirror.sessions.get(sent.sessionId)?.snapshot : undefined, projectSnapshot(sent));
       mirror.sessions.set(snapshot.sessionId, { snapshot, bytes: Buffer.byteLength(JSON.stringify(snapshot)) });
     }
     mirror.revision = result.revision;
@@ -276,11 +281,11 @@ export class MachineMirror {
     this.scheduleSave(mirror);
   }
 
-  /** Leaves out the Sessions changed longest ago until the copy fits its cap. */
+  /** Leaves out the Sessions whose snapshot changed longest ago (lowest host revision) until the copy fits its cap. */
   private keepUnderCap(mirror: Mirror): void {
     let total = FILE_OVERHEAD_BYTES + [...mirror.sessions.values()].reduce((sum, entry) => sum + entry.bytes + 1, 0);
     if (total <= this.capBytes) return;
-    const oldestFirst = [...mirror.sessions.values()].sort((left, right) => left.snapshot.session.updatedAt.localeCompare(right.snapshot.session.updatedAt));
+    const oldestFirst = [...mirror.sessions.values()].sort((left, right) => left.snapshot.revision - right.snapshot.revision);
     for (const entry of oldestFirst) {
       if (total <= this.capBytes) break;
       mirror.sessions.delete(entry.snapshot.sessionId);
@@ -289,7 +294,7 @@ export class MachineMirror {
   }
 
   private scheduleSave(mirror: Mirror): void {
-    if (mirror.save) return;
+    if (mirror.save || this.stopped) return;
     mirror.save = setTimeout(() => {
       mirror.save = undefined;
       this.saveNow(mirror);

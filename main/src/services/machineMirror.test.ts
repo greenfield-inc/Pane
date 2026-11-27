@@ -1,4 +1,4 @@
-import { mkdtempSync, promises, readFileSync, readdirSync, rmSync, statSync, writeFileSync, mkdirSync } from 'fs';
+import { chmodSync, mkdtempSync, promises, readFileSync, readdirSync, rmSync, statSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -446,6 +446,92 @@ describe('MachineMirror', () => {
     expect(saved).not.toContain('sk-live-123');
     expect(saved).not.toContain('launchCommand');
     expect(mirror.session('mac', 'a')?.session).not.toHaveProperty('openingPrompt');
+  });
+
+  it('applies the projection itself, storing nothing outside it whatever the host sends', async () => {
+    const mac = fakeHost('mac');
+    mac.add('a');
+    const link = fakeMachines([mac]);
+    const read = link.machines.read;
+    const big = 'q'.repeat(20_000);
+    // A host that sends more than it should (a regression, or a field added later).
+    link.machines.read = async (machineId, channel, args) => {
+      const result = await read(machineId, channel, args);
+      // SAFETY: the fake host answers { success, data: SessionSnapshotsResult }.
+      const answer = result.data as { data: SessionSnapshotsResult };
+      for (const snapshot of answer.data.snapshots) {
+        Object.assign(snapshot.session, { launchCommand: 'claude --api-key sk-live-123' });
+        snapshot.tabs.push({ id: 'term', sessionId: 'pane-a', type: 'terminal', title: 'T', state: { isActive: false, customState: { screenText: 'sk-live-123', cwd: '/r' } }, metadata: { createdAt: '', lastActiveAt: '', position: 1 } });
+        snapshot.tabs.push({ id: 'file', sessionId: 'pane-a', type: 'explorer', title: 'f', state: { isActive: false, customState: { content: 'sk-live-123' } }, metadata: { createdAt: '', lastActiveAt: '', position: 2 } });
+        snapshot.chat.transcript?.messages.push({ id: 'img', role: 'user', parts: [{ type: 'content', content: { type: 'image', data: big } }] });
+      }
+      return result;
+    };
+    const mirror = mirrorOf(link.machines);
+    await mirror.start();
+    link.online('mac');
+    await vi.advanceTimersByTimeAsync(0);
+    await mirror.flush();
+
+    const saved = readFileSync(path.join(directory, 'mac.json'), 'utf8');
+    expect(saved).not.toContain('sk-live-123');
+    expect(saved).not.toContain(big);
+    expect(mirror.session('mac', 'a')?.tabs.map(tab => tab.id)).toEqual(['chat-a', 'term']);
+  });
+
+  it('over its cap, leaves out the Sessions whose snapshot changed longest ago, not whose record did', async () => {
+    const mac = fakeHost('mac');
+    // busy's record is the oldest, but its chat keeps changing.
+    mac.add('busy', 30, '2026-10-01T00:00:00.000Z');
+    mac.add('idle', 30, '2026-11-20T00:00:00.000Z');
+    const link = fakeMachines([mac]);
+    // SAFETY: the fake host answers as the channel does, `{ success, data: SessionSnapshotsResult }`.
+    const one = JSON.stringify((await mac.answer([{}]) as { data: SessionSnapshotsResult }).data.snapshots[0]).length;
+    const mirror = mirrorOf(link.machines, { capBytes: one * 2 + 2000 });
+    await mirror.start();
+    link.online('mac');
+    await vi.advanceTimersByTimeAsync(0);
+    await settle(mac);
+    mac.add('new', 30, '2026-11-25T00:00:00.000Z');
+    await vi.advanceTimersByTimeAsync(0);
+    link.deliver(mac);
+    await vi.advanceTimersByTimeAsync(250);
+    await settle(mac);
+    mac.say('busy');
+    link.deliver(mac);
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(mirror.sessions('mac').map(snapshot => snapshot.sessionId).sort()).toEqual(['busy', 'new']);
+  });
+
+  it('saves nothing for a read that finishes after it stopped', async () => {
+    const mac = fakeHost('mac');
+    mac.add('a');
+    const link = fakeMachines([mac]);
+    const read = link.machines.read;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    link.machines.read = async (machineId, channel, args) => { await gate; return read(machineId, channel, args); };
+    const mirror = new MachineMirror({ directory, machines: link.machines });
+    await mirror.start();
+    link.online('mac');
+
+    await mirror.stop();
+    release();
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(() => readdirSync(directory)).toThrow();
+  });
+
+  it('makes an existing mirror folder readable only by this user', async () => {
+    if (process.platform === 'win32') return;
+    mkdirSync(directory, { recursive: true, mode: 0o755 });
+    chmodSync(directory, 0o755);
+    const mirror = mirrorOf(fakeMachines([]).machines);
+
+    await mirror.start();
+
+    expect(statSync(directory).mode & 0o777).toBe(0o700);
   });
 
   it('removes the copy of a machine that is forgotten', async () => {

@@ -169,20 +169,14 @@ export class SessionSnapshotService implements PaneEventSink {
         continue;
       }
       const held = sameRun ? request.held?.[record.id] : undefined;
-      snapshots.push({
+      snapshots.push(projectSnapshot({
         sessionId: record.id,
         revision: sessionRevision,
-        session: readableCopy(record),
-        chat: {
-          ...chat,
-          transcript: chat.transcript && withoutInlineData(changedSince(chat.transcript, chat.messageCount, held, this.chats.get(chatPanelId))),
-          // A waiting approval's tool call can carry a whole file; a question's form, a long schema.
-          permissions: chat.permissions.map(lighter),
-          questions: chat.questions.map(lighter),
-        },
-        tabs: this.sources.tabs(record.internalSessionId).filter(tab => isReadableTabType(tab.type)).map(tab => readableCopy(tab)),
+        session: record,
+        chat: { ...chat, transcript: chat.transcript && changedSince(chat.transcript, chat.messageCount, held, this.chats.get(chatPanelId)) },
+        tabs: this.sources.tabs(record.internalSessionId),
         layout: this.sources.layout(record.internalSessionId),
-      });
+      }));
     }
     return { revision, epoch: this.epoch, sessionIds, snapshots };
   }
@@ -315,8 +309,25 @@ function changedSince(transcript: ChatTabTranscript, messageCount: number, held:
   return { ...transcript, start: from, messages: transcript.messages.slice(from - transcript.start) };
 }
 
-function withoutInlineData(transcript: ChatTabTranscript): ChatTabTranscript {
-  return { ...transcript, messages: transcript.messages.map(message => ({ ...message, parts: message.parts.map(lighterPart) })) };
+/**
+ * What may leave the host and be kept by another machine: the record and tabs as a Read only
+ * viewer sees them (no launch settings, only chat and terminal tabs with the state they show), and
+ * every string over 4 KB outside a message's own text, in the transcript, a waiting approval or a
+ * question's form, replaced by its length. The host sends it, and the desktop applies it again before storing.
+ */
+export function projectSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
+  const { chat } = snapshot;
+  return {
+    ...snapshot,
+    session: readableCopy(snapshot.session),
+    tabs: snapshot.tabs.filter(tab => isReadableTabType(tab.type)).map(tab => readableCopy(tab)),
+    chat: {
+      ...chat,
+      transcript: chat.transcript && { ...chat.transcript, messages: chat.transcript.messages.map(message => ({ ...message, parts: message.parts.map(lighterPart) })) },
+      permissions: chat.permissions.map(lighter),
+      questions: chat.questions.map(lighter),
+    },
+  };
 }
 
 /** A part with every string over 4 KB replaced in place by its length; a message's own text is kept whole. */
