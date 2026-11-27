@@ -164,7 +164,8 @@ the agent to finish its current reply, then restart its chat tab on the new laun
   lead runs in a terminal (a promoted or resumed conversation, WSL, a wrapper or
   custom resume command, or Chat tabs off) gets a snapshot too. Its Reload profile
   takes a new snapshot without restarting the lead, so only tabs opened afterwards
-  use it. If a Reload or Switch can't save its snapshot, it changes nothing and
+  use it. The lead keeps the snapshot it started with, even across a Pane restart:
+  close and reopen the lead tab to move it to the new one. If a Reload or Switch can't save its snapshot, it changes nothing and
   says so (`AGENT_FARM_SNAPSHOT_FAILED`, "Nothing was reloaded."). If the snapshot
   can't be saved when the Session is created, the Session is still created
   without one. Its activity then says "No Agent Farm snapshot", and its agents

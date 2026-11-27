@@ -801,7 +801,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       const next: OrchestrationSessionRecord = { ...current, revision: current.revision + 1, updatedAt: new Date().toISOString(), activity: [...current.activity] };
       if (snapshot) next.agentFarmSnapshot = snapshot.path;
       if (mode === 'snapshot') {
-        next.activity.push(this.activity('updated', 'Reloaded the Session\'s Agent Farm snapshot · its lead keeps running as it is, and tabs opened from now on use the new one.', source));
+        next.activity.push(this.activity('updated', 'Reloaded the Session\'s Agent Farm snapshot · its lead keeps running as it is, and tabs opened from now on use the new one. Close and reopen the lead tab to move the lead too.', source));
         this.trimActivity(next);
         this.store.write(replaceSession(data, next));
         if (snapshot) this.snapshotChanged.delete(next.id);
@@ -838,7 +838,13 @@ export class OrchestrationSessionManager extends EventEmitter {
     }
     const lead = panelManager.getPanel(record.panelIds[record.agent]);
     if (lead?.type === 'chat') {
-      if (!record.agentProfile) throw new PaneError('SESSION_PROFILE_NONE', `${record.name} started before Sessions had profiles, so it has none to reload. ${outcome}`, 'Use Switch profile to give it one.');
+      // Review r2 N-5: a Session created with Profiles on whose agent or launch command later took no profile.
+      if (!record.agentProfile) {
+        const why = record.agentFarmSnapshot ? `has no profile now: its agent or launch command changed to one without one` : 'started before Sessions had profiles';
+        throw new PaneError('SESSION_PROFILE_NONE', `${record.name} ${why}, so it has none to reload. ${outcome}`, 'Use Switch profile to give it one.');
+      }
+      // Review r2 F-3: refused before the snapshot, which writes a folder.
+      if (this.configManager.getConfig().chatTabsEnabled !== true) throw new PaneError('SESSION_PROFILE_UNSUPPORTED', `Profiles run in chat tabs, which are off on this computer. ${outcome}`, 'Turn on Chat tabs in Settings > AI & Agents, then try again.');
       return 'lead';
     }
     if (record.agentFarmSnapshot) return 'snapshot';
@@ -934,6 +940,30 @@ export class OrchestrationSessionManager extends EventEmitter {
   refreshPluginHashes(force = false, from: 'list' | 'timer' = 'list'): Promise<void> {
     // With Profiles off nothing shows the mark, so no plugin is read.
     if (!this.profilesOn()) return Promise.resolve();
+    // The gone mark lists Agent Farm's profiles (a process): listing and Save refresh it on its own
+    // throttle, so the 10 s hash check never holds it back (review r2 N-1); the timer never runs it.
+    const gone = from === 'timer' ? Promise.resolve() : this.refreshGoneMarks(force);
+    return Promise.all([gone, this.refreshHashes(force)]).then(() => undefined);
+  }
+
+  private goneCheckedAt = 0;
+  private goneChecking?: Promise<void>;
+
+  /** Marks live Sessions whose profile Agent Farm no longer lists, at most every 10 s unless forced. */
+  private refreshGoneMarks(force: boolean): Promise<void> {
+    if (this.goneChecking) return this.goneChecking;
+    if (!force && Date.now() - this.goneCheckedAt < PLUGIN_HASH_INTERVAL_MS) return Promise.resolve();
+    this.goneCheckedAt = Date.now();
+    this.goneChecking = (async () => {
+      const sessions = this.store.read().sessions.filter(session => session.archived !== true && !session.move && session.agentProfile);
+      const goneChanged = await this.refreshGoneProfiles(sessions.map(session => session.agentProfile!.ref));
+      for (const session of sessions) if (goneChanged.has(session.agentProfile!.ref)) this.emitChanged(session, 'updated');
+    })().finally(() => { this.goneChecking = undefined; });
+    return this.goneChecking;
+  }
+
+  /** Hashes the plugins live Sessions run and marks those whose profile or snapshot changed (see refreshPluginHashes). */
+  private refreshHashes(force: boolean): Promise<void> {
     if (this.pluginHashesChecking) return this.pluginHashesChecking;
     if (!force && Date.now() - this.pluginHashesCheckedAt < PLUGIN_HASH_INTERVAL_MS) return Promise.resolve();
     this.pluginHashesCheckedAt = Date.now();
@@ -966,11 +996,9 @@ export class OrchestrationSessionManager extends EventEmitter {
         if (differs) this.snapshotChanged.add(session.id); else this.snapshotChanged.delete(session.id);
         flipped.add(session.id);
       }
-      // The gone mark lists Agent Farm's profiles (a process); the 10 s check leaves that to listing and Save.
-      const goneChanged = from === 'timer' ? new Set<string>() : await this.refreshGoneProfiles(sessions.map(session => session.agentProfile!.ref));
       for (const session of live) {
         const own = !session.agentFarmSnapshot && !!session.agentProfile && changed.has(profilePlugin(session.agentProfile.ref));
-        if (own || flipped.has(session.id) || (session.agentProfile !== undefined && goneChanged.has(session.agentProfile.ref))) this.emitChanged(session, 'updated');
+        if (own || flipped.has(session.id)) this.emitChanged(session, 'updated');
       }
     })().finally(() => { this.pluginHashesChecking = undefined; });
     return this.pluginHashesChecking;
