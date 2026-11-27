@@ -1885,3 +1885,68 @@ describe('RemotePaneClient reads compressed answers (T-127)', () => {
     expect(bytesFromHost() - before).toBeLessThan(raw / 10);
   });
 });
+
+// Review 1781 SF-1: from a window on another machine (D-20), the dial to the next one keeps the
+// window's own connection until the new one is ready, so a cancel or a failed dial leaves it as it was.
+describe('a switch from a window on another machine keeps that machine until the new one is ready (T-132)', () => {
+  async function onStudio() {
+    const studioServer = await createTestRemoteServer();
+    const buildServer = await createTestRemoteServer();
+    activeServers.push(studioServer, buildServer);
+    const config = createDefaultRemoteDaemonConfig();
+    const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [{ id: `public:${studioServer.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: studioServer.baseUrl, token: 'test-token' }] };
+    const build = { id: 'build-box', label: 'Build Box', routes: [{ id: `public:${buildServer.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: buildServer.baseUrl, token: 'test-token' }] };
+    config.client = { ...config.client, mode: 'remote', activeProfileId: 'studio-mac', computers: [studio, build] };
+    const controller = createController();
+    const states: string[] = [];
+    controller.initialize({ configManager: createConfigManagerStub(config), rendererEventSink: { send() {
+      const state = controller.getConnectionState();
+      const label = `${state.status}:${state.activeProfileId}`;
+      if (states.at(-1) !== label) states.push(label);
+    } } });
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    states.length = 0;
+    controller.setRecentAnswers(() => ({ routeId: build.routes[0].id, baseUrl: buildServer.baseUrl }));
+    return { controller, states, studio, build, studioServer, buildServer };
+  }
+
+  it('an arrow while it dials stops the dial at once and never drops or redials the machine the window is on', async () => {
+    const { controller, states, build, studioServer, buildServer } = await onStudio();
+    // The other machine never says ready: the dial would hang.
+    buildServer.setEmitReadyEvent(false);
+    const studioDials = studioServer.getEventRequestCount();
+
+    const switching = controller.activateProfile(primaryProfile(build));
+    await waitFor(() => buildServer.getEventRequestCount() > 0);
+    expect(controller.cancelActivation('build-box')).toBe(true);
+
+    await expect(switching).rejects.toMatchObject({ code: 'ERR_REMOTE_SWITCH_CANCELLED' });
+    await sleep(50);
+    expect(states.filter(state => !state.endsWith(':studio-mac'))).toEqual([]);
+    expect(controller.getConnectionState()).toMatchObject({ status: 'connected', activeProfileId: 'studio-mac' });
+    expect(studioServer.getEventRequestCount()).toBe(studioDials);
+    await controller.switchToLocalMode();
+  });
+
+  it('a dial that fails leaves the window on the machine it shows, still connected', async () => {
+    const { controller, states, build, studioServer, buildServer } = await onStudio();
+    buildServer.setEventsReady(false);
+    const studioDials = studioServer.getEventRequestCount();
+    await expect(controller.activateProfile(primaryProfile(build))).rejects.toBeDefined();
+    await sleep(50);
+    expect(controller.getConnectionState()).toMatchObject({ status: 'connected', activeProfileId: 'studio-mac' });
+    expect(studioServer.getEventRequestCount()).toBe(studioDials);
+    expect(states.filter(state => state.startsWith('connected:') && !state.endsWith(':studio-mac'))).toEqual([]);
+    await controller.switchToLocalMode();
+  });
+
+  it('a switch that completes moves the window to the new machine and closes the old connection', async () => {
+    const { controller, states, build } = await onStudio();
+    await controller.activateProfile(primaryProfile(build));
+    controller.commitActivation();
+    await waitFor(() => controller.getConnectionState().status === 'connected' && controller.getConnectionState().activeProfileId === 'build-box');
+    expect(controller.getActiveRemoteClient()?.profile.id).toBe('build-box');
+    expect(states.at(-1)).toBe('connected:build-box');
+    await controller.switchToLocalMode();
+  });
+});

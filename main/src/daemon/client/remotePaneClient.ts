@@ -145,6 +145,11 @@ interface RemotePaneClientConnectOptions {
    * shows no checklist; the next attempt's own failure does (review F-6).
    */
   quietInitialFailure?: boolean;
+  /**
+   * A switch from a window on another machine (T-132, D-20): the window's own connection stays
+   * until the new one is ready, so a cancel or a failed dial leaves it as it was (review SF-1).
+   */
+  keepCurrentUntilReady?: boolean;
 }
 
 interface RemoteInvokeSuccessPayload {
@@ -1402,6 +1407,8 @@ export class RemotePaneClientController extends EventEmitter {
   private activationGeneration = 0;
   /** Rejects the probes of the switch in flight, while it can still be stopped; null otherwise. */
   private cancelPending: { profileId: string; cancel: () => void } | null = null;
+  /** The connection a switch dials while the window keeps its own (`keepCurrentUntilReady`); null otherwise. */
+  private stagedClient: RemotePaneClient | null = null;
   /** The SSH host and command behind each of the current check's run-on-host fixes. */
   private hostFixes = new Map<RemoteConnectionCheckStage, { alias: string; command: string }>();
   private versionRowReady: Promise<void> = Promise.resolve();
@@ -1644,15 +1651,29 @@ export class RemotePaneClientController extends EventEmitter {
     const releaseSync = this.holdConfigSync();
     // The dial can be cancelled too (T-132): a 1 s rest dials a machine heard from moments ago
     // with no checklist, and an arrow press meanwhile leaves the window where it is (D-6).
-    const dialing = { profileId: profile.id, cancel: () => undefined };
+    // From a window on another machine its connection stays until the new one is ready, and a
+    // cancel drops only the new one (review SF-1).
+    const keepCurrentUntilReady = this.activeClient !== null;
+    let stopDial: (error: Error) => void = () => undefined;
+    const stopped = new Promise<never>((_resolve, reject) => { stopDial = reject; });
+    stopped.catch(() => undefined);
+    const dialing = { profileId: profile.id, cancel: () => {
+      this.dropStagedClient();
+      stopDial(switchCancelled(profile));
+    } };
     this.cancelPending = dialing;
+    const dial = (options: RemotePaneClientConnectOptions): Promise<void> => {
+      const connecting = this.connectProfile(profile, { ...options, keepCurrentUntilReady });
+      connecting.catch(() => undefined);
+      return Promise.race([connecting, stopped]);
+    };
     try {
       try {
-        await this.connectProfile(profile, { retryOnInitialFailure: false, resolveOnReady: true, firstRoute: recent, quietInitialFailure: Boolean(recent) });
+        await dial({ retryOnInitialFailure: false, resolveOnReady: true, firstRoute: recent, quietInitialFailure: Boolean(recent) });
       } catch (error) {
         // The live connection's address stopped answering since its heartbeat: look the route up and dial once more.
         if (!recent || generation !== this.activationGeneration) throw error;
-        await this.connectProfile(profile, { retryOnInitialFailure: false, resolveOnReady: true });
+        await dial({ retryOnInitialFailure: false, resolveOnReady: true });
       }
       if (generation !== this.activationGeneration) throw switchCancelled(profile);
       if (this.cancelPending === dialing) this.cancelPending = null;
@@ -1923,7 +1944,13 @@ export class RemotePaneClientController extends EventEmitter {
     options: RemotePaneClientConnectOptions,
   ): Promise<void> {
     const generation = ++this.connectionGeneration;
-    await this.disconnectActiveClient();
+    const staged = options.keepCurrentUntilReady === true && this.activeClient !== null;
+    if (staged) {
+      this.dropStagedClient();
+      this.commitActivation();
+    } else {
+      await this.disconnectActiveClient();
+    }
     const routes = firstRouteFirst(this.routesToTry(savedProfile), options.firstRoute?.routeId);
     // A Tailscale route the machine's live connection is on: its address is known, no `tailscale status`.
     const live = options.firstRoute && routes[0]?.routeId === options.firstRoute.routeId && tailnetMachineRef(routes[0].profile)
@@ -1940,7 +1967,7 @@ export class RemotePaneClientController extends EventEmitter {
         profile = { ...profile, baseUrl: await this.resolveTailnetMachineUrl(machine) };
       } catch (error) {
         // Name the host, so the banner and machine list show which one Tailscale cannot find.
-        if (generation === this.connectionGeneration) {
+        if (generation === this.connectionGeneration && !staged) {
           this.setConnectionState({
             mode: 'remote',
             status: 'error',
@@ -1973,6 +2000,22 @@ export class RemotePaneClientController extends EventEmitter {
     let quietFailure = options.quietInitialFailure === true;
     // The credential's own level: nothing the host says changes it.
     const access = [savedProfile, ...routes.map((route) => route.profile)].some((route) => tokenAccess(route.token) === 'read') ? 'read' as const : undefined;
+    const stateFor = (status: RemotePaneConnectionStatus, errorMessage: string | null | undefined, metadata: RemoteConnectionStateMetadata | undefined, baseUrl: string): RemotePaneConnectionState => ({
+      mode: 'remote',
+      status,
+      activeProfileId: profile.id,
+      activeProfileLabel: profile.label,
+      activeBaseUrl: baseUrl,
+      activeRouteId: metadata?.routeId ?? null,
+      updateIntent: status === 'connected' ? null : this.state.updateIntent,
+      access,
+      lastError: errorMessage ?? null,
+      lastSeenAt: metadata?.lastSeenAt ?? this.getLastSeenAtForProfile(profile.id, status),
+    });
+    // While staged, the window shows its own connection; the new one's latest status waits to be shown.
+    let stagedStatus: { status: RemotePaneConnectionStatus; errorMessage: string | null | undefined; metadata: RemoteConnectionStateMetadata | undefined } | null = null;
+    let promoted: () => void = () => undefined;
+    const promotion = staged ? new Promise<void>(resolve => { promoted = resolve; }) : Promise.resolve();
     const client = new RemotePaneClient(profile, {
       dnsLookup: this.dnsLookup,
       routes: routes.length === 1 ? [{ ...routes[0], profile }] : routes,
@@ -2005,6 +2048,13 @@ export class RemotePaneClientController extends EventEmitter {
         },
       },
       onConnectionStateChange: (status, errorMessage, metadata) => {
+        if (staged && this.stagedClient === client) {
+          stagedStatus = { status, errorMessage, metadata: { ...stagedStatus?.metadata, ...metadata } };
+          if (status === 'connected') quietFailure = false;
+          this.advanceCheck(savedProfile, status, errorMessage, metadata?.hostVersion, !quietFailure);
+          if (metadata?.hostRoutes) void this.saveRoutesReport(savedProfile.id, metadata.routeId, metadata.hostRoutes);
+          return;
+        }
         if (this.activeClient !== client) return;
         if (status === 'connected') quietFailure = false;
         this.advanceCheck(savedProfile, status, errorMessage, metadata?.hostVersion, !quietFailure);
@@ -2024,21 +2074,11 @@ export class RemotePaneClientController extends EventEmitter {
           });
         }
         if (metadata?.hostRoutes) void this.saveRoutesReport(savedProfile.id, metadata.routeId, metadata.hostRoutes);
-        this.setConnectionState({
-          mode: 'remote',
-          status,
-          activeProfileId: profile.id,
-          activeProfileLabel: profile.label,
-          activeBaseUrl: client.profile.baseUrl,
-          activeRouteId: metadata?.routeId ?? null,
-          updateIntent: status === 'connected' ? null : this.state.updateIntent,
-          access,
-          lastError: errorMessage ?? null,
-          lastSeenAt: metadata?.lastSeenAt ?? this.getLastSeenAtForProfile(profile.id, status),
-        });
+        this.setConnectionState(stateFor(status, errorMessage, metadata, client.profile.baseUrl));
       },
       onResyncRequired: async () => {
         await commit;
+        await promotion;
         if (this.activeClient !== client) return;
         this.emit('resync');
         await this.restoreRenderers(hostChanged);
@@ -2047,14 +2087,50 @@ export class RemotePaneClientController extends EventEmitter {
       },
     });
 
-    this.activeClient = client;
-    this.portTunnel = createPortTunnel(port => client.openPortStream(port));
+    if (staged) {
+      this.stagedClient = client;
+    } else {
+      this.activeClient = client;
+      this.portTunnel = createPortTunnel(port => client.openPortStream(port));
+    }
     try {
       await client.connect({
         retryOnInitialFailure: options.retryOnInitialFailure,
         resolveOnReady: options.resolveOnReady,
       });
+      if (staged) {
+        // Dropped meanwhile (a cancel, or a newer switch): the window stays as it is.
+        if (this.stagedClient !== client) { promoted(); await client.disconnect(); return; }
+        this.stagedClient = null;
+        const previous = this.activeClient;
+        const tunnel = this.portTunnel;
+        this.pendingRestore?.reject(new Error('Connection changed'));
+        this.pendingRestore = null;
+        this.activeClient = client;
+        this.portTunnel = createPortTunnel(port => client.openPortStream(port));
+        this.tunnelledSnapshot = null;
+        const shown = stagedStatus ?? { status: 'restoring' as const, errorMessage: null, metadata: undefined };
+        this.setConnectionState(stateFor(shown.status, shown.errorMessage, shown.metadata, client.profile.baseUrl));
+        promoted();
+        await tunnel?.close();
+        await previous?.disconnect();
+      }
     } catch (error) {
+      if (staged) {
+        promoted();
+        if (this.stagedClient === client) this.stagedClient = null;
+        await client.disconnect();
+        trackRemotePaneEvent(this.analyticsManager, 'remote_pane_client_connection_failed', {
+          surface: 'desktop',
+          role: 'client',
+          flow: 'connect',
+          result: 'failed',
+          failure_stage: 'initial_connect',
+          failure_category: getRemoteFailureCategory(error instanceof Error ? error.message : String(error)),
+          client_kind: 'desktop',
+        });
+        throw error;
+      }
       if (options.retryOnInitialFailure && this.activeClient === client) {
         trackRemotePaneEvent(this.analyticsManager, 'remote_pane_client_connection_failed', {
           surface: 'desktop',
@@ -2183,7 +2259,15 @@ export class RemotePaneClientController extends EventEmitter {
     }
   }
 
+  /** Closes the connection a switch was dialing beside the window's own; the window stays as it is. */
+  private dropStagedClient(): void {
+    const staged = this.stagedClient;
+    this.stagedClient = null;
+    if (staged) void staged.disconnect();
+  }
+
   private async disconnectActiveClient(): Promise<void> {
+    this.dropStagedClient();
     this.commitActivation();
     this.pendingRestore?.reject(new Error('Connection changed'));
     this.pendingRestore = null;
