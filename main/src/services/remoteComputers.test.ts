@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigManager } from './configManager';
-import { applyRoutesReport, decodeComputers, isOwnComputer, routesReachableHere, upsertComputer, type RemoteComputer } from '../../../shared/types/remoteComputers';
+import { applyRoutesReport, decodeComputers, isOwnComputer, verifiedTailnetName, routesReachableHere, upsertComputer, type RemoteComputer } from '../../../shared/types/remoteComputers';
 
 // Saved by v2.4.225: the same Mac once through Tailscale and once through the relay, plus a code host.
 const tailnetMac = {
@@ -229,6 +229,40 @@ describe('merging computers', () => {
     expect(kinds(applyRoutesReport([mallory, otherKey], devbox.id, relayRoute, report).computers, 'mallory')).toEqual(['tailscale', 'relay']);
     const lying = { ...report, relay: { ...report.relay, fingerprint: 'other' } };
     expect(kinds(applyRoutesReport([mallory, proved], devbox.id, relayRoute, lying).computers, 'mallory')).toEqual(['tailscale', 'relay']);
+  });
+
+  it('lets a computer refused its Tailscale name take it back once a check over Tailscale finds its own key there, with no mark needed (review S-9)', async () => {
+    const claimedRoute = { id: 'tailscale:https://devbox.tail1.ts.net:8443', kind: 'tailscale' as const, source: 'found' as const, baseUrl: 'https://devbox.tail1.ts.net:8443', token: 'mallory-token', tailnetMachine: 'devbox', tailnetDomain: 'tail1.ts.net' };
+    const mallory: RemoteComputer = { id: 'mallory', label: 'mallory', routes: [claimedRoute, { ...relayRoute, id: 'relay:https://m.runpane.net', baseUrl: 'https://m.runpane.net', relay: { computerId: 'm', fingerprint: 'fp-m' } }] };
+    const report = {
+      machineId: 'devbox-install',
+      name: 'devbox',
+      relay: { id: 'k7xq2m4n8p3r5t6v', address: 'https://k7xq2m4n8p3r5t6v.runpane.net', fingerprint: 'fp', local: [] },
+      tailnet: { dnsName: 'devbox.tail1.ts.net.', machine: 'devbox', domain: 'tail1.ts.net', port: 8443 },
+    };
+    const asked: string[] = [];
+    const holds = (key: { computerId: string; fingerprint: string } | null | undefined) => async (tailnet: { name: string; domain: string }) => { asked.push(tailnet.name); return key; };
+
+    // The name is taken and the machine there holds the key this report's route is pinned to: it is this computer.
+    const verified = await verifiedTailnetName([mallory, devbox], devbox.id, relayRoute, report, holds({ computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'fp' }));
+    expect(verified).toBe(true);
+    expect(asked).toEqual(['devbox']);
+    const taken = applyRoutesReport([mallory, devbox], devbox.id, relayRoute, report, { verifiedTailnet: verified }).computers;
+    expect(taken.find((computer) => computer.id === devbox.id)?.routes.map((route) => route.kind)).toEqual(['tailscale', 'relay']);
+    expect(taken.find((computer) => computer.id === 'mallory')?.routes.map((route) => route.kind)).toEqual(['relay']);
+
+    // Another key there, none, or no answer: not verified.
+    for (const key of [{ computerId: 'm', fingerprint: 'fp-m' }, null, undefined]) {
+      expect(await verifiedTailnetName([mallory, devbox], devbox.id, relayRoute, report, holds(key))).toBe(false);
+    }
+    // Not taken, or a report whose key isn't the route's pin: nothing is asked.
+    asked.length = 0;
+    expect(await verifiedTailnetName([devbox], devbox.id, relayRoute, report, holds({ computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'fp' }))).toBe(false);
+    expect(await verifiedTailnetName([mallory, devbox], devbox.id, relayRoute, { ...report, relay: { ...report.relay, fingerprint: 'other' } }, holds({ computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'other' }))).toBe(false);
+    expect(asked).toEqual([]);
+    // A verified flag never helps an unproven report.
+    const unproven = applyRoutesReport([mallory, devbox], devbox.id, relayRoute, { ...report, relay: { ...report.relay, fingerprint: 'other' } }, { verifiedTailnet: true }).computers;
+    expect(unproven.find((computer) => computer.id === 'mallory')?.routes.map((route) => route.kind)).toEqual(['tailscale', 'relay']);
   });
 
   it('saves only https addresses a computer reports, so its token never goes out in the clear', () => {

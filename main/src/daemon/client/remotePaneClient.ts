@@ -5,7 +5,7 @@ import { pinnedServerIdentity } from '../relay/keyPinning';
 import { DirectPath } from '../relay/directPath';
 import { findPaneDirect } from '../relay/paneDirect';
 import { RELAY_CLIENT_COMMANDS } from '../../../../shared/types/relay';
-import { COMPUTER_ROUTE_LABELS, applyRoutesReport, decodeComputerRoutesReport, primaryProfile, routeProfile, routesReachableHere, type ComputerRoute, type ComputerRouteKind, type ComputerRoutesReport } from '../../../../shared/types/remoteComputers';
+import { COMPUTER_ROUTE_LABELS, applyRoutesReport, decodeComputerRoutesReport, verifiedTailnetName, primaryProfile, routeProfile, routesReachableHere, type ComputerRoute, type ComputerRouteKind, type ComputerRoutesReport } from '../../../../shared/types/remoteComputers';
 import { EventEmitter } from 'events';
 import { lookup as defaultLookup, Resolver } from 'dns';
 import http, { type IncomingMessage, type RequestOptions } from 'http';
@@ -1305,6 +1305,8 @@ interface RemotePaneClientControllerOptions {
   analyticsManager?: Pick<AnalyticsManager, 'track'>;
   /** Looks up a codeless profile's machine on its tailnet; see `tailnetMachine`. */
   resolveTailnetMachineUrl?: (machine: TailnetMachineRef) => Promise<string>;
+  /** The relay key the machine at a Tailscale name holds, read over Tailscale (review S-9); undefined when it can't be reached. */
+  tailnetRelayKey?: (machine: { name: string; domain: string }, secret: string) => Promise<{ computerId: string; fingerprint: string } | null | undefined>;
   /** This app's Pane version, compared with the host's on the checklist's version row. */
   appVersion?: string;
   checkDependencies?: Partial<ConnectionCheckDependencies>;
@@ -1339,6 +1341,7 @@ export class RemotePaneClientController extends EventEmitter {
   private rendererEventSink: PaneEventSink = noopPaneEventSink;
   private analyticsManager: Pick<AnalyticsManager, 'track'> | undefined;
   private resolveTailnetMachineUrl: ((machine: TailnetMachineRef) => Promise<string>) | undefined;
+  private tailnetRelayKey: RemotePaneClientControllerOptions['tailnetRelayKey'];
   private prepareSshRoute: ((route: ComputerRoute) => Promise<string>) | undefined;
   private activeClient: RemotePaneClient | null = null;
   private rendererIds: () => number[] = () => [];
@@ -1394,6 +1397,7 @@ export class RemotePaneClientController extends EventEmitter {
     this.rendererEventSink = options.rendererEventSink;
     this.analyticsManager = options.analyticsManager;
     this.resolveTailnetMachineUrl = options.resolveTailnetMachineUrl;
+    this.tailnetRelayKey = options.tailnetRelayKey;
     this.prepareSshRoute = options.prepareSshRoute;
     this.appVersion = options.appVersion;
     this.checkDependencies = { ...defaultCheckDependencies, ...options.checkDependencies };
@@ -1745,12 +1749,17 @@ export class RemotePaneClientController extends EventEmitter {
   async saveRoutesReport(computerId: string, routeId: string | undefined, report: ComputerRoutesReport): Promise<void> {
     if (!this.configManager) return;
     try {
+      // A Tailscale name another record holds is checked over Tailscale before this report may take it back (review S-9).
+      const before = normalizeRemoteDaemonConfig(this.configManager.getConfig().remoteDaemon).client.computers;
+      const savedVia = before.find((candidate) => candidate.id === computerId)?.routes.find((route) => route.id === routeId);
+      const tailnetRelayKey = this.tailnetRelayKey;
+      const verifiedTailnet = savedVia && tailnetRelayKey ? await verifiedTailnetName(before, computerId, savedVia, report, tailnetRelayKey) : false;
       await this.configManager.updateConfigWith((current) => {
         const remote = normalizeRemoteDaemonConfig(current.remoteDaemon);
         const computer = remote.client.computers.find((candidate) => candidate.id === computerId);
         const via = computer?.routes.find((route) => route.id === routeId) ?? computer?.routes[0];
         if (!computer || !via) return {};
-        const { computers, id } = applyRoutesReport(remote.client.computers, computerId, via, report);
+        const { computers, id } = applyRoutesReport(remote.client.computers, computerId, via, report, { verifiedTailnet: verifiedTailnet && via.id === savedVia?.id });
         if (JSON.stringify(computers) === JSON.stringify(remote.client.computers)) return {};
         // A record that moved or folded away hands "active" to where its route went.
         const active = remote.client.activeProfileId;

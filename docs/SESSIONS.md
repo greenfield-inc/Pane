@@ -1116,9 +1116,11 @@ Tailscale route (checked by name on every connect) and on a Same network or
 relay route only when that route is pinned to the same key; on any other key or
 route the machine is not mirrored until proved again. While offline the mark
 stands, so the saved copy stays. A Tailscale route a host reports under a name
-another saved computer already has is refused, unless the reporting computer
-is proved yours for the key its route is pinned to: then the name is its own,
-and the other record's route under it is dropped. A machine with no
+another saved computer already has is refused, unless the name is the
+reporting computer's own: it is proved yours for the key its route is pinned
+to, or a read over Tailscale finds that same key at the name. Then the other
+record's routes under it that a host reported are dropped; a route the person
+or this computer saved stays, and no record is deleted. A machine with no
 Tailscale name here (relay only, say) or owned by another login is not
 mirrored. **This is my computer** in Settings › Remote Access › Computers
 (`mineOverride`) wins over the check both ways: on mirrors the machine, off

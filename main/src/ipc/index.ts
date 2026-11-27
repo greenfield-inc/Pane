@@ -70,7 +70,7 @@ import { registerWorkspaceAccessHandlers } from './workspaceAccess';
 import { registerBrowserHandlers } from './browser';
 import { electronBrowserHost } from '../services/browser/browserHost';
 import { registerDeviceHandlers } from './devices';
-import { readTailscaleStatus, resolveTailnetMachineUrl } from '../services/tailnetMachines';
+import { readTailscaleStatus, resolveTailnetMachineUrl, tailnetRelayKey } from '../services/tailnetMachines';
 import { startedOnFreshBoot } from '../services/freshBoot';
 
 
@@ -95,6 +95,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
     },
     analyticsManager: services.analyticsManager,
     resolveTailnetMachineUrl: (machine) => resolveTailnetMachineUrl(machine, readTailscaleStatus),
+    tailnetRelayKey: (machine, secret) => tailnetRelayKey(machine, secret, readTailscaleStatus),
     prepareSshRoute: ensureSshRoute,
     appVersion: services.app.getVersion(),
     freshBoot: startedOnFreshBoot,

@@ -490,6 +490,7 @@ export function applyRoutesReport(
   computerId: string,
   via: ComputerRoute,
   report: ComputerRoutesReport,
+  options: { verifiedTailnet?: boolean } = {},
 ): ComputersChange {
   const computer = computers.find((candidate) => candidate.id === computerId);
   if (!computer) return { computers: [...computers], id: computerId };
@@ -499,9 +500,11 @@ export function applyRoutesReport(
     || record.routes.some((own) => own.relay?.computerId === route.relay?.computerId && own.relay?.fingerprint === route.relay?.fingerprint);
   const holder = computers.find((candidate) => candidate.id !== computerId && candidate.machineId === report.machineId);
   const confirmed = proven && holder !== undefined && reportNamesKeyOf(holder, report);
-  // Proved yours for the very key this report's route is pinned to: its Tailscale name is its own, whoever claimed it first (review S-8).
-  const provedYours = proven && computer.mine === 'tailscale' && via.relay !== undefined
-    && computer.mineRelay?.computerId === via.relay.computerId && computer.mineRelay.fingerprint === via.relay.fingerprint;
+  // Its Tailscale name is its own, whoever claimed it first, when it is proved yours for the very key this report's
+  // route is pinned to (review S-8), or a check over Tailscale found that key at the name (`verifiedTailnetName`, S-9).
+  const provedYours = proven && ((computer.mine === 'tailscale' && via.relay !== undefined
+    && computer.mineRelay?.computerId === via.relay.computerId && computer.mineRelay.fingerprint === via.relay.fingerprint)
+    || options.verifiedTailnet === true);
   // A Tailscale name another saved computer has is that computer's: a host claiming it gets no route to it (review MF-1).
   const takenNames = provedYours ? new Set<string>() : new Set(computers
     .filter((candidate) => candidate.id !== computerId && !(confirmed && candidate === holder))
@@ -539,6 +542,29 @@ export function applyRoutesReport(
 
 function tailnetKey(machine: string, domain: string): string {
   return `${machine.toLowerCase()}@${domain.toLowerCase()}`;
+}
+
+/**
+ * Whether a report's Tailscale name, taken by another saved record, is this computer's own (review
+ * S-9): the report names the key its route is pinned to, and the machine at that name, read over
+ * Tailscale (`relayKeyAt`), holds the same key. Asks nothing when the name isn't taken.
+ */
+export async function verifiedTailnetName(
+  computers: readonly RemoteComputer[],
+  computerId: string,
+  via: ComputerRoute,
+  report: ComputerRoutesReport,
+  relayKeyAt: (tailnet: { name: string; domain: string }, secret: string) => Promise<{ computerId: string; fingerprint: string } | null | undefined>,
+): Promise<boolean> {
+  const tailnet = report.tailnet;
+  const pin = via.relay;
+  if (!tailnet || !pin || report.relay?.id !== pin.computerId || report.relay.fingerprint !== pin.fingerprint) return false;
+  const name = tailnetKey(tailnet.machine, tailnet.domain);
+  const taken = computers.some((candidate) => candidate.id !== computerId
+    && candidate.routes.some((route) => route.tailnetMachine && route.tailnetDomain && tailnetKey(route.tailnetMachine, route.tailnetDomain) === name));
+  if (!taken) return false;
+  const held = await relayKeyAt({ name: tailnet.machine, domain: tailnet.domain }, via.token);
+  return held?.computerId === pin.computerId && held.fingerprint === pin.fingerprint;
 }
 
 /** Whether a report's relay id and key fingerprint are the ones a saved record pins. */
