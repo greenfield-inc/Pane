@@ -1396,7 +1396,10 @@ every Pane in it. Pause leaves a chat tab running: the result counts it in
 `chatIdleReleaseMinutes` (30 by default), outside the Pane on screen and never
 while it works, holds a queued message or waits on the person. Opening the tab
 or sending it a message resumes it in its conversation, and it reports no
-`panel.paused`. A Session whose orchestrator is a chat tab therefore never reads as paused.
+`panel.paused`. A Session whose chat auto-pause paused reads as paused (its row
+shows the pause mark) once every Pane in it is paused too, and `runpane
+sessions resume` or **Resume** starts its chat again. Resting the sidebar
+cursor on it shows it without resuming it; Enter or a click resumes it.
 A paused terminal tab stays stopped through clicks, app restarts and updates until
 `runpane panels resume --panel <panel-id>`, `runpane panes resume --pane
 <pane-id> --yes` or `runpane sessions resume --session <session-id>` restarts

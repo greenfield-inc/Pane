@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
 import { withLock } from '../utils/mutex';
 import { getAppDirectory } from '../utils/appDirectory';
 import { panelManager } from './panelManager';
+import { decodeChatPanelState } from './chatTabs/state';
 import { getChatTabManager } from './chatTabs';
 import { sessionChatLaunch } from './chatTabs/launch';
 import type { SessionAdoption } from './chatTabs/switchToChat';
@@ -1002,11 +1003,29 @@ export class OrchestrationSessionManager extends EventEmitter {
     const openedAt = Number.isNaN(openedMs) ? undefined : new Date(openedMs).toISOString();
     let latest: TerminalPausedMark | undefined;
     for (const paneId of this.pausablePaneIdsOf(record)) {
-      const mark = this.sessionManager.getSession(paneId)?.paused;
+      const mark = paneId === record.internalSessionId ? this.ownPanePausedMark(record) : this.sessionManager.getSession(paneId)?.paused;
       if (!mark) return { ...record, paused: undefined, openedAt };
       if (!latest || mark.at > latest.at) latest = mark;
     }
     return { ...record, paused: latest, openedAt };
+  }
+
+  /**
+   * The Session's own Pane's paused mark. Its terminal tabs' mark counts as before, even while the
+   * chat runs (`sessions pause` leaves chats running). Its agent's chat tab counts too: auto-pause
+   * and a move mark only the chat tab's state (T-134 QA F-1), so a chat-only Pane is paused when its
+   * chat is; with terminal tabs beside it, those must be paused too, and the later mark is the Pane's.
+   */
+  private ownPanePausedMark(record: OrchestrationSessionSummary): TerminalPausedMark | undefined {
+    const paneMark = this.sessionManager.getSession(record.internalSessionId)?.paused;
+    const agent = panelManager.getPanel(record.panelIds[record.agent]);
+    if (agent?.type !== 'chat') return paneMark;
+    const chatMark = decodeChatPanelState(agent.state.customState)?.paused;
+    if (!chatMark) return paneMark;
+    const hasTerminals = databaseService.getPanelTypesForSession(record.internalSessionId).some(panel => panel.type === 'terminal');
+    if (!hasTerminals) return chatMark;
+    if (!paneMark) return undefined;
+    return paneMark.at > chatMark.at ? paneMark : chatMark;
   }
 
   /**
