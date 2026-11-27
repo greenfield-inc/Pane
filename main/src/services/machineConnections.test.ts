@@ -315,11 +315,17 @@ describe('MachineConnections: which saved computers are yours (D-500)', () => {
     id: `tailscale:https://${name}.tail1.ts.net:4800`, kind: 'tailscale', source: 'found', baseUrl: `https://${name}.tail1.ts.net:4800`, token, tailnetMachine: name, tailnetDomain: 'tail1.ts.net',
   });
   const relayRoute = (name: string): RemoteComputer['routes'][number] => ({
-    id: `relay:https://${name}.relay.example`, kind: 'relay', source: 'link', baseUrl: `https://${name}.relay.example`, token: `token-${name}`, relay: { computerId: `${name}-relay`, fingerprint: 'f' },
+    id: `relay:https://${name}.relay.example`, kind: 'relay', source: 'link', baseUrl: `https://${name}.relay.example`, token: `token-${name}`, relay: { computerId: `${name}-relay`, fingerprint: `fp-${name}` },
   });
+  /** A Same network route, pinned like the relay route to the computer's relay key. */
+  const lanRoute = (name: string): RemoteComputer['routes'][number] => ({
+    id: `lan:https://l192-168-1-20.${name}-relay.relay.example`, kind: 'lan', source: 'found', baseUrl: `https://l192-168-1-20.${name}-relay.relay.example`, token: `token-${name}`, relay: { computerId: `${name}-relay`, fingerprint: `fp-${name}` },
+  });
+  /** The relay key a machine holds, as it answers over Tailscale. */
+  const keyOf = (name: string) => ({ computerId: `${name}-relay`, fingerprint: `fp-${name}` });
 
   /** Saved computers whose config changes as the mark and the switch are saved; `logins` is who owns each Tailscale name, as Tailscale here reports it. */
-  function own(computers: RemoteComputer[], logins: Record<string, boolean | undefined>) {
+  function own(computers: RemoteComputer[], logins: Record<string, boolean | undefined>, keys: Record<string, { computerId: string; fingerprint: string } | null | undefined> = {}) {
     const configManager = new ConfigManager();
     const defaults = createDefaultRemoteDaemonConfig();
     let config: AppConfig = { gitRepoPath: '', verbose: false, remoteDaemon: { ...defaults, client: { ...defaults.client, computers } } };
@@ -330,6 +336,7 @@ describe('MachineConnections: which saved computers are yours (D-500)', () => {
       configManager.emit('config-updated', config);
     };
     const checks: string[] = [];
+    const probes: string[] = [];
     const clients = new Map<string, ClientOptions>();
     const machines = new MachineConnections({
       configManager,
@@ -340,6 +347,7 @@ describe('MachineConnections: which saved computers are yours (D-500)', () => {
       },
       ownership: {
         check: async ({ name }) => { checks.push(name); return logins[name]; },
+        relayKey: async ({ name }) => { probes.push(name); return keys[name]; },
         save: async (computerId, mine) => change(computerId, computer => {
           const next = { ...computer };
           if (mine) next.mine = 'tailscale';
@@ -357,7 +365,7 @@ describe('MachineConnections: which saved computers are yours (D-500)', () => {
       clients.get(id)?.onConnectionStateChange?.('connected', null, route ? { routeId: route } : undefined);
     };
     const drop = (id: string) => clients.get(id)?.onConnectionStateChange?.('reconnecting');
-    return { machines, mine, connect, drop, checks, change, saved: (id: string) => config.remoteDaemon?.client.computers.find(computer => computer.id === id), logins };
+    return { machines, mine, connect, drop, checks, probes, keys, change, saved: (id: string) => config.remoteDaemon?.client.computers.find(computer => computer.id === id), logins };
   }
 
   it('marks a saved computer yours once it connects over its Tailscale route and Tailscale names this computer\'s login as its owner', async () => {
@@ -388,14 +396,72 @@ describe('MachineConnections: which saved computers are yours (D-500)', () => {
   it('never trusts a Tailscale name the host reported about itself: a teammate\'s host claiming yours isn\'t marked (review S-6)', async () => {
     // A teammate's host, linked over the relay, reported one of your machines' Tailscale names as its own.
     const claimed = { ...tailscaleRoute('studio'), id: 'tailscale:https://studio.tail1.ts.net:4800#claimed' };
-    const { mine, connect, checks, saved } = own([{ id: 'mallory', label: 'mallory', routes: [relayRoute('mallory'), claimed] }], { studio: true });
+    // Dialed over Tailscale, that name reaches your real studio, which holds its own relay key, not the teammate's.
+    const { mine, connect, probes, saved } = own([{ id: 'mallory', label: 'mallory', routes: [relayRoute('mallory'), claimed] }], { studio: true }, { studio: keyOf('studio') });
 
     connect('mallory', relayRoute('mallory').id);
+    await vi.waitFor(() => expect(probes).toEqual(['studio']));
     await new Promise(resolve => setImmediate(resolve));
 
-    expect(checks).toEqual([]);
     expect(saved('mallory')?.mine).toBeUndefined();
     expect(mine('mallory')).toBe(false);
+  });
+
+  it('marks a computer connected over Same network through a side check on its Tailscale route, when the machine there holds the same relay key', async () => {
+    const { mine, connect, probes, checks } = own([{ id: 'macbook', label: 'macbook', routes: [lanRoute('macbook'), tailscaleRoute('macbook'), relayRoute('macbook')] }], { macbook: true }, { macbook: keyOf('macbook') });
+
+    connect('macbook');
+    await vi.waitFor(() => expect(mine('macbook')).toBe(true));
+    expect(probes).toEqual(['macbook']);
+    expect(checks).toEqual(['macbook']);
+  });
+
+  it('never side-checks a relay-only computer, and never marks from a side check whose login is someone else\'s', async () => {
+    const { mine, connect, probes } = own([
+      { id: 'linked', label: 'linked', routes: [relayRoute('linked')] },
+      { id: 'teammate', label: 'teammate', routes: [lanRoute('teammate'), tailscaleRoute('teammate')] },
+    ], { teammate: false }, { teammate: keyOf('teammate') });
+
+    connect('linked');
+    connect('teammate');
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    expect(probes.filter(name => name === 'linked')).toEqual([]);
+    expect(mine('linked')).toBe(false);
+    expect(mine('teammate')).toBe(false);
+  });
+
+  it('side-checks once per connect, backs off after a failure, and checks a marked computer again only after 24 hours', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-26T12:00:00.000Z'));
+    try {
+      const { mine, connect, drop, probes, keys } = own([{ id: 'macbook', label: 'macbook', routes: [lanRoute('macbook'), tailscaleRoute('macbook')] }], { macbook: true });
+      const reconnect = async () => {
+        drop('macbook');
+        connect('macbook');
+        await new Promise(resolve => setTimeout(resolve, 10));
+      };
+      // Unreachable over Tailscale: one try, then none until the backoff passes.
+      await reconnect();
+      expect(probes).toHaveLength(1);
+      await reconnect();
+      expect(probes).toHaveLength(1);
+
+      keys.macbook = keyOf('macbook');
+      vi.setSystemTime(new Date('2026-11-26T12:05:00.000Z'));
+      await reconnect();
+      expect(probes).toHaveLength(2);
+      await vi.waitFor(() => expect(mine('macbook')).toBe(true));
+
+      // Marked: not again for a day.
+      await reconnect();
+      expect(probes).toHaveLength(2);
+      vi.setSystemTime(new Date('2026-11-27T12:06:00.000Z'));
+      await reconnect();
+      expect(probes).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('checks again on each connect over Tailscale, keeps the mark when Tailscale can\'t say or the connection is on another route', async () => {

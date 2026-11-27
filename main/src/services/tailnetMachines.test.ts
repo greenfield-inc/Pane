@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { discoverTailnetMachines, resolveTailnetMachineUrl, savedSecretKey, tailnetLoginMatches, type WorkspaceProbe, type WorkspaceProbeResult } from './tailnetMachines';
+import { discoverTailnetMachines, resolveTailnetMachineUrl, savedSecretKey, tailnetLoginMatches, tailnetRelayKey, type WorkspaceCall, type WorkspaceProbe, type WorkspaceProbeResult } from './tailnetMachines';
 
 const status = {
   BackendState: 'Running',
@@ -180,5 +180,27 @@ describe('tailnetLoginMatches', () => {
     expect(await tailnetLoginMatches({ name: 'my-mac', domain: 'tail1.ts.net' }, read(null))).toBeUndefined();
     expect(await tailnetLoginMatches({ name: 'my-mac', domain: 'tail1.ts.net' }, read({ ...status, BackendState: 'NeedsLogin' }))).toBeUndefined();
     expect(await tailnetLoginMatches({ name: 'my-mac', domain: 'tail1.ts.net' }, async () => '{not json')).toBeUndefined();
+  });
+});
+
+describe('tailnetRelayKey', () => {
+  const read = async () => JSON.stringify(status);
+  const report = { machineId: 'mac-install', name: 'my-mac', relay: { id: 'mac-relay', address: 'https://mac-relay.runpane.net', fingerprint: 'fp-mac', local: [] } };
+
+  it('reads the relay key from the machine its Tailscale name reaches, sending the route\'s secret', async () => {
+    const calls: Array<{ ip: string; channel: string; secret?: string }> = [];
+    const call: WorkspaceCall = async (machine, channel, _args, secret) => { calls.push({ ip: machine.ip, channel, secret }); return { kind: 'answered', statusCode: 200, ok: true, result: report }; };
+    expect(await tailnetRelayKey({ name: 'my-mac', domain: 'tail1.ts.net' }, 'token-mac', read, call)).toEqual({ computerId: 'mac-relay', fingerprint: 'fp-mac' });
+    expect(calls).toEqual([{ ip: '100.64.0.2', channel: 'computers:routes-report', secret: 'token-mac' }]);
+  });
+
+  it('is null for a machine with no relay key, and undefined when it can\'t be reached or is on another tailnet', async () => {
+    const { relay: _relay, ...withoutRelay } = report;
+    const noRelay: WorkspaceCall = async () => ({ kind: 'answered', statusCode: 200, ok: true, result: withoutRelay });
+    expect(await tailnetRelayKey({ name: 'my-mac', domain: 'tail1.ts.net' }, '', read, noRelay)).toBeNull();
+    expect(await tailnetRelayKey({ name: 'my-mac', domain: 'tail1.ts.net' }, '', read, async () => ({ kind: 'unreachable', detail: 'timeout' }))).toBeUndefined();
+    expect(await tailnetRelayKey({ name: 'my-mac', domain: 'tail1.ts.net' }, '', read, async () => ({ kind: 'answered', statusCode: 200, ok: true, result: 'garbage' }))).toBeUndefined();
+    expect(await tailnetRelayKey({ name: 'my-mac', domain: 'tail2.ts.net' }, '', read, noRelay)).toBeUndefined();
+    expect(await tailnetRelayKey({ name: 'gone', domain: 'tail1.ts.net' }, '', read, noRelay)).toBeUndefined();
   });
 });

@@ -4,6 +4,7 @@ import type { LookupFunction } from 'net';
 import { isIP } from 'net';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
+import { decodeComputerRoutesReport } from '../../../shared/types/remoteComputers';
 import type {
   TailnetMachine,
   TailnetMachineList,
@@ -288,6 +289,34 @@ export async function tailnetLoginMatches(
   if (!tailnet.ok) return undefined;
   if (tailnet.domain.toLowerCase() !== machine.domain.toLowerCase()) return false;
   return tailnet.peers.find((candidate) => candidate.name.toLowerCase() === machine.name.toLowerCase())?.mine ?? false;
+}
+
+/**
+ * The relay key a machine on this computer's tailnet holds, read over Tailscale (D-500 side check).
+ * Dials the name through this computer's Tailscale, as a Tailscale route does, so TLS checks that
+ * name, and reads `computers:routes-report` with this machine's login. Null when it has no relay
+ * key; undefined when it can't be reached, isn't on the tailnet it was saved on, or doesn't answer.
+ */
+export async function tailnetRelayKey(
+  machine: { name: string; domain: string },
+  secret: string,
+  readStatus: () => Promise<string | null>,
+  call: WorkspaceCall = callWorkspace,
+): Promise<{ computerId: string; fingerprint: string } | null | undefined> {
+  let located: Awaited<ReturnType<typeof locateTailnetCandidate>>;
+  try {
+    located = await locateTailnetCandidate(machine.name, readStatus);
+  } catch {
+    return undefined;
+  }
+  if (located.domain.toLowerCase() !== machine.domain.toLowerCase()) return undefined;
+  const answer = await call(located.candidate, 'computers:routes-report', [], secret || undefined, { timeoutMs: 5_000 });
+  if (answer.kind !== 'answered' || !answer.ok) return undefined;
+  // A Pane without an install id yet reports nothing; one with relay off reports no relay.
+  if (answer.result === null) return null;
+  const decoded = decodeComputerRoutesReport(answer.result);
+  if (!decoded) return undefined;
+  return decoded.relay ? { computerId: decoded.relay.id, fingerprint: decoded.relay.fingerprint } : null;
 }
 
 /** A machine by name on the current tailnet, as a candidate to call, with whether it is on this machine's own login. */

@@ -140,7 +140,7 @@ import { SharedCredentialSync } from './services/sharedCredentialSync';
 import { startSecretLeases } from './services/secretLeaseRuntime';
 import { MachineConnections, remoteMachineAccess } from './services/machineConnections';
 import { MachineMirror } from './services/machineMirror';
-import { readTailscaleStatus, tailnetLoginMatches } from './services/tailnetMachines';
+import { readTailscaleStatus, tailnetLoginMatches, tailnetRelayKey } from './services/tailnetMachines';
 import { MACHINE_MIRROR_FOLDER } from '../../shared/types/machineMirror';
 import { RemoteMemberEvents } from './services/remoteMemberEvents';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
@@ -1306,6 +1306,7 @@ async function initializeServices() {
     ownership: {
       check: (tailnet) => tailnetLoginMatches(tailnet, readTailscaleStatus),
       save: (computerId, mine) => remotePaneClientController.saveOwnership(computerId, mine),
+      relayKey: (tailnet, secret) => tailnetRelayKey(tailnet, secret, readTailscaleStatus),
     },
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);

@@ -31,6 +31,11 @@ import {
 
 /** A client gives up after its reconnect budget; a saved machine may sleep for hours, so try again this often. */
 const RETRY_AFTER_GIVE_UP_MS = 60_000;
+/** A computer the side check proved is checked again after this long. */
+const SIDE_CHECK_AGAIN_MS = 24 * 60 * 60 * 1000;
+/** After a side check that proved nothing, the next waits this long, doubling up to an hour. */
+const SIDE_CHECK_BACKOFF_MS = 60_000;
+const SIDE_CHECK_BACKOFF_MAX_MS = 60 * 60 * 1000;
 
 type RemoteClientOptions = NonNullable<ConstructorParameters<typeof RemotePaneClient>[1]>;
 export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke' | 'suspend' | 'resume' | 'openPortStream' | 'measureLatency'>;
@@ -55,6 +60,12 @@ export interface MachineConnectionsDeps {
     check(tailnet: { name: string; domain: string }): Promise<boolean | undefined>;
     /** Saves the result as the computer's `mine` mark. */
     save(computerId: string, mine: boolean): Promise<void>;
+    /**
+     * The side check: one short owner-authenticated read over the named Tailscale machine, through
+     * this computer's Tailscale, for the relay key it holds. Null when it has none; undefined when it
+     * can't be reached.
+     */
+    relayKey?(tailnet: { name: string; domain: string }, secret: string): Promise<{ computerId: string; fingerprint: string } | null | undefined>;
   };
 }
 
@@ -116,6 +127,8 @@ const commandSchemas = {
 export class MachineConnections {
   private readonly machines = new Map<string, RemoteMachine>();
   private readonly latencies = new Map<string, Promise<MachineLatency>>();
+  /** Per computer: when the side check last proved its owner, and when it may run again after one that didn't. */
+  private readonly sideChecks = new Map<string, { provedAt?: number; failures: number; retryAt: number }>();
   private readonly listeners = new Set<(event: MachineConnectionsEvent) => void>();
   private readonly createClient: CreateMachineClient;
   private readonly onConfigUpdated = () => this.refresh();
@@ -354,7 +367,8 @@ export class MachineConnections {
    * route's name is looked up in this computer's Tailscale, which connected to that very peer. A
    * Tailscale name the host reported about itself is never trusted on its own (review S-6), so over
    * any other route, or before connecting, the mark stays as it is. A computer with no Tailscale
-   * route has no mark. When Tailscale here can't say, the mark is left as it is.
+   * route has no mark. Connected on a key-pinned route, a side check over Tailscale may prove it
+   * (`sideCheck`). When Tailscale here can't say, the mark is left as it is.
    */
   private async checkOwnership(computerId: string, connectedRouteId: string | undefined): Promise<void> {
     const ownership = this.deps.ownership;
@@ -368,12 +382,51 @@ export class MachineConnections {
       let matches: boolean | undefined;
       if (!hasTailscale) matches = false;
       else if (via?.kind === 'tailscale' && via.tailnetMachine && via.tailnetDomain) matches = await ownership.check({ name: via.tailnetMachine, domain: via.tailnetDomain });
+      else if (via?.relay) matches = await this.sideCheck(computer, via.relay);
       const now = saved();
       if (matches === undefined || !now || matches === (now.mine === 'tailscale')) return;
       await ownership.save(computerId, matches);
     } catch (error) {
       console.warn(`[MachineConnections] Could not check whether ${computer.label} is yours:`, reasonOf(error));
     }
+  }
+
+  /**
+   * Connected on a key-pinned route (Same network or the relay): reads each of the computer's
+   * Tailscale machines once, over Tailscale, for the relay key it holds. Only one holding the key
+   * this connection is pinned to is the machine connected, so only its Tailscale owner decides; a
+   * name the host claimed reaches another machine, with another key, and proves nothing. Runs once
+   * per connect while unmarked (backing off after one that proved nothing) and once a day after.
+   */
+  private async sideCheck(computer: RemoteComputer, pinned: { computerId: string; fingerprint: string }): Promise<boolean | undefined> {
+    const relayKey = this.deps.ownership?.relayKey;
+    const ownership = this.deps.ownership;
+    if (!relayKey || !ownership) return undefined;
+    const record = this.sideChecks.get(computer.id) ?? { failures: 0, retryAt: 0 };
+    this.sideChecks.set(computer.id, record);
+    const now = Date.now();
+    const due = computer.mine === 'tailscale'
+      ? record.provedAt === undefined || now - record.provedAt >= SIDE_CHECK_AGAIN_MS
+      : now >= record.retryAt;
+    if (!due) return undefined;
+    let proven: boolean | undefined;
+    for (const route of computer.routes) {
+      if (route.kind !== 'tailscale' || !route.tailnetMachine || !route.tailnetDomain) continue;
+      const tailnet = { name: route.tailnetMachine, domain: route.tailnetDomain };
+      const key = await relayKey(tailnet, route.token);
+      if (!key || key.computerId !== pinned.computerId || key.fingerprint !== pinned.fingerprint) continue;
+      proven = await ownership.check(tailnet);
+      if (proven !== undefined) break;
+    }
+    if (proven === undefined) {
+      record.retryAt = Date.now() + Math.min(SIDE_CHECK_BACKOFF_MS * 2 ** record.failures, SIDE_CHECK_BACKOFF_MAX_MS);
+      record.failures += 1;
+    } else {
+      record.provedAt = Date.now();
+      record.failures = 0;
+      record.retryAt = 0;
+    }
+    return proven;
   }
 
   private async close(machine: RemoteMachine): Promise<void> {

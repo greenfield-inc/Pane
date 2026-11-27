@@ -1099,9 +1099,15 @@ theirs when its Tailscale owner, as this computer's Tailscale reports it, is
 this computer's own Tailscale login. That is checked each time a connection
 starts on, or moves to, one of the computer's Tailscale routes, where
 Tailscale itself names the peer, and saved on it as `mine: 'tailscale'`. A
-Tailscale name a host reported about itself is never trusted on its own, so
-over any other route the mark stays as it is; when Tailscale here can't say,
-the last result is kept. A machine with no
+Tailscale name a host reported about itself is never trusted on its own. On a
+connection over Same network or the relay, which are pinned to the computer's
+relay key, a side check makes one short read over each of its Tailscale routes,
+through this computer's Tailscale (`computers:routes-report`, as this
+computer's login). Only a machine there that holds the same relay key is the
+one connected, so only its Tailscale owner sets or clears the mark. It runs
+once per connect while the computer is unmarked (backing off after one that
+proved nothing, up to an hour) and once a day after. When Tailscale here can't
+say, the last result is kept. A machine with no
 Tailscale name here (relay only, say) or owned by another login is not
 mirrored. **This is my computer** in Settings › Remote Access › Computers
 (`mineOverride`) wins over the check both ways: on mirrors the machine, off
