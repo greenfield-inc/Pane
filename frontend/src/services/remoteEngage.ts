@@ -82,24 +82,61 @@ let listening = false;
  * a view the switch replaced had it) still goes into the held text, and focus goes back to the
  * held box. No key typed meanwhile is lost.
  */
-function onStrayKey(event: KeyboardEvent): void {
+/** What the key handlers read of a keydown. */
+type KeyPress = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'isComposing' | 'preventDefault'>;
+
+function onStrayKey(event: KeyPress): void {
   const engaging = useRemoteEngage.getState().engaging;
   if (!engaging || event.key.length !== 1 || event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
   const active = document.activeElement;
   if (active && active !== document.body && active.isConnected) return;
   event.preventDefault();
   holdRemoteText(engaging, (useRemoteEngage.getState().held[engageKey(engaging)]?.text ?? '') + event.key);
-  const box = document.querySelector<HTMLTextAreaElement>(`[data-testid="engage-hold"] textarea[data-remote-composer]`);
+  const box = heldBox();
   if (box) {
     box.focus({ preventScroll: true });
     box.setSelectionRange(box.value.length + 1, box.value.length + 1);
   }
 }
 
+/** The person moved focus themselves (a click, Tab, a shortcut) since the held box last had it. */
+let personMovedFocus = false;
+let boxRestores = 0;
+
+function heldBox(): HTMLTextAreaElement | null {
+  return document.querySelector<HTMLTextAreaElement>('[data-testid="engage-hold"] textarea[data-remote-composer]');
+}
+
+/**
+ * While an engage runs, the restore under the held view focuses what it reopens (a tab, a
+ * button). Typing then went there and was lost (the rig). Focus the switch takes from the held box
+ * goes back to it, as #1770's cursor hold does for the sidebar row; a click, Tab or a shortcut is
+ * the person's own move and keeps it. An element that takes focus back a third time keeps it.
+ */
+function onFocusIn(event: FocusEvent): void {
+  const engaging = useRemoteEngage.getState().engaging;
+  const box = heldBox();
+  if (!engaging || !box) return;
+  if (event.target === box) { personMovedFocus = false; return; }
+  const previous = event.relatedTarget;
+  if (previous !== box || personMovedFocus || boxRestores >= 2) return;
+  boxRestores += 1;
+  box.focus({ preventScroll: true });
+  box.setSelectionRange(box.value.length, box.value.length);
+}
+
+function onPersonMoves(event: KeyPress | MouseEvent): void {
+  if ('key' in event && !(event.key === 'Tab' || event.metaKey || event.ctrlKey || event.altKey)) return;
+  personMovedFocus = true;
+}
+
 function listen(): void {
   if (listening) return;
   listening = true;
-  if (typeof window.addEventListener === 'function') window.addEventListener('keydown', onStrayKey, true);
+  window.addEventListener('keydown', onStrayKey, true);
+  window.addEventListener('keydown', onPersonMoves, true);
+  window.addEventListener('mousedown', onPersonMoves, true);
+  window.addEventListener('focusin', onFocusIn, true);
   onChatTabShown(panelId => {
     const engaging = useRemoteEngage.getState().engaging;
     if (!engaging || engaging.panelId !== panelId) return;
@@ -179,6 +216,8 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
   clearTimeout(liveWait);
   shownMeanwhile.clear();
   const panelId = heldRemoteChat(cachedRemoteSession(target.machineId, target.sessionId))?.panelId;
+  personMovedFocus = false;
+  boxRestores = 0;
   useRemoteEngage.setState({ engaging: { ...target, cause, panelId, switched: false }, failure: undefined });
   switchMark('engage:start', { machineId: target.machineId, sessionId: target.sessionId, status: cause });
   const opening = openOnMachine(target.machineId, { kind: 'session', id: target.sessionId, name: sessionName(target) }, { quiet: cause === 'rest', reportErrors: false });

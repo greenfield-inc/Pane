@@ -9,7 +9,8 @@ function deferred<T>() {
 }
 
 const saveNavigationMemory = vi.fn(async () => ({ success: true }));
-const keyListeners: Array<(event: KeyboardEvent) => void> = [];
+type KeyPress = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'isComposing' | 'preventDefault'>;
+const keyListeners: Array<(event: KeyPress) => void> = [];
 const cancelSwitch = vi.fn(async () => ({ success: true, data: { cancelled: true } }));
 
 /**
@@ -19,7 +20,7 @@ const cancelSwitch = vi.fn(async () => ({ success: true, data: { cancelled: true
 async function setup(switchMachine: (machineId: string) => Promise<MachineSelectOutcome>, { online = true } = {}) {
   vi.resetModules();
   vi.stubGlobal('window', {
-    addEventListener: vi.fn((type: string, listener: (event: KeyboardEvent) => void) => { if (type === 'keydown') keyListeners.push(listener); }),
+    addEventListener: vi.fn((type: string, listener: (event: KeyPress) => void) => { if (type === 'keydown') keyListeners.push(listener); }),
     electronAPI: {
       uiState: { saveNavigationMemory, getPaneLayout: vi.fn(async () => ({ success: true, data: null })) },
       remoteDaemon: { cancelSwitch },
@@ -242,8 +243,7 @@ describe('typing, Enter or a click engages, and what was typed arrives once (T-1
     engage.holdRemoteText(target, 'ab');
     engage.engageRemoteSession(target, 'type');
     const preventDefault = vi.fn();
-    // SAFETY: the listener reads only these fields of a keydown.
-    for (const listener of keyListeners) listener({ key: 'c', metaKey: false, ctrlKey: false, altKey: false, isComposing: false, preventDefault } as unknown as KeyboardEvent);
+    for (const listener of keyListeners) listener({ key: 'c', metaKey: false, ctrlKey: false, altKey: false, isComposing: false, preventDefault });
     expect(state().held[engage.engageKey(target)]?.text).toBe('abc');
     expect(preventDefault).toHaveBeenCalled();
   });
