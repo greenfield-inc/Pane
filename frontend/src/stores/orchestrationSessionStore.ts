@@ -64,9 +64,10 @@ interface OrchestrationSessionState {
   refresh: (options?: { adoptServerSelection?: boolean; throwOnError?: boolean }) => Promise<void>;
   /**
    * Remembers the Session to land on once the host switch that follows clears this host's
-   * Sessions (T-128); undefined drops it, as a newer press or a cancelled switch does.
+   * Sessions (T-128); undefined drops it, as a newer press or a cancelled switch does. `quiet`
+   * (a 1 s rest engaged it, T-132) lands as a rest settles: a paused chat stays paused there.
    */
-  landOn: (sessionId: string | undefined) => void;
+  landOn: (sessionId: string | undefined, options?: { quiet?: boolean }) => void;
   /** This desktop's remembered Session for the current host, preferred over the host's last-used one. */
   preferSelection: (sessionId: string | undefined) => void;
   /**
@@ -134,7 +135,7 @@ function revisionAfter(state: OrchestrationSessionState, selectedSessionId: stri
  * host that has it: that list selects it as a click would, and any select already in flight
  * (one the restored layout started) is dropped, so the host's own last-used Session never wins.
  */
-let landing: { sessionId: string; armed: boolean } | undefined;
+let landing: { sessionId: string; armed: boolean; quiet: boolean } | undefined;
 /**
  * The Session a landing selected, held against automatic selects until shortly after the restore
  * ends (#1767 review F-12): the restored layout or first-run state otherwise picked the host's own
@@ -155,23 +156,25 @@ function landingHolds(sessionId: string | undefined): boolean {
   return sessionId !== heldLanding.sessionId;
 }
 
-function takeLanding(sessions: OrchestrationSessionSummary[]): string | undefined {
+function takeLanding(sessions: OrchestrationSessionSummary[]): { sessionId: string; quiet: boolean } | undefined {
   if (!landing?.armed) return undefined;
   const sessionId = activeSessionIdFromList(sessions, landing.sessionId);
   if (!sessionId) return undefined;
+  const { quiet } = landing;
   landing = undefined;
   // Taken after the restore ended (the Session arrived late), it is held for a second from now (review F-3).
   heldLanding = { sessionId, until: restoring ? null : Date.now() + LANDING_HOLD_AFTER_RESTORE_MS };
   operationGeneration += 1;
   pendingSelectionGeneration = null;
   preferredSessionId = sessionId;
-  return sessionId;
+  return { sessionId, quiet };
 }
 
 /** The state a landing leaves: the Session selected and counted as this desktop's own choice. */
-function landedState(state: OrchestrationSessionState, sessionId: string): Partial<OrchestrationSessionState> {
+function landedState(state: OrchestrationSessionState, { sessionId, quiet }: { sessionId: string; quiet: boolean }): Partial<OrchestrationSessionState> {
   return {
     selectedSessionId: sessionId,
+    quietSessionId: quiet ? sessionId : undefined,
     selectionRevision: state.selectionRevision + 1,
     selectionVisits: { ...state.selectionVisits, [sessionId]: (state.selectionVisits[sessionId] ?? 0) + 1 },
     selectionError: null,
@@ -206,8 +209,8 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
   hostRevision: 0,
   cursorSessionId: undefined,
   quietSessionId: undefined,
-  landOn: (sessionId) => {
-    landing = sessionId ? { sessionId, armed: false } : undefined;
+  landOn: (sessionId, options) => {
+    landing = sessionId ? { sessionId, armed: false, quiet: options?.quiet === true } : undefined;
     heldLanding = undefined;
   },
   settleLanding: () => {

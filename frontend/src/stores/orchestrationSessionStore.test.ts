@@ -380,6 +380,21 @@ describe('landing on the Session pressed on another machine (T-128)', () => {
     now.mockRestore();
   });
 
+  it('a quiet landing (a 1 s rest engaged it, T-132) keeps a paused chat paused there; a plain one resumes it', async () => {
+    list.mockResolvedValue(reply('a'));
+    const store = await setup();
+
+    store.getState().landOn('b', { quiet: true });
+    store.getState().invalidateHost();
+    await store.getState().load();
+    expect(store.getState()).toMatchObject({ selectedSessionId: 'b', quietSessionId: 'b' });
+
+    store.getState().landOn('b');
+    store.getState().invalidateHost();
+    await store.getState().load();
+    expect(store.getState()).toMatchObject({ selectedSessionId: 'b', quietSessionId: undefined });
+  });
+
   it('drops a landing that a newer press or a cancelled switch replaced', async () => {
     list.mockResolvedValue(reply('a'));
     const store = await setup();

@@ -41,7 +41,7 @@ describe('openOnMachine (T-128)', () => {
 
     await openOnMachine('build', { kind: 'session', id: 'release', name: 'Release' });
 
-    expect(landOn).toHaveBeenCalledWith('release');
+    expect(landOn).toHaveBeenCalledWith('release', { quiet: false });
     expect(landOn).not.toHaveBeenCalledWith(undefined);
   });
 
@@ -63,7 +63,7 @@ describe('openOnMachine (T-128)', () => {
     first.resolve({ ok: false, error: 'superseded mid-way' });
     await older;
 
-    expect(landOn).toHaveBeenLastCalledWith('notes');
+    expect(landOn).toHaveBeenLastCalledWith('notes', { quiet: false });
     expect(shownError()).toBeNull();
   });
 
