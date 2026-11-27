@@ -178,12 +178,12 @@ export class ChatTabViewer {
       }
       if (this.state.hasNewer && event.generation === transcript.generation && event.index >= transcript.start + transcript.messages.length) {
         // Past the end of a window scrolled back from the newest: keep the window, track the revision.
-        if (event.revision > transcript.revision + 1) { void this.refresh(); return; }
+        if (event.revision > transcript.revision + 1) { void this.resync(); return; }
         if (event.revision === transcript.revision + 1) this.publishLive({ transcript: { ...transcript, revision: event.revision } });
         return;
       }
       const applied = applyChatTabEvent(transcript, event);
-      if (applied.resync) { void this.refresh(); return; }
+      if (applied.resync) { void this.resync(); return; }
       this.publishLive({ transcript: this.state.hasNewer ? applied.transcript : this.bounded(applied.transcript) });
     });
     const states = client.onState(view => {
@@ -194,7 +194,7 @@ export class ChatTabViewer {
       const finishedStarting = this.state.view?.status === 'starting' && view.status !== 'starting';
       if (finishedStarting) switchMark('chat:ready', { panelId: this.panelId });
       this.publish({ view: { ...view, transcript: undefined } });
-      if ((newGeneration || finishedStarting) && view.status !== 'starting') void this.refresh();
+      if ((newGeneration || finishedStarting) && view.status !== 'starting') void this.resync();
     });
     const reconnect = client.onReconnect?.(() => { void this.refresh(); });
     this.detach = () => { events(); states(); reconnect?.(); };
@@ -208,6 +208,12 @@ export class ChatTabViewer {
     this.detach = () => { clearTimeout(later); detach(); };
   }
 
+  /** The live events showed a gap or a new conversation run: the client may fetch fresher data first (`ChatTabClient.resync`). */
+  private resync(): Promise<void> {
+    this.chatClient.resync?.(this.panelId);
+    return this.refresh();
+  }
+
   /** A fresh snapshot of the newest window, then any events that arrived while it loaded. */
   refresh(): Promise<void> {
     if (this.loading) return this.loading;
@@ -218,6 +224,11 @@ export class ChatTabViewer {
       switchMark('chat:get:end', { panelId: this.panelId, status: view.status, start: view.transcript?.start, n: view.transcript?.messages.length });
       if (transport !== this.transport) return;
       let transcript = view.transcript;
+      // A copy older than the window shown (a held copy behind the live events, T-116 PR 6) never
+      // replaces it: the conversation would jump backwards. The events that arrived meanwhile apply to
+      // the newer window, so they are neither lost nor taken for a gap. A host's own read is never older.
+      const shown = this.state.transcript;
+      if (transcript && shown && transcript.generation === shown.generation && transcript.revision < shown.revision) transcript = shown;
       let gap = false;
       for (const event of this.pending) {
         if (!transcript) break;
@@ -242,7 +253,7 @@ export class ChatTabViewer {
       // Only now does refresh() start a new fetch instead of returning this one.
       if (this.resyncNeeded) {
         this.resyncNeeded = false;
-        if (this.detach) void this.refresh();
+        if (this.detach) void this.resync();
       }
     });
     this.loading = loading;

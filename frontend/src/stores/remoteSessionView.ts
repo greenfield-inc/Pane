@@ -66,8 +66,43 @@ const mirrorReads = new Map<string, Promise<void>>();
 const hostReads = new Map<string, Promise<RemoteSessionEntry | undefined>>();
 /** When each Session's last host read started (performance.now()), keyed by machine and Session. */
 const readStartedAt = new Map<string, number>();
-/** The fewest milliseconds between two host reads a gap in a shown chat's events starts. */
-const GAP_READ_MS = 2000;
+
+/** The newest live event heard for each remote chat (by panel id): how far ahead of what is held the host is. */
+const liveRevisions = new Map<string, { generation: number; revision: number; at: number }>();
+
+function heardLive(panelId: string, generation: number, revision: number): void {
+  const known = liveRevisions.get(panelId);
+  if (!known || generation > known.generation || (generation === known.generation && revision > known.revision)) liveRevisions.set(panelId, { generation, revision, at: performance.now() });
+}
+
+/** Chats whose host read is under way while newer live events came in: read once more when it lands. */
+const readAgain = new Set<string>();
+
+/**
+ * Reads the host for a gap in a shown chat's live events: at once, unless a read started after the
+ * newest event was heard (it covers it). One under way when a newer event arrived reads again when it lands.
+ */
+function readForLive(machineId: string, sessionId: string, panelId: string): void {
+  const key = remoteSessionKey(machineId, sessionId);
+  const heardAt = liveRevisions.get(panelId)?.at ?? performance.now();
+  if (hostReads.has(key)) {
+    if ((readStartedAt.get(key) ?? -Infinity) < heardAt) readAgain.add(key);
+    return;
+  }
+  if ((readStartedAt.get(key) ?? -Infinity) >= heardAt) return;
+  void readRemoteSession(machineId, sessionId).then(() => {
+    if (!readAgain.delete(key) || !isTarget(machineId, sessionId) || !machineOnline(machineId)) return;
+    readForLive(machineId, sessionId, panelId);
+  });
+}
+
+/** Whether the live events heard for a chat are ahead of the copy held: a gap only the host can close. */
+function behindLive(panelId: string, chat: ChatTabView): boolean {
+  const live = liveRevisions.get(panelId);
+  const held = chat.transcript;
+  if (!live || !held) return false;
+  return live.generation > held.generation || (live.generation === held.generation && live.revision > held.revision);
+}
 
 /** Which copy of a chat is held: its panel, conversation, revision and window. */
 function heldVersion(chat: ChatTabView | undefined): string {
@@ -268,25 +303,30 @@ export function remoteChatClient(machineId: string, machineName: string, { held 
       const chat = heldRemoteChat(sessionId ? cachedRemoteSession(machineId, sessionId) : undefined);
       if (!chat || chat.panelId !== panelId) throw new Error(`Pane has nothing of this chat from ${machineName} yet.`);
       const full = !held && fullChats.has(remoteSessionKey(machineId, panelId));
-      // A read of a chat the cursor stays on may be a gap in its live events that what is held can't
-      // close (the host is ahead of the mirror): one host read, at most every GAP_READ_MS. Its answer
-      // reaches the viewer through onReconnect.
-      if (full && sessionId && machineOnline(machineId) && performance.now() - (readStartedAt.get(remoteSessionKey(machineId, sessionId)) ?? -Infinity) >= GAP_READ_MS) {
-        void readRemoteSession(machineId, sessionId);
-      }
       return full ? chat : firstPaintWindow(chat);
     },
     // A newer copy of a chat held for this machine (the mirror caught up, a host read landed): its viewer reads it.
+    // A gap in a shown chat's live events, or a new run (its agent started on the host): the held copies
+    // can't close it, so the host is read, unless a read started since the newest event was heard.
+    resync(panelId) {
+      const sessionId = sessionOfChat(machineId, panelId);
+      if (!sessionId || !isTarget(machineId, sessionId) || !machineOnline(machineId)) return;
+      readForLive(machineId, sessionId, panelId);
+    },
+    // Only the shown Session's copy, and only one carrying more than its live events already did (a
+    // copy behind them would draw nothing new: the viewer keeps the newer window anyway).
     onReconnect(callback) {
-      const versions = () => Object.entries(useRemoteSessionView.getState().entries)
-        .filter(([key]) => key.startsWith(remoteSessionKey(machineId, '')))
-        .map(([, entry]) => heldVersion(heldRemoteChat(entry)));
-      let seen = versions();
+      const shownChat = () => {
+        const { target, entries } = useRemoteSessionView.getState();
+        return target?.machineId === machineId ? heldRemoteChat(entries[remoteSessionKey(machineId, target.sessionId)]) : undefined;
+      };
+      let seen = heldVersion(shownChat());
       return useRemoteSessionView.subscribe(() => {
-        const now = versions();
-        const newer = now.some(version => version !== '' && !seen.includes(version));
+        const chat = shownChat();
+        const now = heldVersion(chat);
+        const changed = now !== '' && now !== seen;
         seen = now;
-        if (newer) callback();
+        if (changed && chat && !behindLive(chat.panelId, chat)) callback();
       });
     },
     // Scroll-back reads the host once the window has switched to it.
@@ -299,14 +339,18 @@ export function remoteChatClient(machineId: string, machineName: string, { held 
       return machineMirrorApi()?.onChatEvent(event => {
         if (event.machineId !== machineId || event.channel !== 'chat-tab:event') return;
         const decoded = decodeOrDrop(() => decodeChatTabEvent(event.payload));
-        if (decoded) callback(decoded);
+        if (!decoded) return;
+        heardLive(decoded.panelId, decoded.generation, decoded.revision);
+        callback(decoded);
       }) ?? (() => undefined);
     },
     onState(callback) {
       return machineMirrorApi()?.onChatEvent(event => {
         if (event.machineId !== machineId || event.channel !== 'chat-tab:view') return;
         const decoded = decodeOrDrop(() => decodeChatTabView(event.payload));
-        if (decoded) callback(decoded);
+        if (!decoded) return;
+        heardLive(decoded.panelId, decoded.generation, 0);
+        callback(decoded);
       }) ?? (() => undefined);
     },
   };
