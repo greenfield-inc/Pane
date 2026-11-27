@@ -10,7 +10,7 @@ import { SESSION_SNAPSHOT_CHANGED_CHANNEL, SESSION_SNAPSHOTS_CHANNEL, type Sessi
 
 // Host snapshots (T-116 PR 4) in a real, isolated Pane: `orchestration-sessions:snapshots` answers
 // with each chat Session's summary, tabs, layout and newest messages, a new message raises its
-// revision and sends `session-snapshot:changed`, and a read with `since` and `held` sends only what
+// revision and sends `session-snapshot:changed`, and a read with `since`, `epoch` and `held` sends only what
 // changed. The chat runs the scripted ACP agent, so no real agent or account is touched. Asked over
 // the local daemon socket; the owner-only refusal of remote callers is covered by unit tests.
 
@@ -85,7 +85,7 @@ test('a chat Session\'s host snapshot holds its newest messages and announces ea
     }, { panelId: session.panelId, data: image });
     let latest = first;
     await expect.poll(async () => {
-      latest = await snapshots(client, { since: first.revision });
+      latest = await snapshots(client, { since: first.revision, epoch: first.epoch });
       const texts = JSON.stringify(latest.snapshots.find(entry => entry.sessionId === session.id)?.chat.transcript?.messages ?? []);
       return texts.includes('You said: hello snapshots');
     }, { timeout: 30_000 }).toBe(true);
@@ -97,19 +97,21 @@ test('a chat Session\'s host snapshot holds its newest messages and announces ea
       .filter(event => event.channel === SESSION_SNAPSHOT_CHANGED_CHANNEL)
       .some(event => decodeBoundary(event.args[0], notice).sessionId === session.id), { timeout: 5_000 }).toBe(true);
 
-    // A desktop that holds those messages gets only the last one again, and no Session that did not change.
-    const count = changed.chat.messageCount;
     // Once the reply has settled, a read since the last one sends nothing.
     let since = latest.revision;
     await expect.poll(async () => {
-      const next = await snapshots(client, { since });
+      const next = await snapshots(client, { since, epoch: first.epoch });
       since = next.revision;
       return next.snapshots.length;
     }, { timeout: 10_000, intervals: [1_500] }).toBe(0);
-    const held = await snapshots(client, { held: { [session.id]: { generation: changed.chat.generation, count } } });
+    // A desktop that holds every message gets none of them again.
+    const whole = (await snapshots(client, {})).snapshots.find(entry => entry.sessionId === session.id)!;
+    const transcript = whole.chat.transcript!;
+    const count = transcript.start + transcript.messages.length;
+    const held = await snapshots(client, { epoch: first.epoch, held: { [session.id]: { generation: transcript.generation, count, revision: transcript.revision } } });
     const again = held.snapshots.find(entry => entry.sessionId === session.id)!;
-    expect(again.chat.transcript?.start).toBe(count - 1);
-    expect(again.chat.transcript?.messages).toHaveLength(1);
+    expect(again.chat.transcript?.start).toBe(count);
+    expect(again.chat.transcript?.messages).toEqual([]);
     // Reading created no tab.
     expect(again.tabs).toHaveLength(tabsBefore);
   } finally {

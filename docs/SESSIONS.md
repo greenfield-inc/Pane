@@ -1039,20 +1039,39 @@ answers of 1 KB or more.
 
 `orchestration-sessions:snapshots` serves host snapshots, which let the owner's
 other machines show a chat Session ahead of opening it. There is one snapshot
-per unarchived chat Session: the summary record, its tabs as `panels:list`
-returns them, the stored layout, and the chat view with its newest 30 messages.
-Inline attachment bytes over 4 KB (`data`, `blob`) are replaced by
-`omitted: { field, length }`. Each snapshot has a `revision` that rises on any
-change to the record (except order and selection), the tabs, the layout or the
-chat. The request is `{ since?, held? }`: the answer lists every snapshotted
-Session id, the snapshots newer than `since`, and the `revision` to send next
-time. `held` maps a Session id to the `{ generation, count }` of messages the
-caller already has, and only the messages from the last held one on are sent.
-After a restart every Session reads as changed. A change also sends
-`session-snapshot:changed` `{ sessionId, revision }` on the event stream, at
-most once a second per Session. Reading creates no tab and starts no agent. Only
-the owner's own devices get an answer; teammates and Read only devices are
-refused with `SESSION_SNAPSHOTS_OWNER_ONLY`.
+per unarchived chat Session. It holds:
+
+- the summary record, without its launch settings (`launchCommand`,
+  `customResume`, `openingPrompt`, `profile`);
+- its chat and terminal tabs, as names and kinds only, with the few state
+  fields a Read only device sees. No terminal screen, launch input, selection
+  or file content leaves the machine, and other kinds of tab are left out;
+- the stored layout;
+- the chat view with its newest 30 messages.
+
+Any string over 4 KB outside a message's own text is replaced in place by
+`{ omitted: { field, length } }`. That covers an image's `data`, a `data:` URI,
+a resource's `blob` or `text`, and a tool's input or output.
+
+Each snapshot has a `revision` that rises on any change to the record (except
+order and selection), the tabs, the layout or the chat.
+
+The request is `{ since?, epoch?, held? }`. The answer lists every snapshotted
+Session id, the snapshots newer than `since`, and the `revision` and `epoch` to
+send next time. `held` maps a Session id to the `{ generation, count, revision }`
+of the messages the caller already has. Only messages added or changed since
+that transcript revision are sent, including an earlier tool call that
+finished later. The host sends the whole window when it can't tell what
+changed.
+
+`epoch` names the host's run. An answer from another run, such as after a
+restart or with the clock set back, has `since` and `held` ignored, so every
+Session is sent whole.
+
+A change also sends `session-snapshot:changed` `{ sessionId, revision }` on the
+event stream, at most once a second per Session. Reading creates no tab and
+starts no agent. Only the owner's own devices get an answer; teammates and Read
+only devices are refused with `SESSION_SNAPSHOTS_OWNER_ONLY`.
 
 The existing
 `pane-chat:*` channels remain compatibility endpoints for the imported legacy

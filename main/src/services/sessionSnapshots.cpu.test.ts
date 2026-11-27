@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionSnapshotService, type SessionSnapshotSources } from './sessionSnapshots';
 import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 import type { AgentChatMessage } from '../../../shared/types/agentChat';
-import type { SessionSnapshotsResult } from '../../../shared/types/sessionSnapshot';
+import type { SessionSnapshotHeld, SessionSnapshotsResult } from '../../../shared/types/sessionSnapshot';
 
 /**
  * The plan's CPU budget for the sending Mac (T-116 "Budgets"): at most 1% of a core with 5 chats
@@ -54,21 +54,24 @@ describe('SessionSnapshotService CPU on the host', () => {
         return {
           panelId, agent: 'claude', generation: 1, status: 'working', canAttachImages: true, controls: [], commands: [], permissions: [], questions: [], queue: [],
           // The host's transcript copies its window on every read too (`structuredClone` in transcript.ts).
-          transcript: { panelId, generation: 1, revision: messages.length, start: messages.length - window.length, messages: structuredClone(window) },
+          transcript: { panelId, generation: 1, revision: chatRevisions.get(panelId) ?? messages.length, start: messages.length - window.length, messages: structuredClone(window) },
           messageCount: messages.length,
         };
       },
       announce: (sessionId, revision) => { notices.push({ sessionId, revision }); },
     };
     const service = new SessionSnapshotService(sources);
-    const held: Record<string, { generation: number; count: number }> = {};
+    const held: Record<string, SessionSnapshotHeld> = {};
     let since: number | undefined;
+    let epoch: string | undefined;
+    const chatRevisions = new Map<string, number>();
     let pulls = 0;
     const pull = async () => {
       pulls += 1;
-      const answer: SessionSnapshotsResult = await service.snapshots({ since, held });
+      const answer: SessionSnapshotsResult = await service.snapshots({ since, epoch, held });
       since = answer.revision;
-      for (const snapshot of answer.snapshots) held[snapshot.sessionId] = { generation: 1, count: snapshot.chat.messageCount };
+      epoch = answer.epoch;
+      for (const snapshot of answer.snapshots) held[snapshot.sessionId] = { generation: 1, count: snapshot.chat.messageCount, revision: snapshot.chat.transcript!.revision };
       // The host encodes and compresses each answer for the wire (#1768).
       gzipSync(JSON.stringify(answer));
     };
@@ -86,7 +89,9 @@ describe('SessionSnapshotService CPU on the host', () => {
           const last = messages.length - 1;
           messages[last] = { ...messages[last]!, parts: [{ type: 'text', text: `${streamed(messages[last]!)} more` }] };
         }
-        service.send('chat-tab:event', { panelId: `chat-${chat}`, generation: 1, revision: messages.length });
+        const revision = (chatRevisions.get(`chat-${chat}`) ?? messages.length) + 1;
+        chatRevisions.set(`chat-${chat}`, revision);
+        service.send('chat-tab:event', { panelId: `chat-${chat}`, generation: 1, revision, index: messages.length - 1 });
       }
       await vi.advanceTimersByTimeAsync(1000 / UPDATES_PER_SECOND);
       // The worst case: a desktop that pulls once per notice (PR 5 batches them for 250 ms).

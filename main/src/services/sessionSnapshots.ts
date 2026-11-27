@@ -1,5 +1,7 @@
+import { randomUUID } from 'crypto';
 import type { PaneEventArgument, PaneEventSink } from '../core/eventSink';
-import { boundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from '../../../shared/validation/boundaryDecoder';
+import { isReadableTabType, readableCopy } from '../daemon/accessLevel';
+import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 import {
   SESSION_SNAPSHOT_MESSAGE_LIMIT,
@@ -10,13 +12,15 @@ import {
   type SessionSnapshotsResult,
 } from '../../../shared/types/sessionSnapshot';
 import type { ChatTabTranscript, ChatTabView } from '../../../shared/types/chatTab';
-import type { AgentChatMessage, AgentChatPart } from '../../../shared/types/agentChat';
+import type { AgentChatPart } from '../../../shared/types/agentChat';
 import type { SessionPanelLayout, ToolPanel } from '../../../shared/types/panels';
 
 /** The fewest milliseconds between two notices for one Session (the same pace as recent.json's writes). */
 const SNAPSHOT_NOTICE_INTERVAL_MS = 1000;
-/** Inline attachment bytes longer than this are left out of a snapshot and named by their length. */
+/** A string longer than this outside a message's own text (an image's bytes, a file, a tool's output) is left out and named by its length. */
 const INLINE_DATA_LIMIT = 4096;
+/** The message changes remembered per chat; a desktop holding an older revision gets the whole window. */
+const TRACKED_CHANGES = 500;
 /** A list read this old is read again even with no change heard, in case one was missed. */
 const LIST_MAX_AGE_MS = 60_000;
 /** Changes to a Session's order or which one is selected: neither is in a snapshot. */
@@ -41,6 +45,17 @@ interface ChatSession {
   chatPanelId: string;
 }
 
+/** Which messages of one chat changed, and at which transcript revision, since this Pane began watching it. */
+interface ChatChanges {
+  generation: number;
+  /** The first revision watched: changes from it on are all in `changed`. */
+  from: number;
+  /** The last revision heard. */
+  latest: number;
+  /** Message index → the revision that last changed it, oldest change first. */
+  changed: Map<number, number>;
+}
+
 interface NoticePace {
   sentAt: number;
   timer?: ReturnType<typeof setTimeout>;
@@ -49,6 +64,7 @@ interface NoticePace {
 const sessionChangeSchema = boundary.object({ sessionId: boundary.string, kind: boundary.optional(boundary.string) });
 const paneEventSchema = boundary.object({ sessionId: boundary.string });
 const panelEventSchema = boundary.object({ panelId: boundary.string });
+const chatEventSchema = boundary.object({ panelId: boundary.string, generation: boundary.number, revision: boundary.number, index: boundary.optional(boundary.number) });
 
 /**
  * Host snapshots (T-116 PR 4): a small, ready copy of each unarchived chat Session for the owner's
@@ -56,17 +72,22 @@ const panelEventSchema = boundary.object({ panelId: boundary.string });
  * Pane already sends (it is one of the event sinks), keeps only revision numbers, and builds a
  * snapshot when one is read. Reading never creates a tab, starts an agent or writes.
  *
- * Revisions are milliseconds since 1970, kept rising: every Session reads as changed at the time
- * this Pane started, so a desktop that last read before a restart reads everything again.
+ * Revisions are milliseconds since 1970, kept rising, and an answer names this Pane's run (`epoch`):
+ * a desktop whose last answer came from another run (a restart, maybe with the clock set back)
+ * reads everything again. What leaves this machine is the read-only projection (`readableCopy`):
+ * no launch settings, and tabs cut to what a tab shows (D-11).
  */
 export class SessionSnapshotService implements PaneEventSink {
   private last = 0;
   private readonly started: number;
+  private readonly epoch = randomUUID();
+  private readonly chats = new Map<string, ChatChanges>();
   private readonly revisions = new Map<string, number>();
   private readonly paces = new Map<string, NoticePace>();
   /** The chat Sessions as last read, by id and by their own Pane. */
   private known = new Map<string, ChatSession>();
   private sessionByPane = new Map<string, string>();
+  private sessionByChat = new Map<string, string>();
   /** The list read under way, and how many changes had been heard when it was asked for. */
   private refreshing?: { read: Promise<void>; changes: number };
   /** Counts Session changes heard; the list is read again when it was read before the latest. */
@@ -109,7 +130,13 @@ export class SessionSnapshotService implements PaneEventSink {
         if (change) this.paneChanged(change.sessionId);
         return;
       }
-      case 'chat-tab:event':
+      case 'chat-tab:event': {
+        const event = decodeOptionalBoundary(payload, chatEventSchema);
+        if (event && this.sessionByChat.has(event.panelId)) this.track(event);
+        const paneId = event && this.sources.panel(event.panelId)?.sessionId;
+        if (paneId) this.paneChanged(paneId);
+        return;
+      }
       case 'chat-tab:view': {
         const change = decodeOptionalBoundary(payload, panelEventSchema);
         const paneId = change && this.sources.panel(change.panelId)?.sessionId;
@@ -120,40 +147,62 @@ export class SessionSnapshotService implements PaneEventSink {
     }
   }
 
-  /** `orchestration-sessions:snapshots`: the snapshots newer than `since`, with only the messages after what the desktop holds. */
+  /** `orchestration-sessions:snapshots`: the snapshots newer than `since`, with only the messages changed since what the desktop holds. */
   async snapshots(request: SessionSnapshotsRequest): Promise<SessionSnapshotsResult> {
     // Taken before reading, so a change made while this read runs is read again next time.
     const revision = this.last;
     // The list is read only after a Session changed: each pull would otherwise copy every record.
     if (this.listedChanges !== this.listChanges || Date.now() - this.listedAt > LIST_MAX_AGE_MS) await this.refresh();
-    const since = request.since;
+    // `since` and `held` mean something only to the run that answered them.
+    const sameRun = request.epoch === this.epoch;
+    const since = sameRun ? request.since : undefined;
     const snapshots: SessionSnapshot[] = [];
     const sessionIds: string[] = [];
     for (const { record, chatPanelId } of this.known.values()) {
+      sessionIds.push(record.id);
       const sessionRevision = this.revisionOf(record.id);
-      if (since !== undefined && sessionRevision <= since) {
-        sessionIds.push(record.id);
+      if (since !== undefined && sessionRevision <= since) continue;
+      const chat = this.sources.chat(chatPanelId, SESSION_SNAPSHOT_MESSAGE_LIMIT);
+      if (!chat) {
+        // Not readable yet (its tab is still loading): kept listed, and sent on the next read.
+        this.revisions.set(record.id, this.nextRevision());
         continue;
       }
-      const chat = this.sources.chat(chatPanelId, SESSION_SNAPSHOT_MESSAGE_LIMIT);
-      if (!chat) continue;
-      sessionIds.push(record.id);
+      const held = sameRun ? request.held?.[record.id] : undefined;
       snapshots.push({
         sessionId: record.id,
         revision: sessionRevision,
-        session: record,
-        chat: { ...chat, transcript: chat.transcript && withoutInlineData(after(chat.transcript, chat.messageCount, request.held?.[record.id])) },
-        tabs: this.sources.tabs(record.internalSessionId),
+        session: readableCopy(record),
+        chat: { ...chat, transcript: chat.transcript && withoutInlineData(changedSince(chat.transcript, chat.messageCount, held, this.chats.get(chatPanelId))) },
+        tabs: this.sources.tabs(record.internalSessionId).filter(tab => isReadableTabType(tab.type)).map(tab => readableCopy(tab)),
         layout: this.sources.layout(record.internalSessionId),
       });
     }
-    return { revision, sessionIds, snapshots };
+    return { revision, epoch: this.epoch, sessionIds, snapshots };
   }
 
   dispose(): void {
     this.disposed = true;
     for (const pace of this.paces.values()) clearTimeout(pace.timer);
     this.paces.clear();
+  }
+
+  /** Remembers which message a chat event changed, so a desktop gets earlier messages that changed too. */
+  private track(event: { panelId: string; generation: number; revision: number; index?: number }): void {
+    let changes = this.chats.get(event.panelId);
+    if (!changes || changes.generation !== event.generation || event.index === undefined || event.revision <= changes.latest) {
+      // A new conversation, or an event that names no message: watch afresh from the next change.
+      changes = { generation: event.generation, from: event.index === undefined ? event.revision + 1 : event.revision, latest: event.revision, changed: new Map() };
+      this.chats.set(event.panelId, changes);
+      if (event.index === undefined) return;
+    }
+    changes.latest = event.revision;
+    changes.changed.delete(event.index);
+    changes.changed.set(event.index, event.revision);
+    if (changes.changed.size <= TRACKED_CHANGES) return;
+    const [[oldest, oldestRevision]] = changes.changed;
+    changes.changed.delete(oldest);
+    changes.from = oldestRevision + 1;
   }
 
   private paneChanged(paneId: string): void {
@@ -182,6 +231,14 @@ export class SessionSnapshotService implements PaneEventSink {
     if (this.disposed) return;
     pace.sentAt = Date.now();
     this.sources.announce(sessionId, this.revisionOf(sessionId));
+    // A Session gone from the list (archived, deleted, moved away) is forgotten once its last notice is out.
+    if (!this.known.has(sessionId)) this.forget(sessionId);
+  }
+
+  private forget(sessionId: string): void {
+    if (this.paces.get(sessionId)?.timer) return;
+    this.paces.delete(sessionId);
+    this.revisions.delete(sessionId);
   }
 
   private revisionOf(sessionId: string): number {
@@ -213,66 +270,58 @@ export class SessionSnapshotService implements PaneEventSink {
     const listedAt = Date.now();
     const known = new Map<string, ChatSession>();
     const sessionByPane = new Map<string, string>();
+    const sessionByChat = new Map<string, string>();
     for (const record of await this.sources.sessions()) {
       if (record.archived === true || record.move?.state === 'arriving') continue;
       const chatPanelId = record.panelIds[record.agent];
       if (this.sources.panel(chatPanelId)?.type !== 'chat') continue;
       known.set(record.id, { record, chatPanelId });
       sessionByPane.set(record.internalSessionId, record.id);
+      sessionByChat.set(chatPanelId, record.id);
     }
     this.known = known;
     this.sessionByPane = sessionByPane;
+    this.sessionByChat = sessionByChat;
+    for (const sessionId of [...this.revisions.keys()]) if (!known.has(sessionId)) this.forget(sessionId);
+    for (const panelId of [...this.chats.keys()]) if (!sessionByChat.has(panelId)) this.chats.delete(panelId);
     this.listedChanges = changes;
     this.listedAt = listedAt;
   }
 }
 
 /**
- * The window from the last message the desktop holds on (it may have grown since), or the whole
- * window when the desktop holds another conversation or too little to join it up.
+ * The part of the window the desktop lacks: from the first message added or changed since the
+ * revision it holds. The whole window when it holds another conversation, too little to join up,
+ * or a revision older than this Pane has watched the chat.
  */
-function after(transcript: ChatTabTranscript, messageCount: number, held: SessionSnapshotHeld | undefined): ChatTabTranscript {
+function changedSince(transcript: ChatTabTranscript, messageCount: number, held: SessionSnapshotHeld | undefined, changes: ChatChanges | undefined): ChatTabTranscript {
   if (!held || held.generation !== transcript.generation || held.count > messageCount) return transcript;
-  const from = Math.max(0, held.count - 1);
+  if (held.revision === transcript.revision) {
+    return held.count === messageCount ? { ...transcript, start: messageCount, messages: [] } : transcript;
+  }
+  if (!changes || changes.generation !== transcript.generation || changes.latest !== transcript.revision || held.revision < changes.from - 1) return transcript;
+  let from = held.count;
+  for (const [index, revision] of changes.changed) {
+    if (revision > held.revision && index < from) from = index;
+  }
   if (from < transcript.start) return transcript;
   return { ...transcript, start: from, messages: transcript.messages.slice(from - transcript.start) };
 }
 
 function withoutInlineData(transcript: ChatTabTranscript): ChatTabTranscript {
-  return { ...transcript, messages: transcript.messages.map(lighterMessage) };
+  return { ...transcript, messages: transcript.messages.map(message => ({ ...message, parts: message.parts.map(lighterPart) })) };
 }
 
-function lighterMessage(message: AgentChatMessage): AgentChatMessage {
-  return { ...message, parts: message.parts.map(lighterPart) };
-}
-
+/** A part with every string over 4 KB replaced in place by its length; a message's own text is kept whole. */
 function lighterPart(part: AgentChatPart): AgentChatPart {
-  if (part.type === 'content') return { ...part, content: lighterBlock(part.content) };
-  if (part.type !== 'tool' || !part.content) return part;
-  return { ...part, content: part.content.map(lighterToolContent) };
+  if (part.type === 'text' || part.type === 'thought') return part;
+  // SAFETY: the replacer only swaps long strings for an omitted marker, so the part keeps its kind and keys.
+  return JSON.parse(JSON.stringify(part, omitLong)) as AgentChatPart;
 }
 
-/** A tool call's content entry; `{ type: 'content', content }` holds a content block (ACP `ToolCallContent`). */
-function lighterToolContent(entry: JsonValue): JsonValue {
-  const object = decodeOptionalBoundary(entry, boundary.jsonObject);
-  if (object?.type !== 'content' || object.content === undefined) return entry;
-  return { ...object, content: lighterBlock(object.content) };
-}
-
-/** A content block without an image's or audio's long `data`, or an embedded resource's long `blob` (ACP `ContentBlock`). */
-function lighterBlock(block: JsonValue): JsonValue {
-  const object = decodeOptionalBoundary(block, boundary.jsonObject);
-  if (!object) return block;
-  const result = withoutLong(object, 'data');
-  const resource = decodeOptionalBoundary(object.resource, boundary.jsonObject);
-  if (resource) result.resource = withoutLong(resource, 'blob');
-  return result;
-}
-
-function withoutLong(object: JsonObject, field: SessionSnapshotOmittedData['omitted']['field']): JsonObject {
-  const value = decodeOptionalBoundary(object[field], boundary.string);
-  if (value === undefined || value.length <= INLINE_DATA_LIMIT) return { ...object };
-  const { [field]: _omitted, ...rest } = object;
-  const omitted: SessionSnapshotOmittedData['omitted'] = { field, length: value.length };
-  return { ...rest, omitted: { ...omitted } };
+function omitLong(key: string, value: JsonValue): JsonValue {
+  const text = decodeOptionalBoundary(value, boundary.string);
+  if (text === undefined || text.length <= INLINE_DATA_LIMIT) return value;
+  const omitted: SessionSnapshotOmittedData['omitted'] = { field: key, length: text.length };
+  return { omitted: { ...omitted } };
 }

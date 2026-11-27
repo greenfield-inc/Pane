@@ -234,7 +234,8 @@ export function registerOrchestrationSessionHandlers(
 
 const snapshotsRequestSchema = boundary.object({
   since: boundary.optional(boundary.number),
-  held: boundary.optional(boundary.record(boundary.object({ generation: boundary.number, count: boundary.number }))),
+  epoch: boundary.optional(boundary.string),
+  held: boundary.optional(boundary.record(boundary.object({ generation: boundary.number, count: boundary.number, revision: boundary.number }))),
 });
 
 function decodeSnapshotsRequest(value: PaneCommandValue | undefined): SessionSnapshotsRequest {
@@ -242,6 +243,7 @@ function decodeSnapshotsRequest(value: PaneCommandValue | undefined): SessionSna
   const decoded = decodeBoundary(value, snapshotsRequestSchema);
   const request: SessionSnapshotsRequest = {};
   if (decoded.since !== undefined) request.since = decoded.since;
+  if (decoded.epoch !== undefined) request.epoch = decoded.epoch;
   if (decoded.held !== undefined) request.held = decoded.held;
   return request;
 }

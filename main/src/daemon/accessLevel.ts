@@ -207,15 +207,32 @@ function staysInTabList(entry: JsonValue): boolean {
   return decodeOptionalBoundary(entry, tabSchema) === undefined || isReadableTab(entry);
 }
 
+/** Drops hidden fields, cuts each tab's state to what it shows, and leaves other kinds of tab out of every `panels` list. */
+function readableField(key: string, field: JsonValue): JsonValue | undefined {
+  if (HIDDEN_FIELDS.has(key)) return undefined;
+  if (key === 'panels' && Array.isArray(field)) return field.filter(staysInTabList);
+  if (key !== 'customState') return field;
+  const state = decodeOptionalBoundary(field, boundary.jsonObject);
+  return state && Object.fromEntries(Object.entries(state).filter(([name]) => TAB_STATE_FIELDS.has(name)));
+}
+
 /** A value without hidden fields, with each tab's state cut to what it shows, and other kinds of tab left out of every `panels` list. */
 function readable(value: JsonValue): JsonValue {
-  return decodeBoundary(JSON.parse(JSON.stringify(value, (key, field: JsonValue) => {
-    if (HIDDEN_FIELDS.has(key)) return undefined;
-    if (key === 'panels' && Array.isArray(field)) return field.filter(staysInTabList);
-    if (key !== 'customState') return field;
-    const state = decodeOptionalBoundary(field, boundary.jsonObject);
-    return state && Object.fromEntries(Object.entries(state).filter(([name]) => TAB_STATE_FIELDS.has(name)));
-  })), boundary.json);
+  return decodeBoundary(JSON.parse(JSON.stringify(value, readableField)), boundary.json);
+}
+
+/**
+ * The same cut for a value this Pane sends ahead to the owner's other machines (host snapshots,
+ * T-116): a record loses its launch settings, and a tab keeps only what its tab shows.
+ */
+export function readableCopy<Value extends object>(value: Value): Value {
+  // SAFETY: the replacer only removes fields (and other kinds of tab from lists), so what remains has the value's shape with optional parts missing.
+  return JSON.parse(JSON.stringify(value, readableField)) as Value;
+}
+
+/** Whether a read-only viewer sees a tab of this kind at all: terminals and chats. */
+export function isReadableTabType(type: string): boolean {
+  return READABLE_TAB_TYPES.has(type);
 }
 
 /** A chat without what waits on its owner: approvals, questions and prompts not sent yet. */

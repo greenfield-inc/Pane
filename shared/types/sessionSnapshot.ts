@@ -15,16 +15,20 @@ export const SESSION_SNAPSHOT_CHANGED_CHANNEL = 'session-snapshot:changed';
 /** Messages a snapshot carries: the newest 30 (D-3). */
 export const SESSION_SNAPSHOT_MESSAGE_LIMIT = 30;
 
-/** What the desktop already holds of one Session's chat: the conversation and how many of its messages. */
+/** What the desktop already holds of one Session's chat: the conversation, how many of its messages, and as of which change. */
 export interface SessionSnapshotHeld {
   generation: number;
   /** Messages it holds, counted from the conversation's first: it has messages [.., count). */
   count: number;
+  /** The transcript `revision` of what it holds. */
+  revision: number;
 }
 
 export interface SessionSnapshotsRequest {
   /** The `revision` of the last answer; absent asks for every snapshot. */
   since?: number;
+  /** The `epoch` of the last answer: `since` and `held` count only when it is this host's current run. */
+  epoch?: string;
   /** Per Session id, what the desktop holds, so only messages after it are sent. */
   held?: Record<string, SessionSnapshotHeld>;
 }
@@ -33,32 +37,35 @@ export interface SessionSnapshot {
   sessionId: string;
   /** Rises on any change to what this snapshot holds. */
   revision: number;
-  /** The Session as a summary list sends it (no activity log or profile). */
+  /** The Session as a summary list sends it, without its launch settings (no activity log, profile, launch command, custom resume or opening prompt). */
   session: OrchestrationSessionSummary;
   /**
    * The Session's chat tab as the desktop draws it, read without starting it. Its transcript holds
-   * at most the newest 30 messages, from `start` on, and only those after what `held` said the
-   * desktop has (the last held one again, since a streaming message grows in place). Large inline
-   * attachment data is left out (`SessionSnapshotOmittedData`).
+   * at most the newest 30 messages, from `start` on: only those added or changed since what `held`
+   * said the desktop has (earlier ones a tool call updated included). Any string over 4 KB outside a
+   * message's own text is left out (`SessionSnapshotOmittedData`).
    */
   chat: ChatTabView;
-  /** The Session's tabs, as `panels:list` returns them. */
+  /** The Session's chat and terminal tabs as a read-only viewer sees them: names, kinds and the few state fields a tab shows; never a screen, launch input or file. */
   tabs: ToolPanel[];
   /** Its stored split layout, or null. */
   layout: SessionPanelLayout | null;
 }
 
 /**
- * What stands in for an attachment's inline bytes (an image's base64 `data`, a resource's `blob`)
- * over 4 KB: the field is removed and its length is given here. The full read fills it in once shown.
+ * What stands in, in place, for any string over 4 KB outside a message's own text (an image's
+ * `data`, a `data:` URI, a resource's `blob` or `text`, a tool's input or output): the key it was
+ * under (an array position for an array entry) and its length. The full read fills it in once shown.
  */
 export interface SessionSnapshotOmittedData {
-  omitted: { field: 'data' | 'blob'; length: number };
+  omitted: { field: string; length: number };
 }
 
 export interface SessionSnapshotsResult {
   /** Send this as `since` next time. */
   revision: number;
+  /** This host's current run; send it back with `since`. */
+  epoch: string;
   /** Every Session that has a snapshot now; the desktop drops any other it kept. */
   sessionIds: string[];
   /** The snapshots newer than `since`. */

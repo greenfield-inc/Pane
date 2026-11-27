@@ -150,12 +150,12 @@ describe('orchestration-sessions:snapshots', () => {
 
   it('answers the machine\'s owner with the snapshots newer than since', async () => {
     const { registry, snapshots } = host();
-    snapshots.mockResolvedValue({ revision: 7, sessionIds: ['a'], snapshots: [] });
+    snapshots.mockResolvedValue({ revision: 7, epoch: 'run-1', sessionIds: ['a'], snapshots: [] });
 
-    const result = await registry.invokeRemote('orchestration-sessions:snapshots', [{ since: 5, held: { a: { generation: 2, count: 40 } } }]);
+    const result = await registry.invokeRemote('orchestration-sessions:snapshots', [{ since: 5, epoch: 'run-1', held: { a: { generation: 2, count: 40, revision: 41 } } }]);
 
-    expect(snapshots).toHaveBeenCalledWith({ since: 5, held: { a: { generation: 2, count: 40 } } });
-    expect(result).toEqual({ success: true, data: { revision: 7, sessionIds: ['a'], snapshots: [] } });
+    expect(snapshots).toHaveBeenCalledWith({ since: 5, epoch: 'run-1', held: { a: { generation: 2, count: 40, revision: 41 } } });
+    expect(result).toEqual({ success: true, data: { revision: 7, epoch: 'run-1', sessionIds: ['a'], snapshots: [] } });
   });
 
   it('reads everything when asked with no arguments', async () => {
