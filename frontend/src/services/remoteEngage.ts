@@ -99,6 +99,8 @@ function onStrayKey(event: KeyPress): void {
   }
 }
 
+const DIALOGS = '[role="dialog"], [role="alertdialog"], [aria-modal="true"], [role="menu"], [role="listbox"]';
+
 /** The person moved focus themselves (a click, Tab, a shortcut) since the held box last had it. */
 let personMovedFocus = false;
 let boxRestores = 0;
@@ -118,6 +120,8 @@ function onFocusIn(event: FocusEvent): void {
   const box = heldBox();
   if (!engaging || !box) return;
   if (event.target === box) { personMovedFocus = false; return; }
+  // A dialog or menu that opened keeps focus (a first visit's welcome, a confirmation).
+  if (event.target instanceof Element && event.target.closest(DIALOGS)) return;
   const previous = event.relatedTarget;
   if (previous !== box || personMovedFocus || boxRestores >= 2) return;
   boxRestores += 1;
