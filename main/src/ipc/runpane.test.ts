@@ -3988,6 +3988,18 @@ describe('runpane IPC handlers', () => {
     expect(result).toMatchObject({ ok: true, strategy: 'tab', sequenceName: 'tab', verifiedSubmitted: true });
   });
 
+  it('verifies submit-composer cleared an Antigravity composer even when the prompt echoes into scrollback above', async () => {
+    const rule = '─'.repeat(40);
+    vi.mocked(terminalPanelManager.getOutputGeneration).mockReturnValueOnce(0).mockReturnValue(1);
+    vi.mocked(terminalPanelManager.getTerminalSnapshot)
+      .mockReturnValueOnce(terminalSnapshot(`${rule}\n> Fix the login test\n${rule}\n? for shortcuts\n`, 'idle', 'agy'))
+      .mockReturnValue(terminalSnapshot(`> Fix the login test\n  ● Generating · 1s\n${rule}\n>\n${rule}\n? for shortcuts\n`, 'active', 'agy'));
+    const result = await createRegistry().invoke('runpane:panels:submit-composer', [{ panelId: terminalPanel.id, strategy: 'auto' }]);
+
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, '\r');
+    expect(result).toMatchObject({ ok: true, verifiedSubmitted: true, delivery: { state: 'taken', evidence: 'screen' } });
+  });
+
   it('blocks submit-composer when the Codex pasted-content composer remains visible', async () => {
     vi.useFakeTimers();
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({

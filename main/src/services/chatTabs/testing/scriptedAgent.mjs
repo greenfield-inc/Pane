@@ -135,7 +135,7 @@ const app = agent()
     const all = readdirSync(store).filter(name => name.endsWith('.json')).flatMap(name => {
       const sessionId = name.slice(0, -'.json'.length);
       const saved = JSON.parse(readFileSync(file(sessionId), 'utf8'));
-      if (params.cwd && saved.cwd !== params.cwd) return [];
+      if (process.env.SCRIPTED_AGENT_LIST_IGNORES_CWD !== '1' && params.cwd && saved.cwd !== params.cwd) return [];
       const first = saved.updates.find(update => update.sessionUpdate === 'user_message_chunk' && update.content?.type === 'text');
       return [{ sessionId, cwd: saved.cwd, title: first?.content.text.slice(0, 80) ?? null, updatedAt: statSync(file(sessionId)).mtime.toISOString() }];
     }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));

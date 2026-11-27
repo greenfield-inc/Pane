@@ -520,7 +520,8 @@
               "-i",
               "--print",
               "-p",
-              "--prompt"
+              "--prompt",
+              "--remote-agent"
             ]
           }
         },

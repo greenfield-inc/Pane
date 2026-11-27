@@ -139,6 +139,7 @@ describe('Antigravity session launch and exit capture', () => {
     'agy --prompt-interactive "fix build"',
     'agy -p "summarize"',
     'agy --print "summarize"',
+    'agy --remote-agent',
     'agy acp',
     'agy models',
     'agy -- --continue',

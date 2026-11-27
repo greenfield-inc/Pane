@@ -281,7 +281,7 @@
   },
   "packages/runpane/src/handoff.ts": {
     "reason": "Deferred terminal launch: each agent CLI's model and effort flags and session carry in a handoff.",
-    "count": 10
+    "count": 8
   },
   "packages/runpane/src/localControl.ts": {
     "reason": "Wire decoders matching the host's terminal agent shapes and Loops (published runpane).",

@@ -123,6 +123,20 @@ describe('assessComposerEvidence', () => {
       agentType: 'agy',
     })).toBe('unknown');
 
+    for (const [prompt, footer, word] of [
+      ['> Accept-edits mode: file edits auto-approved (shift+tab to cycle)', 'accept-edits · gemini-4-neon-high', 'Accept-edits'],
+      ['> Best-of-N mode: parallel arms, /model to pick models (shift+tab to cycle)', 'best-of-n · gemini-4-neon-high', 'Best-of-N'],
+      ['> Auto mode: edits & safe commands auto-approv...', 'auto · Gemini 4 Carbon · high', 'Auto'],
+    ] as const) {
+      const frame = agyFrame(prompt, [footer]);
+      expect(assessComposerEvidence({
+        beforeText: frame,
+        afterText: frame,
+        stagedText: word,
+        agentType: 'agy',
+      })).toBe('unknown');
+    }
+
     const overlay = agyFrame('> Fix the login test', ['Keyboard: ↑/↓ Navigate · enter Select · esc Cancel', '? for shortcuts']);
     expect(assessComposerEvidence({
       beforeText: agyFrame('> Fix the login test'),

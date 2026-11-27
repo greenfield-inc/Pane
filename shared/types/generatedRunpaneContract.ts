@@ -540,7 +540,8 @@ const CONTRACT_SECTION_9 = {
             "-i",
             "--print",
             "-p",
-            "--prompt"
+            "--prompt",
+            "--remote-agent"
           ]
         }
       },

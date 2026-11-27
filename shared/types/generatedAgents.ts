@@ -405,7 +405,8 @@ export const AGENTS_CONFIG = {
             "-i",
             "--print",
             "-p",
-            "--prompt"
+            "--prompt",
+            "--remote-agent"
           ]
         }
       },

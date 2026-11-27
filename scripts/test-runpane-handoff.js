@@ -27,6 +27,12 @@ test('freeform destinations name the harness, model, effort, and machine', () =>
   assert.deepEqual(parseDestination('parsas-macbook-pro claude model=claude-opus-5-5', machines), {
     machine: 'parsas-macbook-pro', agent: 'claude', model: 'claude-opus-5-5',
   });
+  assert.deepEqual(parseDestination('agy gemini-4-neon high on parsas-macbook-pro', machines), {
+    machine: 'parsas-macbook-pro', agent: 'agy', model: 'gemini-4-neon', effort: 'high',
+  });
+  assert.deepEqual(parseDestination('antigravity gemini-4-carbon xhigh on this machine', machines), {
+    machine: null, agent: 'agy', model: 'gemini-4-carbon', effort: 'xhigh',
+  });
 });
 
 test('flags override the freeform text', () => {
@@ -38,7 +44,7 @@ test('flags override the freeform text', () => {
 
 test('unclear destinations fail with a message that says what to fix', () => {
   assert.throws(() => parseDestination('claude on parsas-macbook', machines), /matches several machines: parsas-macbook-pro, parsas-macbook-air/);
-  assert.throws(() => parseDestination('opus on parsas-macbook-pro', machines), /Name the agent: .*claude.*pi\./);
+  assert.throws(() => parseDestination('opus on parsas-macbook-pro', machines), /Name the agent: .*claude.*pi, agy\./);
   assert.throws(() => parseDestination('pi high on parsas-macbook-pro', machines), /Pi effort is not supported/);
   assert.throws(() => parseDestination('claude codex on build-server', machines), /names two agents: claude and codex/);
   assert.throws(() => parseDestination('claude on toaster', machines), /No machine on your tailnet or saved in Pane is called "toaster"/);

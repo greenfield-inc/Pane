@@ -938,6 +938,7 @@ describe('AGY_MANIFEST', () => {
     ['draft input', agyIdle('> fix the tests', '? for shortcuts')],
     ['paste badge', agyIdle('> [Pasted text #1 +24 lines]', '? for shortcuts')],
     ['mode footer', agyIdle('>\n  Auto (shift+tab to cycle)', 'auto · gemini-4-neon-high')],
+    ['best-of-n draft footer', agyIdle('> compare options', 'best-of-n · Gemini 4 Carbon · high')],
     ['exit confirmation hint', agyIdle('>', 'press ctrl+d again to exit')],
   ])('classifies %s as visibleIdle', (_label, text) => {
     expect(detectAgentState(AGY_MANIFEST, screen(text))).toMatchObject({

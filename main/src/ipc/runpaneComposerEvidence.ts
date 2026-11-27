@@ -136,8 +136,8 @@ function openCodeComposer(text: string): string | undefined {
 const PI_PASTE_MARKER = /\[paste #\d+(?: \+\d+ lines| \d+ chars)?\]/u;
 const PI_FOOTER_STATS = /(?:\d+(?:\.\d+)?%|\?)\/\d+(?:\.\d+)?[kMB]?\b/u;
 const AGY_PASTE_MARKER = /\[Pasted text #\d+(?: \+\d+ lines)?\]/u;
-const AGY_MODE_PLACEHOLDER = /^(?:Auto|Default|Accept edits|Plan)(?:\s+mode:.*)?\s*\(shift\+tab to cycle\)$/iu;
-const AGY_FOOTER = /(?:\? for shortcuts|press ctrl\+[cd] again to exit|(?:default|accept-edits|auto|plan)\s*·\s*\S)/iu;
+const AGY_MODE_PLACEHOLDER = /^(?:(?:Auto|Default|Accept[- ]edits|Plan|Best-of-N)\s+mode:\s+(?:edits|file edits|research|parallel arms)\b.*(?:\(shift\+tab to cycle\)|\.{3}|…)|(?:Auto|Default|Accept[- ]edits|Plan|Best-of-N)(?:\s+mode:.*)?\s*\(shift\+tab to cycle\))$/iu;
+const AGY_FOOTER = /(?:\? for shortcuts|press ctrl\+[cd] again to exit|(?:default|accept-edits|auto|plan|best-of-n)\s*·\s*\S)/iu;
 
 /**
  * Antigravity's composer: the rows between its `>` prompt's surrounding rules,

@@ -642,7 +642,7 @@ export const AGY_MANIFEST: AgentManifest = {
       region: 'bottom_non_empty_lines(8)',
       visibleIdle: true,
       regex: [
-        /(?:^|\n)\s*─{20,}\s*\n\s*>(?:\s[^\n]*)?\n(?:(?![^\S\n]*─{20,})[^\n]*\n)*\s*─{20,}\s*\n(?:[^\n]*\n){0,2}[^\n]*(?:\? for shortcuts|press ctrl\+[cd] again to exit|(?:default|accept-edits|auto|plan)\s*·\s*\S)[^\n]*\s*$/iu,
+        /(?:^|\n)\s*─{20,}\s*\n\s*>(?:\s[^\n]*)?\n(?:(?![^\S\n]*─{20,})[^\n]*\n)*\s*─{20,}\s*\n(?:[^\n]*\n){0,2}[^\n]*(?:\? for shortcuts|press ctrl\+[cd] again to exit|(?:default|accept-edits|auto|plan|best-of-n)\s*·\s*\S)[^\n]*\s*$/iu,
       ],
     },
   ],

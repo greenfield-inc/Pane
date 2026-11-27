@@ -4541,6 +4541,7 @@ async function verifyComposerSubmitted(
       beforeText: beforeScreen.text,
       afterText: latestScreen.text,
       stagedText,
+      agentType,
     });
     clearedOnScreen = (verdict === 'cleared' && !latestScreen.composer.hasUndeliveredText && panelHasFreshOutputSince(panel.id, outputGenerationBeforeSubmit)) ||
       (beforeHadComposerPrompt && !latestScreen.composer.hasUndeliveredText && !looksLikePendingComposer(latestScreen.text));
