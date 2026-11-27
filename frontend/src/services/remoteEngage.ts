@@ -21,7 +21,7 @@ import { openOnMachine } from '../utils/machineRowActions';
 import { handOverChatDraft, onChatTabShown } from '../utils/chatDraftHandover';
 import { useAllMachinesStore, isMachineDimmed } from '../stores/allMachinesStore';
 import { cachedRemoteSession, heldRemoteChat, remoteSessionKey } from '../stores/remoteSessionView';
-import { chatTabViewer } from '../../../shared/chatTabViewer';
+import { chatTabViewer, firstPaintWindow } from '../../../shared/chatTabViewer';
 import { switchMark } from '../../../shared/switchMarks';
 import type { ChatTabClient } from '../../../shared/types/chatTab';
 
@@ -183,7 +183,8 @@ function switched(target: EngageTarget, panelId: string | undefined): void {
   const chat = heldRemoteChat(cachedRemoteSession(target.machineId, target.sessionId));
   // SAFETY: the window's own chat client is what the live chat tab reads through (ChatTabRoute).
   const liveClient = window.electronAPI?.chatTab as ChatTabClient | undefined;
-  if (chat && liveClient) chatTabViewer(liveClient, chat.panelId).prime(chat, performance.now());
+  // The newest 30 only: drawing 200 there is a long task while the switch finishes (D-6); its own read brings the rest.
+  if (chat && liveClient) chatTabViewer(liveClient, chat.panelId).prime(firstPaintWindow(chat), performance.now());
   useRemoteEngage.setState(state => (state.engaging ? { engaging: { ...state.engaging, switched: true } } : {}));
   switchMark('engage:switched', { machineId: target.machineId, sessionId: target.sessionId });
   if (panelId && shownMeanwhile.has(panelId)) {

@@ -395,6 +395,18 @@ describe('landing on the Session pressed on another machine (T-128)', () => {
     expect(store.getState()).toMatchObject({ selectedSessionId: 'b', quietSessionId: undefined });
   });
 
+  it('says a landing waits on this host\'s list once its switch armed it, until a list takes it (T-132)', async () => {
+    list.mockResolvedValue(reply('a'));
+    const store = await setup();
+    store.getState().landOn('b');
+    expect(store.getState().landingArmed()).toBe(false);
+    store.getState().invalidateHost();
+    expect(store.getState().landingArmed()).toBe(true);
+    await store.getState().refresh();
+    expect(store.getState().landingArmed()).toBe(false);
+    expect(store.getState().selectedSessionId).toBe('b');
+  });
+
   it('drops a landing that a newer press or a cancelled switch replaced', async () => {
     list.mockResolvedValue(reply('a'));
     const store = await setup();

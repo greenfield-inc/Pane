@@ -52,6 +52,9 @@ async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
   if (hostChanged) {
     // Invalidate outgoing Session requests and tile memory before any host read.
     useOrchestrationSessionStore.getState().invalidateHost();
+    // A press on one of this host's Sessions waits for its list (T-128, T-132): read it now, beside
+    // the rest of the restore, so the pressed Session opens a round trip sooner.
+    if (useOrchestrationSessionStore.getState().landingArmed()) void useOrchestrationSessionStore.getState().refresh().catch(() => undefined);
     useSessionStore.getState().invalidateHost();
     usePanelStore.setState({ panels: {}, activePanels: {}, layouts: {}, focusedGroupIds: {}, activationRequests: {},
       agentStatus: {}, agentStatusSession: {}, agentStatusReason: {}, agentStatusSnapshotVersion: 0, activityStatus: {}, lastActivityAt: {}, unviewedCompletedActivity: {} });

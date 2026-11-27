@@ -34,23 +34,25 @@ function clockTime(iso: string | null | undefined): string | null {
  * offline; "Updating from …" while the mirror catches up; and, for a chat the host hasn't read since
  * it restarted, a note that its messages load when it is opened there.
  */
-export function RemoteSessionTileBody({ target }: { target: RemoteSessionTarget }) {
+export function RemoteSessionTileBody({ target, held = false }: { target: RemoteSessionTarget; held?: boolean }) {
   const { machineId, sessionId } = target;
   const entry = useRemoteSessionView(state => state.entries[remoteSessionKey(machineId, sessionId)]);
   const listing = useMachineMirrorStore(state => state.listings[machineId]);
   const machine = useAllMachinesStore(state => state.machines.find(candidate => candidate.id === machineId));
   const row = useAllMachinesStore(state => state.snapshots[machineId]?.sessions.find(session => session.id === sessionId));
-  return <RemoteSessionPanel target={target} entry={entry} listing={listing} machine={machine} row={row} />;
+  return <RemoteSessionPanel target={target} entry={entry} listing={listing} machine={machine} row={row} held={held} />;
 }
 
 /** What `RemoteSessionTileBody` shows, from what the stores hold. */
-export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
+export function RemoteSessionPanel({ target, entry, listing, machine, row, held = false }: {
   target: RemoteSessionTarget;
   entry: RemoteSessionEntry | undefined;
   listing: MachineMirrorListing | undefined;
   machine: MachineState | undefined;
   /** The All machines row's record, for a Session nothing was read of yet. */
   row: OrchestrationSessionSummary | undefined;
+  /** Held over the main area while an engage switches (T-132): the newest 30 messages, never more. */
+  held?: boolean;
 }) {
   const { machineId, sessionId } = target;
   const machineName = machine?.label ?? 'another machine';
@@ -65,7 +67,7 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
   const terminal = entry?.read?.view ? entry.read.view.panel.type !== 'chat' : false;
   // Not known yet, which is not empty: the host restarted and has no saved window for this chat.
   const unknown = !chat?.transcript && entry?.snapshot?.transcriptUnknown === true;
-  const client = useMemo(() => remoteChatClient(machineId, machineName), [machineId, machineName]);
+  const client = useMemo(() => remoteChatClient(machineId, machineName, { held }), [machineId, machineName, held]);
   const readAt = entry?.readAt ?? 0;
 
   // The chat paints the newest 30 messages held at once (drawing 200 takes a long chat ~95 ms);
@@ -81,7 +83,7 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
   }, [client, chat]);
   const panelId = chat?.panelId;
   useEffect(() => {
-    if (!panelId) return undefined;
+    if (!panelId || held) return undefined;
     const viewer = chatTabViewer(client, panelId);
     const rest = setTimeout(() => {
       showFullRemoteChat(machineId, panelId, true);
@@ -247,7 +249,7 @@ export function EngageHold() {
   if (!target) return null;
   return (
     <div className="absolute inset-0 z-30 flex flex-col bg-bg-primary" data-testid="engage-hold" data-machine-id={target.machineId} data-session-id={target.sessionId}>
-      <RemoteSessionTileBody target={target} />
+      <RemoteSessionTileBody target={target} held />
     </div>
   );
 }

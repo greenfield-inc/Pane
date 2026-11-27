@@ -233,6 +233,11 @@ function refused(machineName: string): Promise<never> {
 }
 
 const clients = new Map<string, ChatTabClient>();
+/**
+ * The same, for the view held over the main area while an engage switches (T-132): its own
+ * viewers, which draw the newest 30 messages only, so holding the view never draws 200 again.
+ */
+const heldClients = new Map<string, ChatTabClient>();
 /** Remote chats the cursor has stayed on, keyed by machine and panel: their reads answer every message held. */
 const fullChats = new Set<string>();
 
@@ -250,8 +255,9 @@ export function showFullRemoteChat(machineId: string, panelId: string, full: boo
  * window follows on that machine (`machine-chat:follow`). Anything that acts on the chat is refused:
  * engaging (typing, Enter, a click) switches the window first, in PR 7.
  */
-export function remoteChatClient(machineId: string, machineName: string): ChatTabClient {
-  const known = clients.get(machineId);
+export function remoteChatClient(machineId: string, machineName: string, { held = false }: { held?: boolean } = {}): ChatTabClient {
+  const cache = held ? heldClients : clients;
+  const known = cache.get(machineId);
   if (known) return known;
   const no = () => refused(machineName);
   const client: ChatTabClient = {
@@ -261,7 +267,7 @@ export function remoteChatClient(machineId: string, machineName: string): ChatTa
       const sessionId = sessionOfChat(machineId, panelId);
       const chat = heldRemoteChat(sessionId ? cachedRemoteSession(machineId, sessionId) : undefined);
       if (!chat || chat.panelId !== panelId) throw new Error(`Pane has nothing of this chat from ${machineName} yet.`);
-      const full = fullChats.has(remoteSessionKey(machineId, panelId));
+      const full = !held && fullChats.has(remoteSessionKey(machineId, panelId));
       // A read of a chat the cursor stays on may be a gap in its live events that what is held can't
       // close (the host is ahead of the mirror): one host read, at most every GAP_READ_MS. Its answer
       // reaches the viewer through onReconnect.
@@ -304,6 +310,6 @@ export function remoteChatClient(machineId: string, machineName: string): ChatTa
       }) ?? (() => undefined);
     },
   };
-  clients.set(machineId, client);
+  cache.set(machineId, client);
   return client;
 }

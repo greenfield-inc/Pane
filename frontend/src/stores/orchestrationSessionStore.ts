@@ -68,6 +68,8 @@ interface OrchestrationSessionState {
    * (a 1 s rest engaged it, T-132) lands as a rest settles: a paused chat stays paused there.
    */
   landOn: (sessionId: string | undefined, options?: { quiet?: boolean }) => void;
+  /** A landing waits on the incoming host's list: its switch armed it and no list took it yet. */
+  landingArmed: () => boolean;
   /** This desktop's remembered Session for the current host, preferred over the host's last-used one. */
   preferSelection: (sessionId: string | undefined) => void;
   /**
@@ -213,6 +215,7 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
     landing = sessionId ? { sessionId, armed: false, quiet: options?.quiet === true } : undefined;
     heldLanding = undefined;
   },
+  landingArmed: () => landing?.armed === true,
   settleLanding: () => {
     restoring = false;
     if (heldLanding && heldLanding.until === null) heldLanding.until = Date.now() + LANDING_HOLD_AFTER_RESTORE_MS;
