@@ -1617,6 +1617,10 @@ export class RemotePaneClientController extends EventEmitter {
     options: { recheck?: boolean } = {},
   ): Promise<RemotePaneConnectionState> {
     const sameProfile = this.activeClient?.profile.id === profile.id && this.activeClient.adoptRoutes(this.routesFor(profile));
+    // Latest wins (D-6): picking the machine the window shows while a switch to another one still
+    // dials beside it stops that switch, so the older dial never lands (review 1781 R2-SF-1).
+    const elsewhere = this.cancelPending;
+    if (sameProfile && elsewhere && elsewhere.profileId !== profile.id) this.cancelActivation(elsewhere.profileId);
     if (sameProfile && this.state.status === 'connected' && !options.recheck) {
       // Choosing the connected host again closes a card left by a failed switch to another host.
       if (this.check && this.check.outcome !== 'running') {
@@ -2109,6 +2113,9 @@ export class RemotePaneClientController extends EventEmitter {
         this.activeClient = client;
         this.portTunnel = createPortTunnel(port => client.openPortStream(port));
         this.tunnelledSnapshot = null;
+        // The window is on the new machine now: a cancel can no longer stop this switch, which
+        // would redial the old one while its link still closes (review 1781 R2-SF-2).
+        if (this.cancelPending?.profileId === savedProfile.id) this.cancelPending = null;
         const shown = stagedStatus ?? { status: 'restoring' as const, errorMessage: null, metadata: undefined };
         this.setConnectionState(stateFor(shown.status, shown.errorMessage, shown.metadata, client.profile.baseUrl));
         promoted();

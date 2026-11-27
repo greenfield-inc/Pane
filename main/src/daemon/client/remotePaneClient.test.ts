@@ -1940,6 +1940,46 @@ describe('a switch from a window on another machine keeps that machine until the
     await controller.switchToLocalMode();
   });
 
+  // Review 1781 R2-SF-1: latest wins (D-6). The state still says connected to studio while the
+  // staged dial runs, so picking studio again must stop that dial, not return early.
+  it('picking the machine the window is on while the dial runs stops the dial, and the window stays there', async () => {
+    const { controller, states, build, studio, studioServer, buildServer } = await onStudio();
+    buildServer.setEmitReadyEvent(false);
+    const studioDials = studioServer.getEventRequestCount();
+    const switching = controller.activateProfile(primaryProfile(build));
+    await waitFor(() => buildServer.getEventRequestCount() > 0);
+
+    await controller.activateProfile(primaryProfile(studio));
+    await expect(switching).rejects.toMatchObject({ code: 'ERR_REMOTE_SWITCH_CANCELLED' });
+    buildServer.setEmitReadyEvent(true);
+    await sleep(100);
+    expect(controller.getConnectionState()).toMatchObject({ status: 'connected', activeProfileId: 'studio-mac' });
+    expect(controller.getActiveRemoteClient()?.profile.id).toBe('studio-mac');
+    expect(states.filter(state => !state.endsWith(':studio-mac'))).toEqual([]);
+    expect(studioServer.getEventRequestCount()).toBe(studioDials);
+    await controller.switchToLocalMode();
+  });
+
+  // Review 1781 R2-SF-2: once the new machine has taken over, a cancel can't stop the switch
+  // (it would redial the old machine). The old link's close is awaited after the takeover.
+  it('a cancel after the new machine took over, while the old link still closes, is refused and the switch completes', async () => {
+    const { controller, build, studioServer } = await onStudio();
+    const old = controller.getActiveRemoteClient();
+    if (!old) throw new Error('The window has no connection to studio.');
+    const realDisconnect = old.disconnect.bind(old);
+    old.disconnect = async () => { await realDisconnect(); await sleep(80); };
+    const studioDials = studioServer.getEventRequestCount();
+    const switching = controller.activateProfile(primaryProfile(build));
+    await waitFor(() => controller.getActiveRemoteClient()?.profile.id === 'build-box');
+
+    expect(controller.cancelActivation('build-box')).toBe(false);
+    await expect(switching).resolves.toBeDefined();
+    await sleep(150);
+    expect(controller.getActiveRemoteClient()?.profile.id).toBe('build-box');
+    expect(studioServer.getEventRequestCount()).toBe(studioDials);
+    await controller.switchToLocalMode();
+  });
+
   it('a switch that completes moves the window to the new machine and closes the old connection', async () => {
     const { controller, states, build } = await onStudio();
     await controller.activateProfile(primaryProfile(build));

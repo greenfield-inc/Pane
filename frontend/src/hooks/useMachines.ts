@@ -37,6 +37,24 @@ const machineSwitches = createLatestSwitch(
   },
 );
 
+/** What a press of a machine row needs: which machine, and whether there is anything to switch. */
+export interface MachinePress {
+  id: string;
+  kind: MachineEntry['kind'];
+  action: MachineEntry['action'];
+  computerId: string | undefined;
+}
+
+/**
+ * Queues a press of a machine row (latest wins, D-6). The machine the window is on has nothing to
+ * switch, but its press still goes through the queue, so a switch to another machine still dialing
+ * stops and the older one never lands (review 1781 R2-SF-1).
+ */
+export function requestMachinePress(machine: MachinePress, job: () => Promise<MachineSelectOutcome>) {
+  const run = machine.action === 'none' ? async (): Promise<MachineSelectOutcome> => ({ ok: true }) : job;
+  return machineSwitches.request({ machineId: machine.id, computerId: machine.kind === 'local' ? undefined : machine.computerId, job: run });
+}
+
 /** An engage the person moved off (T-132): its switch still waiting behind another one never runs. */
 export function withdrawMachineSwitch(machineId: string): boolean {
   return machineSwitches.withdraw(press => press.machineId === machineId);
@@ -156,9 +174,9 @@ export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMach
   }, [fetchConfig, refresh, wrapConnect]);
 
   const select = useCallback(async (machine: MachineEntry, password?: string): Promise<MachineSelectOutcome> => {
-    if (machine.action === 'none') return { ok: true };
     if (machine.action === 'password' && password === undefined) return { ok: false, needsPassword: true };
-    const result = await machineSwitches.request({ machineId: machine.id, computerId: machine.kind === 'local' ? undefined : machine.computer?.id, job: () => switchTo(machine, password) });
+    const press = { id: machine.id, kind: machine.kind, action: machine.action, computerId: machine.computer?.id };
+    const result = await requestMachinePress(press, () => switchTo(machine, password));
     // A newer press replaced this one: it says nothing, and the newer one reports for both.
     return result.superseded ? { ok: true } : result.value;
   }, [switchTo]);
