@@ -1,10 +1,11 @@
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useState, useSyncExternalStore } from 'react';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 
 /**
  * Which agent-message cards the person opened or closed (T-133), by tab and M-n, so a card keeps
  * its state across re-renders, tab switches and reloads. Only the person's choices are kept: a card
- * nobody touched shows its default (own workers' messages collapsed, everyone else's open).
+ * nobody touched shows its default (own workers' messages collapsed, everyone else's open; any card
+ * collapses, T-139).
  * Browser storage is a convenience: when it is unavailable, choices last until the window reloads.
  */
 
@@ -60,10 +61,17 @@ export function resetAgentMessageOpenForTests(): void {
   choices = undefined;
 }
 
-/** A card's open state: the person's last choice for it, else `byDefault`; and the setter. */
+/**
+ * A card's open state: the person's last choice for it, else `byDefault`; and the setter. Without
+ * a tab id (a chat outside a panel) or an M-n (a To-dos line), the choice lasts while the card is shown.
+ */
 export function useAgentMessageOpen(panelId: string | undefined, ref: string | undefined, byDefault: boolean): [boolean, (open: boolean) => void] {
   const read = () => (panelId && ref ? current().get(keyOf(panelId, ref)) : undefined);
   const chosen = useSyncExternalStore(subscribe, read, read);
-  const set = useCallback((open: boolean) => { if (panelId && ref) setAgentMessageOpen(panelId, ref, open); }, [panelId, ref]);
-  return [chosen ?? byDefault, set];
+  const [local, setLocal] = useState<boolean>();
+  const set = useCallback((open: boolean) => {
+    if (panelId && ref) setAgentMessageOpen(panelId, ref, open);
+    else setLocal(open);
+  }, [panelId, ref]);
+  return [chosen ?? local ?? byDefault, set];
 }

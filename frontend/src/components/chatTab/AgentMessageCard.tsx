@@ -1,4 +1,4 @@
-import { useContext, type ReactNode } from 'react';
+import { useContext, useRef, type ReactNode } from 'react';
 import { Check, Clock, CornerUpLeft, ListChecks, ArrowUp, Zap, AlertCircle, ChevronDown, ChevronRight, MessageSquareReply } from 'lucide-react';
 import type { AgentMessageRecord } from '../../../../shared/types/agentMessages';
 import { messageStatus, ownWorkerExchange, senderInitials, senderOfName, threadReplies, threadRoot, type ChatAgentLine, type ChatSender, type MessageStatus } from '../../../../shared/agentMessagePresentation';
@@ -43,8 +43,8 @@ function ReplyPill({ reply }: { reply: AgentMessageRecord }) {
   return <StatusPill status={{ state: 'answered', replies: [] }} />;
 }
 
-/** One reply in a card's lower half. */
-function ReplySection({ reply, renderText }: { reply: AgentMessageRecord; renderText: (text: string) => ReactNode }) {
+/** One reply in a card's lower half; in a collapsed card, its header row and a short preview (T-139). */
+function ReplySection({ reply, renderText, collapsed, onExpand }: { reply: AgentMessageRecord; renderText: (text: string) => ReactNode; collapsed: boolean; onExpand: () => void }) {
   const { panelId } = useContext(AgentMessagesContext);
   const who = reply.sender.panelId !== null && reply.sender.panelId === panelId ? 'This agent' : senderOfName(reply.sender.name).name;
   const time = messageTime(reply.createdAt);
@@ -56,7 +56,7 @@ function ReplySection({ reply, renderText }: { reply: AgentMessageRecord; render
       <span className="chat-agent-spacer" />
       <ReplyPill reply={reply} />
     </div>
-    <div className="chat-agent-body">{renderText(reply.text)}</div>
+    {collapsed ? <Preview text={reply.text} label={`Show all of reply ${reply.ref}`} onExpand={onExpand} /> : <div className="chat-agent-body">{renderText(reply.text)}</div>}
   </div>;
 }
 
@@ -65,7 +65,17 @@ const POINTER = /^Read and follow \S+/u;
 const plainBody = (text: string) => <span className="whitespace-pre-wrap"><ReferencedText text={text} /></span>;
 
 /** The first words of a collapsed card's text, on one line. */
-const preview = (text: string) => text.replace(/\s+/gu, ' ').trim().slice(0, 240);
+const preview = (text: string, length = 240) => text.replace(/\s+/gu, ' ').trim().slice(0, length);
+
+/**
+ * A collapsed card's message or reply (T-139): its first words as plain text, clipped to two lines.
+ * Clicking it opens the card. It is a click shortcut, not a disclosure of its own: the header's
+ * toggle is the one control with `aria-expanded`, and the keyboard way in, so this stays out of
+ * the tab order and has a short name rather than the message text.
+ */
+function Preview({ text, label, onExpand }: { text: string; label: string; onExpand: () => void }) {
+  return <button type="button" className="chat-agent-preview-text" data-testid="agent-message-preview" tabIndex={-1} aria-label={label} onClick={onExpand}><span>{preview(text, 600)}</span></button>;
+}
 
 /** Failed sends this card's message retried (T-133): one note instead of a card each. */
 function Attempts({ attempts }: { attempts: readonly AgentMessageRecord[] }) {
@@ -77,16 +87,24 @@ function Attempts({ attempts }: { attempts: readonly AgentMessageRecord[] }) {
 /**
  * The card itself: header, body, then a footer (waiting) or the replies (answered). A message
  * between this Session's orchestrator and its own worker starts collapsed to one line (T-133):
- * the person opens it, and the card remembers.
+ * the person opens it, and the card remembers. Every other card starts open and collapses as a
+ * whole (T-139): its header rows stay (who, M-n, time, each reply's sender and Answered) with a
+ * two-line preview of the message and of each reply, so one toggle shrinks the whole exchange.
  */
-function Card({ anchorId, who, compactWho, meta, body, record, hint, copyText, renderText, outgoing = false }: {
-  anchorId: string; who: ReactNode; compactWho?: ReactNode; meta: ReactNode; body: string; record?: AgentMessageRecord; hint?: ReactNode; copyText: string;
+function Card({ anchorId, messageRef, who, compactWho, meta, body, record, hint, copyText, renderText, outgoing = false }: {
+  anchorId: string; messageRef?: string; who: ReactNode; compactWho?: ReactNode; meta: ReactNode; body: string; record?: AgentMessageRecord; hint?: ReactNode; copyText: string;
   renderText: (text: string) => ReactNode; outgoing?: boolean;
 }) {
   const { byRef, panelId, attempts } = useContext(AgentMessagesContext);
   const status = record ? messageStatus(record, byRef) : undefined;
   const collapsible = record !== undefined && ownWorkerExchange(record, panelId);
-  const [open, setOpen] = useAgentMessageOpen(panelId, record?.ref, !collapsible);
+  const ref = record?.ref ?? messageRef;
+  // Kept per tab and M-n. A card with no M-n (a To-dos line) keeps its choice only while it is
+  // shown: its anchor changes when the agent restarts, so storing it would only crowd out M-n choices.
+  const [open, setOpen] = useAgentMessageOpen(panelId, ref, !collapsible);
+  const toggle = useRef<HTMLButtonElement>(null);
+  // The clicked preview goes away as the card opens, so focus moves to the toggle, which stays.
+  const expand = () => { setOpen(true); toggle.current?.focus(); };
   const failed = record ? attempts.get(record.ref) : undefined;
   // Without a record (the PWA, the phone) the reply hint still shows: the card hides the line Pane added.
   const footHint = status ? status.state === 'waiting' && hint : hint;
@@ -106,14 +124,20 @@ function Card({ anchorId, who, compactWho, meta, body, record, hint, copyText, r
       </div>
     </div>;
   }
+  // An own worker's open card collapses back to one line; any other card to its preview.
+  const previewed = !collapsible && !open;
+  const label = `${open ? 'Collapse' : 'Expand'} message${ref ? ` ${ref}` : ''}`;
   return <div className="chat-agent-row" data-outgoing={outgoing}>
-    <div {...card}>
-      <div className="chat-agent-head">{who}<span className="chat-agent-spacer" />{meta}
-        {collapsible && <button type="button" className="chat-agent-toggle" aria-expanded={true} aria-label={`Collapse message ${record.ref}`} onClick={() => setOpen(false)}><ChevronDown aria-hidden="true" /></button>}
+    <div {...card} data-collapsed={previewed ? 'preview' : undefined}>
+      <div className="chat-agent-head">{who}<span className="chat-agent-spacer" />
+        {/* M-n, time and the chevron wrap together, so the chevron never sits on a line of its own. */}
+        <span className="chat-agent-head-end">{meta}
+          <button ref={toggle} type="button" className="chat-agent-toggle" aria-expanded={open} aria-label={label} title={label} onClick={() => setOpen(!open)}>{open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}</button>
+        </span>
       </div>
-      <div className="chat-agent-body">{POINTER.test(body) ? plainBody(body) : renderText(body)}</div>
+      {previewed ? <Preview text={body} label={`Show all of message${ref ? ` ${ref}` : ''}`} onExpand={expand} /> : <div className="chat-agent-body">{POINTER.test(body) ? plainBody(body) : renderText(body)}</div>}
       {((status && status.state !== 'answered') || footHint || failed) && <div className="chat-agent-foot">{status && status.state !== 'answered' && <StatusPill status={status} />}{footHint}{failed && <Attempts attempts={failed} />}</div>}
-      {status?.state === 'answered' && threadReplies(status.replies, byRef).map(reply => <ReplySection key={reply.ref} reply={reply} renderText={renderText} />)}
+      {status?.state === 'answered' && threadReplies(status.replies, byRef).map(reply => <ReplySection key={reply.ref} reply={reply} renderText={renderText} collapsed={previewed} onExpand={expand} />)}
     </div>
     {actions}
   </div>;
@@ -128,7 +152,7 @@ function IncomingCard({ line, anchorId, startedAt, text, renderText }: { line: E
   const { byRef } = useContext(AgentMessagesContext);
   const record = line.ref ? byRef.get(line.ref) : undefined;
   const hint = line.ref && <span className="chat-agent-hint"><CornerUpLeft aria-hidden="true" />reply with <code>runpane reply {line.ref}</code></span>;
-  return <Card anchorId={anchorId} body={line.body} record={record} hint={hint} copyText={text} renderText={renderText} who={<>
+  return <Card anchorId={anchorId} messageRef={line.ref} body={line.body} record={record} hint={hint} copyText={text} renderText={renderText} who={<>
     <Avatar sender={line.sender} />
     <span className="chat-agent-name">{line.sender.name}</span>
     {line.sender.kind && <span className="chat-agent-kind">{line.sender.kind}</span>}
@@ -179,8 +203,10 @@ function ReplyArrival({ line, anchorId, startedAt, text, renderText }: { line: E
         card.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' });
         card.focus({ preventScroll: true });
       };
-      // A collapsed card (an own worker's, T-133) opens first, then scrolls once it has its full height.
-      if (panelId && document.querySelector<HTMLElement>(selector)?.dataset.collapsed === 'true') {
+      // A collapsed card (an own worker's one line, T-133, or any card's preview, T-139) opens first, then scrolls once it has its full height.
+      // Without a tab id the card's choice is its own local state, which this can't reach: it scrolls to the card still collapsed,
+      // where the reply's preview shows.
+      if (panelId && document.querySelector<HTMLElement>(selector)?.dataset.collapsed) {
         setAgentMessageOpen(panelId, root, true);
         requestAnimationFrame(scroll);
       } else scroll();
@@ -190,7 +216,7 @@ function ReplyArrival({ line, anchorId, startedAt, text, renderText }: { line: E
     </div>;
   }
   // Its message isn't in this chat (sent before a Switch to chat, or paged out): the reply is its own card.
-  return <Card anchorId={anchorId} body={line.body} record={byRef.get(line.ref)} copyText={text} renderText={renderText} who={<>
+  return <Card anchorId={anchorId} messageRef={line.ref} body={line.body} record={byRef.get(line.ref)} copyText={text} renderText={renderText} who={<>
     <Avatar sender={line.sender} />
     <span className="chat-agent-name">{line.sender.name}</span>
     <span className="chat-agent-kind">replied to</span>

@@ -218,15 +218,15 @@ describe('own workers\' messages, retries and Pane\'s lines (T-133)', () => {
     expect(text(markup)).toMatch(/From T-104 worker Plan revision 3 is ready\. M-200/);
   });
 
-  it('keeps another Session\'s message open, with no collapse button', () => {
+  it('keeps another Session\'s message open, with a button that collapses it', () => {
     const route = '\n\nReply with runpane reply M-300 "…": it reaches the "Billing" Session orchestrator, who never sees your own chat.';
     const message = record(300, { sender: OTHER_ORCH, receiver: OWN_ORCH, text: 'Is the API frozen?' });
     const markup = render(view('orch', [message]), turn('t', `Is the API frozen?${route}`));
     expect(markup).not.toContain('data-collapsed');
-    expect(markup).not.toContain('aria-expanded');
+    expect(markup).toContain('aria-expanded="true"');
+    expect(markup).toContain('aria-label="Collapse message M-300"');
     expect(markup).toContain('chat-agent-body');
   });
-
   it('notes the failed sends a card retried, instead of a card each', () => {
     const failed = record(17, { sender: OTHER_ORCH, receiver: WORKER, state: 'undelivered', undeliveredReason: 'Terminal panel x is not initialized' });
     const retry = record(18, { sender: OTHER_ORCH, receiver: WORKER });
@@ -249,3 +249,48 @@ describe('own workers\' messages, retries and Pane\'s lines (T-133)', () => {
   });
 });
 
+describe('collapsing any agent message card (T-139)', () => {
+  afterEach(() => resetAgentMessageOpenForTests());
+  const PLANNER = party('planner', 'Tyler Sprint Planner');
+  const SELF = party('me', 'the "Daily" Session orchestrator');
+  const long = (label: string) => `${label}: ${'word '.repeat(200)}\n\n- a list item\n- another`;
+
+  it('collapses a sent card and its reply to their header rows and a short preview of each, and opens again', () => {
+    const sent = record(325, { sender: SELF, receiver: PLANNER, text: long('Good morning'), state: 'answered', replies: ['M-326'] });
+    const reply = record(326, { kind: 'reply', replyTo: 'M-325', sender: PLANNER, receiver: SELF, text: long('Sprint 3 briefing') });
+    const value = view('me', [sent, reply], new Map([['t1', [sent]]]));
+    const opened = render(value, turn('t1', 'Brief me.'));
+    expect(opened).toContain('aria-label="Collapse message M-325"');
+    expect(opened).toContain('<li');
+
+    setAgentMessageOpen('me', 'M-325', false);
+    const markup = render(value, turn('t1', 'Brief me.'));
+    expect(markup).toContain('data-collapsed="preview"');
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('aria-label="Expand message M-325"');
+    // The header rows stay: who it went to, the M-id, the reply's sender, its time and Answered.
+    expect(text(markup)).toMatch(/Sent to Tyler Sprint Planner M-325 .*Tyler Sprint Planner replied · .+ Answered/);
+    // Each half is a preview on one paragraph, not the rendered markdown.
+    expect(markup.match(/data-testid="agent-message-preview"/g)?.length).toBe(2);
+    expect(text(markup)).toContain('Good morning: word word');
+    expect(text(markup)).toContain('Sprint 3 briefing: word word');
+    expect(markup).not.toContain('<li');
+    expect(markup).not.toContain('chat-agent-body');
+  });
+
+  it('collapses an incoming message from outside the Session too', () => {
+    const route = '\n\nReply with runpane reply M-400 "…": it reaches Tyler Sprint Planner, who never sees your own chat.';
+    const message = record(400, { sender: PLANNER, receiver: SELF, text: 'Here is the plan.' });
+    setAgentMessageOpen('me', 'M-400', false);
+    const markup = render(view('me', [message]), turn('t', `Here is the plan.${route}`));
+    expect(markup).toContain('data-collapsed="preview"');
+    expect(text(markup)).toMatch(/Tyler Sprint Planner .*M-400 .+ Here is the plan\. Waiting for reply/);
+    expect(text(markup)).toContain('Here is the plan.');
+  });
+
+  it('offers the toggle on a card with no M-n too', () => {
+    const markup = render({ ...view('worker', []), available: false, byRef: new Map() }, turn('t', '[From Pane, To-dos] You are assigned T-105.'));
+    expect(markup).toContain('aria-expanded="true"');
+    expect(markup).toContain('aria-label="Collapse message"');
+  });
+});

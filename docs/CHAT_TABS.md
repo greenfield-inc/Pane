@@ -360,11 +360,21 @@ composer marks it in amber like a mode that never asks.
   across reloads. A jump up to a collapsed card opens it. The Session comes
   from the message's record (each end's Session and whether it was the
   orchestrator), never from the text. Messages from other Sessions, Autopilot,
-  To-dos and the person's relayed words stay open, and so does everything in
+  To-dos and the person's relayed words start open, and so does everything in
   a worker's own chat. A send that failed and was sent again with the same
   text to the same tab shows no card of its own: the retry's card notes
   *1 failed attempt (M-17), sent again*, with the reason on hover. A failed
   send nobody retried keeps its card.
+- **Collapsing any card** (T-139): every agent-message card has a chevron
+  (a button with `aria-expanded`) at the end of its header. Collapsed, the
+  card keeps its header rows (sender or *Sent to*, `M-n`, time, and each
+  reply's sender, time and *Answered*) with a two-line preview of the message
+  and of each reply; clicking a preview or the chevron opens it. The whole
+  card collapses at once rather than the message and reply separately: the
+  long part is usually the reply, and one control shrinks the exchange
+  without a chevron per reply. The choice is kept with the own-worker cards'
+  choices, per tab and `M-n`, and a jump up to the card opens it. A card with
+  no `M-n` (a To-dos line) keeps its choice only while it is shown.
 - **Pane's approval lines** (`answer: Q-4 → … (by you)`, `reply:`, `closed:`,
   `correction:`) that Pane typed into this tab show as one quiet *Pane* line
   with the text as typed, not the person's bubble. They count only when an
