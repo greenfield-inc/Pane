@@ -304,10 +304,13 @@ Enter pressed meanwhile sends it there once. If the switch fails, the text stays
 in the box with the reason; an offline machine refuses with its offline reason
 and switches nothing. A rest alone keeps a paused chat there paused until you
 type, press Enter or click, as on this computer. A teammate's machine,
-or one that isn't mirrored, keeps Enter (the cursor stops on its rows). Sessions
-whose agent runs in a terminal on this computer, Pane and project rows, and a
-window showing another machine keep Enter. With the setting off, the arrows
-only move the cursor.
+or one that isn't mirrored, keeps Enter (the cursor stops on its rows). The same
+holds whichever machine the window shows: after an engage moves the window to
+another machine, that machine's rows show from its own Sessions, and this
+computer's and your other machines' rows show read-only as above, until a rest,
+Enter, typing or a click engages one. Sessions whose agent runs in a terminal,
+and Pane and project rows, keep Enter. With the setting off, the arrows only
+move the cursor.
 
 While the cursor only passes over a chat, it draws the newest 30 messages, so a
 held arrow key never waits on a long chat; the rest of what it holds draws once

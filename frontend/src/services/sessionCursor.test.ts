@@ -191,12 +191,42 @@ describe('which rows the cursor shows at once (T-116)', () => {
     expect(cursor.rowShowsInstantly('local', { ...appConfig, arrowKeysOpenSessions: false })).toBe(false);
   });
 
-  it('a window showing another machine shows no row at once, not even this computer\'s', async () => {
+  it('in a window showing another machine, that machine\'s rows show from its own cache, and this computer\'s and the other mirrored ones from the mirror; a teammate keeps Enter (D-20)', async () => {
     const { cursor, appConfig } = await setup();
-    // SAFETY: the cursor reads only remoteDaemon and arrowKeysOpenSessions of the config.
-    const remote = { ...appConfig, remoteDaemon: { client: { mode: 'remote', activeProfileId: 'build', profiles: [{ id: 'build', label: 'build-box', baseUrl: 'https://build-box.example:8443', token: 'pairing-token', transport: 'http+sse' }] } } } as AppConfig;
-    expect(cursor.cursorFollowEnabled(remote)).toBe(false);
-    expect(cursor.rowShowsInstantly('local', remote)).toBe(false);
+    const remote = onBuild(appConfig);
+    expect(cursor.cursorFollowEnabled(remote)).toBe(true);
+    expect(cursor.windowMachineId(remote)).toBe('build');
+    const mirrored = (id: string) => id === 'local' || id === 'studio';
+    expect(cursor.rowShowsInstantly('build', remote, mirrored)).toBe(true);
+    expect(cursor.rowShowsInstantly('local', remote, mirrored)).toBe(true);
+    expect(cursor.rowShowsInstantly('studio', remote, mirrored)).toBe(true);
+    expect(cursor.rowShowsInstantly('teammate', remote, mirrored)).toBe(false);
+  });
+
+  it('after an engage moved the window to another machine, its rows show at once there and this computer\'s show read-only, with no switch until a rest (D-20)', async () => {
+    const { cursor, store, settle, appConfig } = await setup();
+    const { useConfigStore } = await import('../stores/configStore');
+    useConfigStore.setState({ config: onBuild(appConfig) });
+    const { target } = await mirrored();
+    const switchMachine = vi.fn(async () => ({ ok: true as const }));
+    const { useAllMachinesStore } = await import('../stores/allMachinesStore');
+    useAllMachinesStore.setState({ switchMachine, machines: [...useAllMachinesStore.getState().machines, { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null }] });
+
+    // The window's own machine: its cache and one peek of it, as this computer's rows are in a local window.
+    cursor.showSessionAtCursor('b', 'build');
+    expect(store.getState().cursorSessionId).toBe('b');
+    expect(target()).toBeUndefined();
+    expect(peek).toHaveBeenCalledWith({ sessionId: 'b' });
+
+    // This computer's row: read-only, from its own snapshots.
+    cursor.showSessionAtCursor('a', 'local');
+    expect(target()).toEqual({ machineId: 'local', sessionId: 'a' });
+    expect(store.getState().cursorSessionId).toBeUndefined();
+    vi.advanceTimersByTime(999);
+    expect(switchMachine).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    await vi.waitFor(() => expect(switchMachine).toHaveBeenCalledWith('local'));
+    expect(settle).not.toHaveBeenCalled();
   });
 
   it("peeks a Session the Sessions list has not loaded from this machine's All machines rows", async () => {
@@ -274,6 +304,12 @@ describe('a load never holds the cursor (D-6)', () => {
 });
 
 /** The owner's machine `build`, mirrored with Sessions `b` and `c` (the same ids as this computer's). */
+/** The config of a window showing the machine `build`. */
+function onBuild(appConfig: AppConfig): AppConfig {
+  // SAFETY: the cursor reads only remoteDaemon and arrowKeysOpenSessions of the config.
+  return { ...appConfig, remoteDaemon: { client: { mode: 'remote', activeProfileId: 'build', profiles: [{ id: 'build', label: 'build-box', baseUrl: 'https://build-box.example:8443', token: 'pairing-token', transport: 'http+sse' }] } } } as AppConfig;
+}
+
 async function mirrored() {
   const { useMachineMirrorStore } = await import('../stores/machineMirrorStore');
   useMachineMirrorStore.setState({ listings: { build: { state: { machineId: 'build', sync: 'live', lastSeenAt: '2026-11-26T12:00:00.000Z', sessionCount: 2 }, sessions: { b: 4, c: 9 } } } });

@@ -31,9 +31,8 @@ import { useNavigationStore } from '../../stores/navigationStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { commandOnMachine, openOnMachine, runOnMachine } from '../../utils/machineRowActions';
-import { sessionCursorAttributes, useRowShowsInstantly } from '../../services/sessionCursor';
+import { sessionCursorAttributes, useRowShowsInstantly, useWindowMachineId } from '../../services/sessionCursor';
 import { engageRemoteSession, useRemoteEngage } from '../../services/remoteEngage';
-import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { followMachineMirror } from '../../stores/machineMirrorStore';
 import { confirmMachineArchive } from '../archiveConfirm';
 import { ReadOnlyPill } from './ReadOnlyPill';
@@ -267,6 +266,7 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
   const dimmed = Boolean(session.paused || moveLabel);
   // The sidebar cursor shows this Session as it passes when it can show it here (T-116); other rows keep Enter.
   const instant = useRowShowsInstantly(machine.id) && !arriving;
+  const windowMachine = useWindowMachineId();
   return (
     <div className={cn('relative', row.offline && 'opacity-50')} data-row-key={row.key} {...reorder.drag} onKeyDown={reorder.onKeyDown}>
       <DropLine edge={reorder.indicator} />
@@ -289,7 +289,7 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
           onClick={() => {
             if (arriving) return;
             // Another of the owner's machines, shown from the mirror: engage it there, the view kept on screen (T-132).
-            if (instant && machine.id !== LOCAL_MACHINE_ID) engageRemoteSession({ machineId: machine.id, sessionId: session.id }, 'click');
+            if (instant && machine.id !== windowMachine) engageRemoteSession({ machineId: machine.id, sessionId: session.id }, 'click');
             else void openOnMachine(machine.id, { kind: 'session', id: session.id, name: session.name });
           }}
           aria-current={active ? 'page' : undefined}

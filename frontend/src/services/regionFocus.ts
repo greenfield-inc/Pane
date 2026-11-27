@@ -21,9 +21,9 @@ import {
   pendingCursorSession,
   settleSessionCursor,
   showSessionAtCursor,
+  windowMachineId,
 } from './sessionCursor';
 import { engageKey, engageRemoteSession, holdRemoteText, onEngageSwitch, useRemoteEngage } from './remoteEngage';
-import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 import {
   sidebarListKey,
   stepStop,
@@ -595,7 +595,7 @@ export function handleSidebarListKey(event: KeyboardEvent): void {
       // Session's box, which takes focus, and the Session engages there.
       const machineId = item.getAttribute(SESSION_CURSOR_MACHINE_ATTRIBUTE);
       const sessionId = item.getAttribute(SESSION_CURSOR_ATTRIBUTE);
-      if (event.key.length === 1 && cursorFollowEnabled() && sessionId && machineId && machineId !== LOCAL_MACHINE_ID) {
+      if (event.key.length === 1 && cursorFollowEnabled() && sessionId && machineId && machineId !== windowMachineId()) {
         event.preventDefault();
         const target = { machineId, sessionId };
         holdRemoteText(target, (useRemoteEngage.getState().held[engageKey(target)]?.text ?? '') + event.key);
