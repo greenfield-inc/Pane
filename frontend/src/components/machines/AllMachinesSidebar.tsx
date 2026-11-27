@@ -32,6 +32,8 @@ import { useSessionStore } from '../../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { commandOnMachine, openOnMachine, runOnMachine } from '../../utils/machineRowActions';
 import { sessionCursorAttributes, useRowShowsInstantly } from '../../services/sessionCursor';
+import { engageRemoteSession, useRemoteEngage } from '../../services/remoteEngage';
+import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { followMachineMirror } from '../../stores/machineMirrorStore';
 import { confirmMachineArchive } from '../archiveConfirm';
 import { ReadOnlyPill } from './ReadOnlyPill';
@@ -284,7 +286,12 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
           data-sidebar-item
           data-sidebar-key={`machine-session-${row.key}`}
           {...sessionCursorAttributes(machine.id, instant ? session.id : undefined)}
-          onClick={() => { if (!arriving) void openOnMachine(machine.id, { kind: 'session', id: session.id, name: session.name }); }}
+          onClick={() => {
+            if (arriving) return;
+            // Another of the owner's machines, shown from the mirror: engage it there, the view kept on screen (T-132).
+            if (instant && machine.id !== LOCAL_MACHINE_ID) engageRemoteSession({ machineId: machine.id, sessionId: session.id }, 'click');
+            else void openOnMachine(machine.id, { kind: 'session', id: session.id, name: session.name });
+          }}
           aria-current={active ? 'page' : undefined}
           aria-disabled={arriving || undefined}
           title={arriving ? `${moveLabel}: it opens once it has arrived` : undefined}
@@ -374,6 +381,8 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
   const activeView = useNavigationStore((state) => state.activeView);
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const selectedSessionId = useOrchestrationSessionStore((state) => state.selectedSessionId);
+  // While an engage switches, its row is the one shown, not this computer's until the switch lands (T-132).
+  const engaging = useRemoteEngage((state) => state.engaging);
   const layout = useAllMachinesStore((state) => state.layout);
   const toggleOpen = useAllMachinesStore((state) => state.toggleOpen);
   const arrangeSessions = useAllMachinesStore((state) => state.arrangeSessions);
@@ -452,7 +461,8 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
                 <SessionRow
                   key={row.key}
                   row={row}
-                  active={row.machine.id === activeMachineId && activeView === 'pane-chat' && row.session.id === selectedSessionId}
+                  active={engaging ? row.machine.id === engaging.machineId && row.session.id === engaging.sessionId
+                    : row.machine.id === activeMachineId && activeView === 'pane-chat' && row.session.id === selectedSessionId}
                   expanded={isOpen(`session:${row.key}`)}
                   onToggle={() => toggleOpen(`session:${row.key}`)}
                   onMenu={setMenu}

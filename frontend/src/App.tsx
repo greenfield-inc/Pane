@@ -8,6 +8,8 @@ import { ConnectionChecklist } from './components/ConnectionChecklist';
 import { useRemoteRuntimeState } from './hooks/useRemoteRuntimeState';
 import { useConnectionPresence } from './hooks/useConnectionPresence';
 import { RemoteWorkspace } from './components/RemoteWorkspace';
+import { EngageHold } from './components/RemoteSessionView';
+import { useRemoteEngage } from './services/remoteEngage';
 import { TailnetHttpsBanner } from './components/TailnetHttpsBanner';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { followHostAccess } from './stores/readOnlyHostStore';
@@ -1030,6 +1032,8 @@ function App() {
 
   // A row opened on a machine that stopped answering shows why in place of the Pane.
   const offlineMachineShown = useAllMachinesStore(state => state.offlineNotice !== null);
+  // An engage keeps another machine's Session on screen through its switch, taking text (T-132).
+  const engaging = useRemoteEngage(state => state.engaging !== undefined);
 
   return (
     <ContextMenuProvider>
@@ -1093,12 +1097,13 @@ function App() {
           />
         </div>
         {/* The checklist carries its own fix buttons, so it never dims. */}
-        <RemoteWorkspace dimmed={connectionPresence !== 'connected' && !shownConnectionCheck} covered={sidebarMaximized}>
+        <RemoteWorkspace dimmed={connectionPresence !== 'connected' && !shownConnectionCheck && !engaging} covered={sidebarMaximized}>
           {shownConnectionCheck
             ? <ConnectionChecklist check={shownConnectionCheck} onOpenSettings={openSettings} onUpdatePane={() => void updatePane()} />
             : offlineMachineShown
               ? <MachineOfflineView onMachineDetails={() => openSettings({ category: 'remote-access', setting: 'remote-machines' })} />
               : <SessionView />}
+          {!shownConnectionCheck && <EngageHold />}
           <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
         </RemoteWorkspace>
         </div>

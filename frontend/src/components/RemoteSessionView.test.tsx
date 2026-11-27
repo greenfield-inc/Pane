@@ -39,7 +39,9 @@ describe("another machine's Session under the cursor, read-only (T-116 PR 6)", (
     expect(html).toMatch(/role="tab" aria-selected="false" aria-disabled="true"[^>]*>Terminal</);
     expect(text(html)).toContain('ship the mirror');
     expect(html).toContain('placeholder="Type to continue on Build box"');
-    expect(html).toMatch(/<textarea[^>]*readonly=""/i);
+    // It takes text: typing into it engages the Session on Build box (PR 7).
+    expect(html).toMatch(/<textarea[^>]*aria-label="Message on Build box"/);
+    expect(html).not.toMatch(/<textarea[^>]*readonly=""/i);
     expect(html).not.toContain('Offline');
     expect(text(html)).not.toContain('Read only: you can watch this chat');
   });
@@ -63,5 +65,26 @@ describe("another machine's Session under the cursor, read-only (T-116 PR 6)", (
     const html = await render({ snapshot: { ...snapshot, chat: { ...chat, transcript: undefined, messageCount: 0 }, transcriptUnknown: true } });
     expect(text(html)).toContain('Messages load when this Session is opened on Build box.');
     expect(html).not.toContain('Type to continue');
+  });
+});
+
+describe("engaging another machine's Session (T-132)", () => {
+  async function box(props: { held?: { text: string; send: boolean }; failure?: string; engagingCause?: 'enter' | 'type' }) {
+    const { HeldComposerBox } = await import('./RemoteSessionView');
+    return renderToStaticMarkup(<HeldComposerBox target={{ machineId: 'build', sessionId: 's1' }} machineName="Build box" held={props.held} failure={props.failure} engagingCause={props.engagingCause} />);
+  }
+
+  it('keeps what was typed after a failed switch, unsent, beside the reason', async () => {
+    const html = await box({ held: { text: 'ship it', send: false }, failure: 'Build box stopped answering.' });
+    expect(html).toMatch(/<textarea[^>]*>ship it<\/textarea>/);
+    expect(html).not.toMatch(/readonly=""/i);
+    expect(html).toContain('role="alert"');
+    expect(text(html)).toContain('Build box stopped answering.');
+  });
+
+  it('says a pressed Enter sends there once it opens, and holds the text still meanwhile', async () => {
+    const html = await box({ held: { text: 'ship it', send: true }, engagingCause: 'enter' });
+    expect(html).toMatch(/<textarea[^>]*readonly=""/i);
+    expect(text(html)).toContain('Sends on Build box once it opens there.');
   });
 });

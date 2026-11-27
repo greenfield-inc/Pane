@@ -11,6 +11,7 @@ const mirrorSession = vi.fn();
 const machineRead = vi.fn();
 const machineRun = vi.fn();
 const followChat = vi.fn();
+const cancelSwitch = vi.fn(async () => ({ success: true, data: { cancelled: true } }));
 
 const records = ['a', 'b', 'c'].map(id => {
   // SAFETY: the cursor reads only these record fields.
@@ -34,9 +35,10 @@ async function setup(config: Partial<AppConfig> = {}) {
   vi.resetModules();
   vi.stubGlobal('window', { addEventListener: vi.fn(), electronAPI: {
     orchestrationSessions: { peek },
-    uiState: { getPaneLayout },
     machineMirror: { list: vi.fn(async () => []), session: mirrorSession, onChanged: vi.fn(() => () => undefined), followChat, onChatEvent: vi.fn(() => () => undefined) },
     machines: { read: machineRead, run: machineRun },
+    remoteDaemon: { cancelSwitch },
+    uiState: { getPaneLayout, saveNavigationMemory: vi.fn(async () => ({ success: true })) },
   } });
   const cursor = await import('./sessionCursor');
   const { useOrchestrationSessionStore } = await import('../stores/orchestrationSessionStore');
@@ -290,9 +292,12 @@ describe("another machine's Sessions under the cursor (T-116 PR 6)", () => {
     expect(cursor.rowShowsInstantly('build', { ...appConfig, arrowKeysOpenSessions: false })).toBe(false);
   });
 
-  it('shows the Session from the mirror by machine and id, reads nothing of this computer, and a 1 s rest does nothing more', async () => {
+  it('shows the Session from the mirror by machine and id, reads nothing of this computer, and a 1 s rest engages it once (PR 7, D-2)', async () => {
     const { cursor, store, settle } = await setup();
     const { target } = await mirrored();
+    const switchMachine = vi.fn(async () => ({ ok: true as const }));
+    const { useAllMachinesStore } = await import('../stores/allMachinesStore');
+    useAllMachinesStore.setState({ switchMachine });
     cursor.showSessionAtCursor('b');
     cursor.showSessionAtCursor('b', 'build');
 
@@ -300,10 +305,33 @@ describe("another machine's Sessions under the cursor (T-116 PR 6)", () => {
     // This computer's own `b` is not what the cursor shows any more.
     expect(store.getState().cursorSessionId).toBeUndefined();
     expect(mirrorSession).toHaveBeenCalledWith('build', 'b');
-    vi.advanceTimersByTime(5000);
+    vi.advanceTimersByTime(999);
+    expect(switchMachine).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    await vi.waitFor(() => expect(switchMachine).toHaveBeenCalledTimes(1));
+    expect(switchMachine).toHaveBeenCalledWith('build');
+    // Nothing of this computer settles, and nothing is run on the machine itself.
     expect(settle).not.toHaveBeenCalled();
     expect(machineRun).not.toHaveBeenCalled();
-    expect(target()).toEqual({ machineId: 'build', sessionId: 'b' });
+  });
+
+  it('starts no switch while the cursor keeps moving over another machine\'s Sessions, and an arrow press cancels one in flight (D-6)', async () => {
+    const { cursor } = await setup();
+    await mirrored();
+    const switchMachine = vi.fn(() => new Promise<{ ok: true }>(() => undefined));
+    const { useAllMachinesStore } = await import('../stores/allMachinesStore');
+    useAllMachinesStore.setState({ switchMachine });
+    for (let press = 0; press < 30; press += 1) {
+      cursor.showSessionAtCursor(press % 2 ? 'b' : 'c', 'build');
+      vi.advanceTimersByTime(33);
+    }
+    expect(switchMachine).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1000);
+    await vi.waitFor(() => expect(switchMachine).toHaveBeenCalledTimes(1));
+    cursor.showSessionAtCursor('c');
+    expect(cancelSwitch).toHaveBeenCalledWith('build');
+    vi.advanceTimersByTime(5000);
+    expect(switchMachine).toHaveBeenCalledTimes(1);
   });
 
   it('moving back to a row of this computer shows it there, and the remote one goes', async () => {

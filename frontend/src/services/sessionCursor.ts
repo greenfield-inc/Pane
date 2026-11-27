@@ -10,7 +10,9 @@
  *
  * This machine's Sessions follow the cursor (`rowShowsInstantly`), in its own sidebar and in
  * the All machines view, and so do the Sessions of the owner's mirrored machines in All machines
- * (T-116 PR 6): those show read-only and never settle by themselves. A teammate's machine,
+ * (T-116 PR 6): those show read-only, and a rest engages them (PR 7, `remoteEngage`): the window
+ * switches to that machine and opens the Session there. Any arrow press cancels that rest, or
+ * the switch it started (D-6). A teammate's machine,
  * worktree Pane and project rows keep Enter, and so does every row in a window showing another
  * machine. A Session whose agent runs in a terminal is shown only by Enter or a click, as before.
  */
@@ -23,6 +25,7 @@ import { usePanelStore } from '../stores/panelStore';
 import { useAllMachinesStore } from '../stores/allMachinesStore';
 import { useMachineMirrorStore } from '../stores/machineMirrorStore';
 import { clearRemoteSession, showRemoteSession } from '../stores/remoteSessionView';
+import { armRestEngage, cancelRemoteEngage } from './remoteEngage';
 import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { chatPausedMarkOf, panePausedMark } from '../../../shared/types/panels';
@@ -139,8 +142,8 @@ function isTerminalSession(sessionId: string): boolean {
 }
 
 /**
- * The sidebar cursor moved onto another machine's Session row (T-116 PR 6): show it, read-only,
- * and nothing more. Resting on it settles nothing in this PR; Enter or a click opens it there.
+ * The sidebar cursor moved onto another machine's Session row (T-116 PR 6): show it, read-only.
+ * Resting on it for a second engages it (PR 7, D-2): the window switches there and opens it.
  */
 function showRemoteSessionAtCursor(machineId: string, sessionId: string): void {
   pending = undefined;
@@ -150,16 +153,19 @@ function showRemoteSessionAtCursor(machineId: string, sessionId: string): void {
   // This computer's Session of the same id, if the cursor showed it, is not what it shows now.
   useOrchestrationSessionStore.getState().showAtCursor(undefined);
   showRemoteSession({ machineId, sessionId });
+  armRestEngage({ machineId, sessionId });
 }
 
 /**
  * The sidebar cursor moved onto a chat Session's row: show it now, and settle on it
  * after SETTLE_MS unless the cursor moves on first. Another machine's row shows its
- * Session and settles nothing.
+ * Session and engages it after the same rest.
  */
 export function showSessionAtCursor(sessionId: string, machineId: string = LOCAL_MACHINE_ID): void {
   listen();
   clearTimer();
+  // The cursor moved: a rest on another machine's Session, or the switch it started, is off (D-6).
+  cancelRemoteEngage();
   if (machineId !== LOCAL_MACHINE_ID) { showRemoteSessionAtCursor(machineId, sessionId); return; }
   clearRemoteSession();
   const sessions = useOrchestrationSessionStore.getState();
@@ -188,6 +194,7 @@ export function showSessionAtCursor(sessionId: string, machineId: string = LOCAL
 /** The cursor moved to a row that is not a chat Session: what it showed stays, and does not settle by itself. */
 export function pauseSessionCursor(): void {
   clearTimer();
+  cancelRemoteEngage();
 }
 
 /**

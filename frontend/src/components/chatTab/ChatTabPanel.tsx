@@ -44,7 +44,8 @@ import { chatAgentLabel } from '../../../../shared/chatAgentMenu';
 import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
 import { FindBar } from '../find/FindBar';
 import { useSurfaceFind } from '../find/surfaceFind';
-import { takeLaunchDraft } from '../../utils/launchOutline';
+import { takeLaunchDraft, type LaunchDraft } from '../../utils/launchOutline';
+import { acceptChatDraft, chatTabShown } from '../../utils/chatDraftHandover';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
@@ -197,9 +198,10 @@ export interface ChatTabPanelProps {
   working?: readonly WorkingAgent[];
   /**
    * Shown read-only from another machine (T-116 PR 6): nothing here acts on the chat. The message
-   * box reads `placeholder` and takes no text; with `note` instead, the note replaces it.
+   * box reads `placeholder` and takes no text; with `note` instead, the note replaces it; with
+   * `composer`, that box replaces it (PR 7: typing there engages the Session on its machine).
    */
-  watchOnly?: { placeholder: string } | { note: ReactNode };
+  watchOnly?: { placeholder: string } | { note: ReactNode } | { composer: ReactNode };
 }
 
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
@@ -471,9 +473,12 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const launchSend = useRef<{ text: string; until: number } | null>(null);
   /** Re-runs the launch send check: the handover can land after mount, once the box settles, and the send window closes. */
   const [launchTick, setLaunchTick] = useState(0);
+  const watching = watchOnly !== undefined;
   useLayoutEffect(() => {
+    // A chat shown read-only from another machine takes no draft: the live chat there does (T-132).
+    if (watching) return undefined;
     const input = () => document.querySelector<HTMLTextAreaElement>(`textarea[data-chat-composer="${CSS.escape(panelId)}"]`);
-    return takeLaunchDraft(panelId, input, draft => {
+    const take = (draft: LaunchDraft) => {
       viewer.setDraft(draft.text);
       runtime.thread.composer.setText(draft.text);
       if (draft.send) launchSend.current = { text: draft.text, until: Date.now() + LAUNCH_SEND_MS };
@@ -485,8 +490,17 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       if (!draft.focused) return;
       box.focus({ preventScroll: true });
       box.setSelectionRange(draft.selectionStart, draft.selectionEnd);
-    });
-  }, [panelId, runtime, viewer]);
+    };
+    // What was typed into this Session on another machine while the window switched here (T-132).
+    const stopAccepting = acceptChatDraft(panelId, take);
+    const stopLaunch = takeLaunchDraft(panelId, input, take);
+    return () => { stopAccepting(); stopLaunch(); };
+  }, [panelId, runtime, viewer, watching]);
+  // The live chat painted: an engage waiting on it lets the mirror's view go (T-132).
+  const painted = !watching && view !== undefined;
+  useLayoutEffect(() => {
+    if (painted) chatTabShown(panelId);
+  }, [painted, panelId]);
   useEffect(() => {
     const pending = launchSend.current;
     if (!pending) return;
@@ -666,7 +680,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           queued={view.queue.length} pr={pr} agents={agentsWorking} onOpenAgent={actions.onOpenWorker} working={working} sendNowSteers={view.sendNowSteers} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
           onStopTask={taskId => void act(() => client.stopTask(panelId, taskId))} onShowQueue={showQueue} />}
         {readOnly && !watchOnly && <p role="status" className="chat-notice">Read only: you can watch this chat, and its owner sends the messages.</p>}
-        {watchOnly && 'note' in watchOnly ? <div role="status" className="chat-notice" data-testid="chat-watch-note">{watchOnly.note}</div> : <ComposerPrimitive.Root className="needs-full-access chat-composer" data-pane-part="chat-composer">
+        {watchOnly && 'composer' in watchOnly ? watchOnly.composer : watchOnly && 'note' in watchOnly ? <div role="status" className="chat-notice" data-testid="chat-watch-note">{watchOnly.note}</div> : <ComposerPrimitive.Root className="needs-full-access chat-composer" data-pane-part="chat-composer">
           {composerMenu.menu && <ChatComposerMenu id={composerMenu.listId} menu={composerMenu.menu} active={composerMenu.active} onHover={composerMenu.hover} onPick={composerMenu.pick} />}
           <div className="flex flex-wrap gap-2 empty:hidden"><ComposerPrimitive.Attachments components={{ Attachment }} /></div>
           <div className="chat-input-box">

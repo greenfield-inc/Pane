@@ -22,6 +22,8 @@ import {
   settleSessionCursor,
   showSessionAtCursor,
 } from './sessionCursor';
+import { engageKey, engageRemoteSession, holdRemoteText, onEngageSwitch, useRemoteEngage } from './remoteEngage';
+import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 import {
   sidebarListKey,
   stepStop,
@@ -588,11 +590,37 @@ export function handleSidebarListKey(event: KeyboardEvent): void {
       else focusMainArea();
       return;
     }
-    default:
+    default: {
+      // Typing on another machine's Session row starts its message (T-132): the key goes into that
+      // Session's box, which takes focus, and the Session engages there.
+      const machineId = item.getAttribute(SESSION_CURSOR_MACHINE_ATTRIBUTE);
+      const sessionId = item.getAttribute(SESSION_CURSOR_ATTRIBUTE);
+      if (event.key.length === 1 && cursorFollowEnabled() && sessionId && machineId && machineId !== LOCAL_MACHINE_ID) {
+        event.preventDefault();
+        const target = { machineId, sessionId };
+        holdRemoteText(target, (useRemoteEngage.getState().held[engageKey(target)]?.text ?? '') + event.key);
+        engageRemoteSession(target, 'type');
+        return;
+      }
       // Typing on the row settles what the cursor shows (T-87); the key keeps its own meaning.
       if (event.key.length === 1 && pendingCursorSession()) settleSessionCursor();
+    }
   }
 }
+
+// A switch a 1 s rest started keeps the cursor in the list as Enter's does (D-6), and leaves it
+// there when it lands: the person was only looking (T-132).
+onEngageSwitch((cause) => {
+  if (cause !== 'rest') return;
+  const switching = machineSwitchInFlight();
+  if (!switching || !sidebarCursor?.isConnected || document.activeElement !== sidebarCursor) return;
+  holdCursorThroughSwitch({
+    switching,
+    cursor: () => sidebarCursor,
+    findByKey: key => document.querySelector<HTMLElement>(`[data-sidebar-key="${CSS.escape(key)}"]`),
+    onLanded: () => undefined,
+  });
+});
 
 // --- Enter goes to the chat (D-328) ---
 

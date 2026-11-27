@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { Monitor } from 'lucide-react';
 import ChatTabPanel from './chatTab/ChatTabPanel';
 import { LoadingStatus } from './ui/Skeleton';
@@ -8,6 +8,7 @@ import { switchMark } from '../../../shared/switchMarks';
 import { useAllMachinesStore } from '../stores/allMachinesStore';
 import { machineMirrorApi, useMachineMirrorStore } from '../stores/machineMirrorStore';
 import { heldRemoteChat, remoteChatClient, showFullRemoteChat, remoteSessionKey, useRemoteSessionView, type RemoteSessionEntry, type RemoteSessionTarget } from '../stores/remoteSessionView';
+import { engageKey, engageRemoteSession, holdRemoteText, useRemoteEngage, type EngageCause, type HeldText } from '../services/remoteEngage';
 import type { MachineMirrorListing, MachineMirrorSync } from '../../../shared/types/machineMirror';
 import type { MachineState } from '../../../shared/types/machineConnections';
 import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
@@ -25,7 +26,9 @@ function clockTime(iso: string | null | undefined): string | null {
 /**
  * Another machine's Session under the sidebar cursor (T-116 PR 6), read-only: its name, the machine
  * it is on, its tabs (shown, not usable) and its chat, from the desktop mirror or one read of its
- * host. Nothing here acts on that machine; Enter or a click on its row opens it there.
+ * host. Nothing here acts on that machine. Typing into its message box, Enter, or a click into it
+ * engages the Session (PR 7, T-132): the window switches to that machine, this view staying on
+ * screen meanwhile, and what was typed goes into the chat there once it shows.
  *
  * Marks: an "Offline · last seen" chip and a note in place of the message box when the machine is
  * offline; "Updating from …" while the mirror catches up; and, for a chat the host hasn't read since
@@ -116,7 +119,7 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
       client={client}
       connected={online}
       machine={{ id: machineId, name: machineName, os: null, slot: 0, letters: '', local: false }}
-      watchOnly={online ? { placeholder: `Type to continue on ${machineName}` } : { note: `${machineName} is offline. This is what it last sent.` }}
+      watchOnly={online ? { composer: <RemoteHeldComposer target={target} machineName={machineName} /> } : { note: `${machineName} is offline. This is what it last sent.` }}
     />;
   } else if (unknown) {
     body = <RemoteNote>Messages load when this Session is opened on {machineName}.</RemoteNote>;
@@ -132,7 +135,9 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="remote-session-view" data-machine-id={machineId} data-session-id={sessionId} data-sync={sync}
-      data-messages={shown} data-filled={readAt > 0 || undefined}>
+      data-messages={shown} data-filled={readAt > 0 || undefined}
+      // A click into the chat engages it there (T-132); an offline machine refuses with its reason.
+      onMouseDown={event => { if (event.button === 0 && online) engageRemoteSession(target, 'click'); }}>
       <div className="flex min-h-11 flex-shrink-0 items-center gap-2 border-b border-border-primary px-4 py-1.5">
         <h1 className="min-w-0 truncate text-sm font-semibold text-text-primary">{name}</h1>
         <span className="inline-flex flex-shrink-0 items-center gap-1 rounded bg-surface-secondary px-1.5 py-0.5 text-[11px] text-text-secondary" data-testid="remote-session-machine">
@@ -161,6 +166,87 @@ export function RemoteSessionPanel({ target, entry, listing, machine, row }: {
   );
 }
 
+/**
+ * The message box of another machine's Session (T-132). It takes text at once: the first key
+ * engages the Session, and the text is held here, still editable, until the chat there takes it.
+ * Enter sends it there once the switch lands. A failed switch keeps the text with the reason.
+ */
+function RemoteHeldComposer({ target, machineName }: { target: RemoteSessionTarget; machineName: string }) {
+  const key = engageKey(target);
+  const held = useRemoteEngage(state => state.held[key]);
+  const failure = useRemoteEngage(state => (state.failure && engageKey(state.failure) === key ? state.failure.message : undefined));
+  const engagingCause = useRemoteEngage(state => (state.engaging && engageKey(state.engaging) === key ? state.engaging.cause : undefined));
+  return <HeldComposerBox target={target} machineName={machineName} held={held} failure={failure} engagingCause={engagingCause} />;
+}
+
+/** What `RemoteHeldComposer` draws, from what the engage store holds for the Session. */
+export function HeldComposerBox({ target, machineName, held, failure, engagingCause }: {
+  target: RemoteSessionTarget;
+  machineName: string;
+  held: HeldText | undefined;
+  failure: string | undefined;
+  engagingCause: EngageCause | undefined;
+}) {
+  const key = engageKey(target);
+  const box = useRef<HTMLTextAreaElement>(null);
+  // Typed on the sidebar row, or into this box before the hold over the main area drew it: the
+  // newest box takes focus, the caret at the end.
+  useLayoutEffect(() => {
+    const input = box.current;
+    if (engagingCause !== 'type' || !input || document.activeElement === input) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLTextAreaElement && !active.hasAttribute('data-remote-composer')) return;
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(input.value.length, input.value.length);
+  }, [engagingCause]);
+  const text = held?.text ?? '';
+  return (
+    <div className="chat-composer" data-pane-part="chat-composer">
+      {failure && <p role="alert" className="chat-notice" data-testid="remote-engage-error">{failure}</p>}
+      <div className="chat-input-box">
+        <textarea
+          ref={box}
+          data-remote-composer={key}
+          className="chat-input"
+          rows={1}
+          value={text}
+          readOnly={held?.send === true}
+          aria-label={`Message on ${machineName}`}
+          placeholder={`Type to continue on ${machineName}`}
+          onChange={event => {
+            holdRemoteText(target, event.target.value);
+            if (event.target.value) engageRemoteSession(target, 'type');
+          }}
+          onKeyDown={event => {
+            if (event.nativeEvent.isComposing) return;
+            if (event.key === 'Enter' && !event.shiftKey && !event.altKey) {
+              event.preventDefault();
+              engageRemoteSession(target, 'enter', { send: true });
+            }
+          }}
+        />
+      </div>
+      {held?.send && engagingCause && <p role="status" className="chat-notice" data-testid="remote-engage-sending">Sends on {machineName} once it opens there.</p>}
+    </div>
+  );
+}
+
 function RemoteNote({ children, role = 'status' }: { children: React.ReactNode; role?: 'status' | 'alert' }) {
   return <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-center"><p role={role} className="max-w-md text-sm text-text-secondary">{children}</p></div>;
+}
+
+/**
+ * While a switch to another machine's Session runs (an engage, T-132), its mirror view stays on
+ * screen over the main area, still taking text, so nothing flashes back to this computer or blank;
+ * the live view underneath takes over once its chat paints there.
+ */
+export function EngageHold() {
+  const engaging = useRemoteEngage(state => state.engaging);
+  const target = useMemo(() => (engaging ? { machineId: engaging.machineId, sessionId: engaging.sessionId } : undefined), [engaging?.machineId, engaging?.sessionId]);
+  if (!target) return null;
+  return (
+    <div className="absolute inset-0 z-30 flex flex-col bg-bg-primary" data-testid="engage-hold" data-machine-id={target.machineId} data-session-id={target.sessionId}>
+      <RemoteSessionTileBody target={target} />
+    </div>
+  );
 }
