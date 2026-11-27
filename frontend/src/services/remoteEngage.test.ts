@@ -130,6 +130,35 @@ describe('a 1 s rest on another machine\'s Session engages it (T-132, D-2)', () 
   });
 });
 
+describe('typing at once after an Enter engage (#1781, build 11)', () => {
+  it.each([300, 450, 600])('keys at 30 ms during a %i ms switch become a typed engage, and the composer there gets the full text in order, once, unsent', async switchMs => {
+    const switchMachine = vi.fn(() => new Promise<MachineSelectOutcome>(done => { setTimeout(() => done({ ok: true }), switchMs); }));
+    const { engage, handover, taken, state } = await setup(switchMachine);
+    const text = 'engage-enter-7';
+
+    // Enter on the row clicks it: the engage starts with nothing typed, and sends nothing.
+    engage.engageRemoteSession(target, 'click');
+    expect(state().engaging).toMatchObject({ ...target, cause: 'click' });
+    // Each key lands on the row (the sidebar's typing path) while the switch runs.
+    for (const key of text) {
+      await vi.advanceTimersByTimeAsync(30);
+      engage.holdRemoteText(target, (state().held[engage.engageKey(target)]?.text ?? '') + key);
+      engage.engageRemoteSession(target, 'type');
+      // The held box takes focus as soon as typing starts, as it does for a typed engage, so the
+      // keys that follow go into it, not wherever the switch's restore puts focus.
+      if (state().engaging) expect(state().engaging?.cause).toBe('type');
+    }
+    await vi.advanceTimersByTimeAsync(Math.max(0, switchMs - 30 * text.length) + 1);
+    await vi.waitFor(() => expect(state().engaging?.switched).toBe(true));
+    handover.chatTabShown('panel-b');
+    handover.chatTabShown('panel-b');
+
+    expect(switchMachine).toHaveBeenCalledTimes(1);
+    expect(taken).toEqual([expect.objectContaining({ text, focused: true, send: false })]);
+    expect(state().held[engage.engageKey(target)]).toBeUndefined();
+  });
+});
+
 describe('typing, Enter or a click engages, and what was typed arrives once (T-132)', () => {
   it('Enter or a click lands so a paused chat resumes, as Enter does today', async () => {
     const { engage, landOn } = await setup(async () => ({ ok: true }));

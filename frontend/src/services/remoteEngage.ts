@@ -330,7 +330,14 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
     useRemoteEngage.setState({ held: { ...state.held, [key]: { text: state.held[key].text, send: true, sendBy: Date.now() + ENTER_WAITS_MS } } });
     armSendExpiry(target);
   }
-  if (sameTarget(state.engaging, target)) return;
+  if (sameTarget(state.engaging, target)) {
+    // Typing into a Session an Enter, click or rest already engages (keys on its row right after
+    // the Enter) makes it a typed engage: the held box takes focus and the keys that follow, so
+    // none goes wherever the switch's restore puts focus (#1781, build 11).
+    const engaging = useRemoteEngage.getState().engaging;
+    if (cause === 'type' && engaging && engaging.cause !== 'type') useRemoteEngage.setState({ engaging: { ...engaging, cause: 'type' } });
+    return;
+  }
   const machine = machineState(target.machineId);
   if (!machine || machine.status !== 'online' || isMachineDimmed(machine)) {
     // Nothing to switch to. A rest says nothing: the view already marks the machine offline.
