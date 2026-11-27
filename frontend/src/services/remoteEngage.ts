@@ -262,6 +262,10 @@ function land(): void {
   if (!engaging) return;
   const key = engageKey(engaging);
   const text = held[key];
+  const rest = { ...held };
+  delete rest[key];
+  // Ended first, so focus moving into the chat there is not taken back to the held box.
+  useRemoteEngage.setState({ engaging: undefined, held: rest });
   if (text && engaging.panelId) {
     handOverChatDraft(engaging.panelId, {
       text: text.text,
@@ -271,9 +275,6 @@ function land(): void {
       send: text.send && !!text.text.trim(),
     });
   }
-  const rest = { ...held };
-  delete rest[key];
-  useRemoteEngage.setState({ engaging: undefined, held: rest });
   switchMark('engage:end', { machineId: engaging.machineId, sessionId: engaging.sessionId, status: 'landed' });
 }
 
