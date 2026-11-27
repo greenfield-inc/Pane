@@ -479,6 +479,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     if (watching) return undefined;
     const input = () => document.querySelector<HTMLTextAreaElement>(`textarea[data-chat-composer="${CSS.escape(panelId)}"]`);
     const take = (draft: LaunchDraft) => {
+      switchMark('chat:draft', { panelId, status: draft.send ? 'send' : 'text' });
       viewer.setDraft(draft.text);
       runtime.thread.composer.setText(draft.text);
       if (draft.send) launchSend.current = { text: draft.text, until: Date.now() + (draft.sendWithinMs ?? LAUNCH_SEND_MS) };
@@ -516,6 +517,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     if (!pending) return;
     const edited = runtime.thread.composer.getState().text !== pending.text;
     if (edited || Date.now() > pending.until) {
+      switchMark('chat:draft-send', { panelId, status: edited ? 'edited' : 'expired' });
       launchSend.current = null;
       // The Enter pressed before the chat could send is not lost silently: the text stays, with why (T-132).
       if (!edited) viewer.setError('Not sent: the chat could not take your message in time (its connection may have dropped). It is still here; press Enter to send it.');
@@ -527,6 +529,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       return () => clearTimeout(timer);
     }
     launchSend.current = null;
+    switchMark('chat:draft-send', { panelId, status: 'sent' });
     void runtime.thread.composer.send();
   }, [runtime, sendDisabled, launchTick, viewer]);
   // Every refusal is shown (assistant-ui's own paste and picker swallow them), and a file
