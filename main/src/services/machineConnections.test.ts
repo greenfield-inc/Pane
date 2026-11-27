@@ -351,34 +351,69 @@ describe('MachineConnections: which saved computers are yours (D-500)', () => {
     machines.start();
     started.push(machines);
     const mine = (id: string) => machines.machineState(id)?.mine === true;
-    const connect = (id: string) => clients.get(id)?.onConnectionStateChange?.('connected');
+    /** Connects over the given route (the computer's first by default), as the client reports it. */
+    const connect = (id: string, routeId?: string) => {
+      const route = routeId ?? config.remoteDaemon?.client.computers.find(computer => computer.id === id)?.routes[0]?.id;
+      clients.get(id)?.onConnectionStateChange?.('connected', null, route ? { routeId: route } : undefined);
+    };
     const drop = (id: string) => clients.get(id)?.onConnectionStateChange?.('reconnecting');
     return { machines, mine, connect, drop, checks, change, saved: (id: string) => config.remoteDaemon?.client.computers.find(computer => computer.id === id), logins };
   }
 
-  it('marks a saved computer yours when its Tailscale owner is this computer\'s login, with no step from the person', async () => {
-    const { mine, saved } = own([{ id: 'studio', label: 'studio', routes: [tailscaleRoute('studio')] }], { studio: true });
+  it('marks a saved computer yours once it connects over its Tailscale route and Tailscale names this computer\'s login as its owner', async () => {
+    const { mine, saved, connect, checks } = own([{ id: 'studio', label: 'studio', routes: [tailscaleRoute('studio')] }], { studio: true });
+    await new Promise(resolve => setImmediate(resolve));
+    // Opened, not connected: nothing has proved which machine answers yet.
+    expect(checks).toEqual([]);
+
+    connect('studio');
     await vi.waitFor(() => expect(mine('studio')).toBe(true));
     expect(saved('studio')?.mine).toBe('tailscale');
   });
 
-  it('never marks one owned by another login, or one with no Tailscale identity here (relay only)', async () => {
-    const { mine, checks, saved } = own([
+  it('never marks one owned by another login, or one with no Tailscale route (relay only)', async () => {
+    const { mine, connect, checks, saved } = own([
       { id: 'teammate', label: 'teammate', mine: 'tailscale', routes: [tailscaleRoute('teammate')] },
-      { id: 'linked', label: 'linked', routes: [relayRoute('linked')] },
+      { id: 'linked', label: 'linked', mine: 'tailscale', routes: [relayRoute('linked')] },
     ], { teammate: false });
-    await vi.waitFor(() => expect(checks).toEqual(['teammate']));
+    connect('teammate');
+    connect('linked');
     await vi.waitFor(() => expect(saved('teammate')?.mine).toBeUndefined());
+    await vi.waitFor(() => expect(saved('linked')?.mine).toBeUndefined());
+    expect(checks).toEqual(['teammate']);
     expect(mine('teammate')).toBe(false);
     expect(mine('linked')).toBe(false);
   });
 
-  it('checks again on each connect, and keeps the mark when Tailscale here can\'t say', async () => {
-    const { mine, connect, drop, checks, logins } = own([{ id: 'studio', label: 'studio', routes: [tailscaleRoute('studio')] }], { studio: true });
+  it('never trusts a Tailscale name the host reported about itself: a teammate\'s host claiming yours isn\'t marked (review S-6)', async () => {
+    // A teammate's host, linked over the relay, reported one of your machines' Tailscale names as its own.
+    const claimed = { ...tailscaleRoute('studio'), id: 'tailscale:https://studio.tail1.ts.net:4800#claimed' };
+    const { mine, connect, checks, saved } = own([{ id: 'mallory', label: 'mallory', routes: [relayRoute('mallory'), claimed] }], { studio: true });
+
+    connect('mallory', relayRoute('mallory').id);
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(checks).toEqual([]);
+    expect(saved('mallory')?.mine).toBeUndefined();
+    expect(mine('mallory')).toBe(false);
+  });
+
+  it('checks again on each connect over Tailscale, keeps the mark when Tailscale can\'t say or the connection is on another route', async () => {
+    const { mine, connect, drop, checks, logins } = own([{ id: 'studio', label: 'studio', routes: [tailscaleRoute('studio'), relayRoute('studio')] }], { studio: true });
+    connect('studio');
     await vi.waitFor(() => expect(mine('studio')).toBe(true));
+
     logins.studio = undefined;
+    drop('studio');
     connect('studio');
     await vi.waitFor(() => expect(checks).toHaveLength(2));
+    expect(mine('studio')).toBe(true);
+
+    // Over the relay, the peer's Tailscale identity is unknown: the mark proved on Tailscale stays.
+    drop('studio');
+    connect('studio', relayRoute('studio').id);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(checks).toHaveLength(2);
     expect(mine('studio')).toBe(true);
 
     logins.studio = false;
@@ -388,11 +423,22 @@ describe('MachineConnections: which saved computers are yours (D-500)', () => {
     expect(checks).toHaveLength(3);
   });
 
+  it('checks when a live connection moves onto a Tailscale route', async () => {
+    const { mine, connect } = own([{ id: 'studio', label: 'studio', routes: [relayRoute('studio'), tailscaleRoute('studio')] }], { studio: true });
+    connect('studio');
+    await new Promise(resolve => setImmediate(resolve));
+    expect(mine('studio')).toBe(false);
+
+    connect('studio', tailscaleRoute('studio').id);
+    await vi.waitFor(() => expect(mine('studio')).toBe(true));
+  });
+
   it('follows "This is my computer" over the Tailscale check, both ways', async () => {
-    const { mine, change } = own([
+    const { mine, change, connect } = own([
       { id: 'studio', label: 'studio', routes: [tailscaleRoute('studio')] },
       { id: 'linked', label: 'linked', routes: [relayRoute('linked')] },
     ], { studio: true });
+    connect('studio');
     await vi.waitFor(() => expect(mine('studio')).toBe(true));
 
     change('linked', computer => ({ ...computer, mineOverride: true }));

@@ -497,6 +497,9 @@ describe('MachineMirror', () => {
       const answer = result.data as { data: SessionSnapshotsResult };
       for (const snapshot of answer.data.snapshots) {
         Object.assign(snapshot.session, { launchCommand: 'claude --api-key sk-live-123' });
+        // Fields outside the snapshot's and the chat view's shape (review S-5).
+        Object.assign(snapshot, { extraTopLevel: 'sk-live-123' });
+        Object.assign(snapshot.chat, { extraChat: 'sk-live-123' });
         snapshot.tabs.push({ id: 'term', sessionId: 'pane-a', type: 'terminal', title: 'T', state: { isActive: false, customState: { screenText: 'sk-live-123', cwd: '/r' } }, metadata: { createdAt: '', lastActiveAt: '', position: 1 } });
         snapshot.tabs.push({ id: 'file', sessionId: 'pane-a', type: 'explorer', title: 'f', state: { isActive: false, customState: { content: 'sk-live-123' } }, metadata: { createdAt: '', lastActiveAt: '', position: 2 } });
         snapshot.chat.transcript?.messages.push({ id: 'img', role: 'user', parts: [{ type: 'content', content: { type: 'image', data: big } }] });
@@ -513,6 +516,7 @@ describe('MachineMirror', () => {
     expect(saved).not.toContain('sk-live-123');
     expect(saved).not.toContain(big);
     expect((await mirror.session('mac', 'a'))?.tabs.map(tab => tab.id)).toEqual(['chat-a', 'term']);
+    expect(await mirror.session('mac', 'a')).not.toHaveProperty('extraTopLevel');
   });
 
   it('over its cap, leaves out the Sessions whose snapshot changed longest ago, not whose record did', async () => {
@@ -892,5 +896,60 @@ describe('MachineMirror', () => {
 
     expect(reads).toEqual(['mac']);
     expect(mirror.state('mac')).toBeUndefined();
+  });
+
+  it('reads a Session whole again when its held file is lost, instead of storing the delta as the whole chat (review SF-4, Q4)', async () => {
+    const mac = fakeHost('mac');
+    mac.add('a', 30);
+    const link = fakeMachines([mac]);
+    const before = mirrorOf(link.machines);
+    await before.start();
+    link.online('mac');
+    await vi.advanceTimersByTimeAsync(0);
+    await before.stop();
+
+    // A fresh start holds the index but not the Session; then its file goes missing.
+    const mirror = mirrorOf(link.machines);
+    await mirror.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await settle(mac);
+    rmSync(path.join(directory, 'mac', 'a.json'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    mac.say('a');
+    link.deliver(mac);
+    await vi.advanceTimersByTimeAsync(250);
+    // The failed file read is real disk work; then the whole read follows.
+    await vi.waitFor(async () => expect((await mirror.session('mac', 'a'))?.chat.transcript?.messages).toHaveLength(30));
+    warn.mockRestore();
+
+    const transcript = (await mirror.session('mac', 'a'))?.chat.transcript;
+    expect(link.reads.at(-1)?.request).not.toHaveProperty('since');
+    expect(transcript?.messages.at(-1)?.id).toBe('m30');
+    expect(transcript?.start).toBe(1);
+  });
+
+  it('drops at start an index entry whose file is missing, and reads that Session whole on connect', async () => {
+    const mac = fakeHost('mac');
+    mac.add('a', 5);
+    mac.add('b', 5);
+    const link = fakeMachines([mac]);
+    const before = mirrorOf(link.machines);
+    await before.start();
+    link.online('mac');
+    await vi.advanceTimersByTimeAsync(0);
+    await before.stop();
+    link.offline('mac');
+    rmSync(path.join(directory, 'mac', 'a.json'));
+
+    const mirror = mirrorOf(link.machines);
+    await mirror.start();
+    expect(ids(mirror, 'mac')).toEqual(['b']);
+
+    link.online('mac');
+    await vi.advanceTimersByTimeAsync(0);
+    // `b`'s held copy is read from its file first.
+    await vi.waitFor(() => expect(ids(mirror, 'mac')).toEqual(['a', 'b']));
+    expect((await mirror.session('mac', 'a'))?.chat.transcript?.messages).toHaveLength(5);
   });
 });

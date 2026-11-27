@@ -2,7 +2,7 @@ import type { WebSocket } from 'ws';
 import { MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL, MACHINE_HEALTH_CLEANUP_CHANNEL, MACHINE_HEALTH_IGNORE_LEAK_CHANNEL, MACHINE_HEALTH_PAUSE_IDLE_CHANNEL, MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_APP_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL } from '../../../shared/types/machineHealth';
 import os from 'os';
 import { RemotePaneClient, type RemoteRouteCandidate } from '../daemon/client/remotePaneClient';
-import { computerTailnetName, isOwnComputer, isWatchedComputer, primaryProfile, routeProfile, routesReachableHere, type ComputerRoutesReport, type RemoteComputer } from '../../../shared/types/remoteComputers';
+import { isOwnComputer, isWatchedComputer, primaryProfile, routeProfile, routesReachableHere, type ComputerRoutesReport, type RemoteComputer } from '../../../shared/types/remoteComputers';
 import type { ConfigManager } from './configManager';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { READ_ONLY_ACCESS_CODE } from '../../../shared/types/accessLevel';
@@ -46,7 +46,10 @@ export interface MachineConnectionsDeps {
     prepare(route: RemoteRouteCandidate): Promise<RemotePaneConnectionProfile>;
     saveReport(computerId: string, routeId: string | undefined, report: ComputerRoutesReport): Promise<void>;
   };
-  /** Marks a saved computer as the person's own when its Tailscale owner is this computer's login (D-500), on open and on each connect. */
+  /**
+   * Marks a saved computer as the person's own when its Tailscale owner is this computer's login (D-500).
+   * Checked on each connect over a Tailscale route, where Tailscale itself names the peer.
+   */
   ownership?: {
     /** Whether the named Tailscale machine's owner is this computer's login; undefined when Tailscale here can't say. */
     check(tailnet: { name: string; domain: string }): Promise<boolean | undefined>;
@@ -323,10 +326,12 @@ export class MachineConnections {
         onConnectionStateChange: (status, _error, metadata) => {
           if (!isCurrent()) return;
           if (metadata?.hostRoutes) void this.deps.routes?.saveReport(id, metadata.routeId, metadata.hostRoutes);
-          if (metadata?.routeId && machine.state.routeId !== metadata.routeId) { machine.state.routeId = metadata.routeId; this.emitMachines(); }
-          const arrived = status === 'connected' && machine.state.status !== 'online';
+          const moved = metadata?.routeId !== undefined && machine.state.routeId !== metadata.routeId;
+          if (metadata?.routeId && moved) { machine.state.routeId = metadata.routeId; this.emitMachines(); }
+          const arrived = status === 'connected' && (machine.state.status !== 'online' || moved);
           this.updateStatus(machine, status, metadata?.hostMachineId, metadata?.hostWorkspaceEntries);
-          if (arrived) void this.checkOwnership(id);
+          // A new connection, or one moved to another route: the route it is on decides what it proves.
+          if (arrived) void this.checkOwnership(id, machine.state.routeId);
           if (status === 'connected') clearRetry(machine);
           if (status === 'error' && !machine.retryTimer) {
             machine.retryTimer = setTimeout(() => {
@@ -339,24 +344,30 @@ export class MachineConnections {
       }),
     };
     this.machines.set(id, machine);
-    void this.checkOwnership(id);
+    void this.checkOwnership(id, undefined);
     void machine.client.connect().catch(() => undefined);
   }
 
   /**
-   * Checks again whether a saved computer's Tailscale owner is this computer's login, and saves the
-   * mark when it changed. A computer with no Tailscale name here has no mark. When Tailscale here
-   * can't say, the mark is left as it is.
+   * Checks again whether a saved computer is the person's own, and saves the mark when it changed
+   * (D-500). Only a connection over one of its Tailscale routes proves which machine answers: that
+   * route's name is looked up in this computer's Tailscale, which connected to that very peer. A
+   * Tailscale name the host reported about itself is never trusted on its own (review S-6), so over
+   * any other route, or before connecting, the mark stays as it is. A computer with no Tailscale
+   * route has no mark. When Tailscale here can't say, the mark is left as it is.
    */
-  private async checkOwnership(computerId: string): Promise<void> {
+  private async checkOwnership(computerId: string, connectedRouteId: string | undefined): Promise<void> {
     const ownership = this.deps.ownership;
     if (!ownership) return;
     const saved = () => this.deps.configManager.getConfig().remoteDaemon?.client.computers.find(computer => computer.id === computerId);
     const computer = saved();
     if (!computer) return;
-    const tailnet = computerTailnetName(computer);
+    const via = computer.routes.find(route => route.id === connectedRouteId);
+    const hasTailscale = computer.routes.some(route => route.kind === 'tailscale');
     try {
-      const matches = tailnet ? await ownership.check({ name: tailnet.machine, domain: tailnet.domain }) : false;
+      let matches: boolean | undefined;
+      if (!hasTailscale) matches = false;
+      else if (via?.kind === 'tailscale' && via.tailnetMachine && via.tailnetDomain) matches = await ownership.check({ name: via.tailnetMachine, domain: via.tailnetDomain });
       const now = saved();
       if (matches === undefined || !now || matches === (now.mine === 'tailscale')) return;
       await ownership.save(computerId, matches);

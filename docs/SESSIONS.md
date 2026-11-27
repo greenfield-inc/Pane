@@ -1096,9 +1096,12 @@ snapshot revision) are left out first.
 
 Only the person's own machines are mirrored (D-500). A saved computer is
 theirs when its Tailscale owner, as this computer's Tailscale reports it, is
-this computer's own Tailscale login. That is checked when the computer is
-opened and on each connect and saved on it as `mine: 'tailscale'`; when
-Tailscale here can't say, the last result is kept. A machine with no
+this computer's own Tailscale login. That is checked each time a connection
+starts on, or moves to, one of the computer's Tailscale routes, where
+Tailscale itself names the peer, and saved on it as `mine: 'tailscale'`. A
+Tailscale name a host reported about itself is never trusted on its own, so
+over any other route the mark stays as it is; when Tailscale here can't say,
+the last result is kept. A machine with no
 Tailscale name here (relay only, say) or owned by another login is not
 mirrored. **This is my computer** in Settings › Remote Access › Computers
 (`mineOverride`) wins over the check both ways: on mirrors the machine, off
@@ -1113,6 +1116,11 @@ Some machines are never copied, and their folder is removed:
   its next connection);
 - a machine that is forgotten;
 - a machine not seen for 30 days.
+
+A Session whose file is lost or unreadable is never rebuilt from a delta:
+its held window is dropped and the next read lists every Session again, so
+the host sends that one whole. At start, index entries whose file is missing
+are dropped the same way.
 
 A snapshot marked `transcriptUnknown` (its host restarted and hasn't run the
 chat's agent since) keeps the messages and count the mirror already holds, in

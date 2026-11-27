@@ -57,6 +57,8 @@ interface Mirror {
   pending: Map<string, SessionSnapshot>;
   /** Sessions dropped since the last save, whose files the next save deletes. */
   removed: Set<string>;
+  /** Ask for every Session next time, not only those changed since `revision`: a held copy was lost and must be sent whole. */
+  whole: boolean;
   /** The connection (its `onlineSince`) this mirror last read on connect. */
   connectedAt?: string;
   reading: boolean;
@@ -281,19 +283,32 @@ export class MachineMirror {
     if (this.stopped) return;
     // A new run of the host sends each Session whole: nothing held from the old run is joined to it.
     const sameRun = mirror.epoch === result.epoch;
-    const joined = await Promise.all(result.snapshots.map(async sent => {
+    const joined = await Promise.all(result.snapshots.map(async (sent): Promise<SessionSnapshot | undefined> => {
       // The host projects what it sends; the desktop projects it again, so it never stores more than the plan allows.
       const projected = projectSnapshot(sent);
       // A host that can't read the chat yet (it restarted) says nothing of its messages: the held ones stay, in any run.
       if (projected.transcriptUnknown === true) return withHeldMessages(mirror.index.has(sent.sessionId) ? await this.load(mirror, sent.sessionId) : undefined, projected);
-      return merged(sameRun && joinsHeld(mirror.index.get(sent.sessionId), projected) ? await this.load(mirror, sent.sessionId) : undefined, projected);
+      if (!sameRun || !joinsHeld(mirror.index.get(sent.sessionId), projected)) return merged(undefined, projected);
+      // Only the messages after the held ones came: without the held copy they are not the chat. Read it whole again.
+      const held = await this.load(mirror, sent.sessionId);
+      return held ? merged(held, projected) : undefined;
     }));
     if (this.stopped || this.mirrors.get(mirror.machineId) !== mirror) return;
     const listed = new Set(result.sessionIds);
     for (const sessionId of [...mirror.index.keys()]) {
       if (!listed.has(sessionId)) this.drop(mirror, sessionId);
     }
-    for (const snapshot of joined) this.store(mirror, snapshot);
+    mirror.whole = false;
+    for (const [at, snapshot] of joined.entries()) {
+      if (snapshot) {
+        this.store(mirror, snapshot);
+        continue;
+      }
+      const entry = mirror.index.get(result.snapshots[at].sessionId);
+      if (entry) delete entry.held;
+      mirror.whole = true;
+      mirror.again = true;
+    }
     mirror.revision = result.revision;
     mirror.epoch = result.epoch;
     mirror.lastSeenAt = new Date().toISOString();
@@ -458,8 +473,16 @@ export class MachineMirror {
       mirror.epoch = saved.epoch;
       mirror.lastSeenAt = saved.lastSeenAt;
       mirror.index = new Map(Object.entries(saved.sessions));
-      const files = new Set([INDEX_FILE, ...[...mirror.index.keys()].map(sessionId => path.basename(this.sessionFileOf(saved.machineId, sessionId)))]);
-      for (const file of await promises.readdir(entry)) {
+      const present = new Set(await promises.readdir(entry));
+      const fileOf = (sessionId: string) => path.basename(this.sessionFileOf(saved.machineId, sessionId));
+      for (const sessionId of [...mirror.index.keys()]) {
+        // A Session whose file is gone (removed outside Pane) is read whole on the next connect.
+        if (present.has(fileOf(sessionId))) continue;
+        mirror.index.delete(sessionId);
+        mirror.whole = true;
+      }
+      const files = new Set([INDEX_FILE, ...[...mirror.index.keys()].map(fileOf)]);
+      for (const file of present) {
         // A Session written before a crash kept the index from naming it, or a save interrupted part-way.
         if (!files.has(file)) await promises.rm(path.join(entry, file), { recursive: true, force: true });
       }
@@ -528,7 +551,7 @@ async function writeAtomically(file: string, contents: string): Promise<void> {
 
 function emptyMirror(machineId: string): Mirror {
   return {
-    machineId, epoch: null, revision: 0, lastSeenAt: null, index: new Map(), pending: new Map(), removed: new Set(),
+    machineId, epoch: null, revision: 0, lastSeenAt: null, index: new Map(), pending: new Map(), removed: new Set(), whole: false,
     reading: false, again: false, due: false, savedAt: -Infinity, writes: Promise.resolve(),
   };
 }
@@ -538,7 +561,8 @@ function requestOf(mirror: Mirror): SessionSnapshotsRequest {
   const request: SessionSnapshotsRequest = {};
   if (!mirror.epoch) return request;
   request.epoch = mirror.epoch;
-  request.since = mirror.revision;
+  // After a lost copy, every Session is listed again; `held` still keeps the others to their changes.
+  if (!mirror.whole) request.since = mirror.revision;
   const held: Record<string, SessionSnapshotHeld> = {};
   for (const [sessionId, entry] of mirror.index) if (entry.held) held[sessionId] = entry.held;
   if (Object.keys(held).length > 0) request.held = held;

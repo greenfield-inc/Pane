@@ -319,18 +319,43 @@ function changedSince(transcript: ChatTabTranscript, messageCount: number, held:
  * question's form, replaced by its length. The host sends it, and the desktop applies it again before storing.
  */
 export function projectSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
-  const { chat } = snapshot;
-  return {
-    ...snapshot,
+  const projected: SessionSnapshot = {
+    sessionId: snapshot.sessionId,
+    revision: snapshot.revision,
     session: readableCopy(snapshot.session),
+    chat: projectChat(snapshot.chat),
     tabs: snapshot.tabs.filter(tab => isReadableTabType(tab.type)).map(tab => readableCopy(tab)),
-    chat: {
-      ...chat,
-      transcript: chat.transcript && { ...chat.transcript, messages: chat.transcript.messages.map(message => ({ ...message, parts: message.parts.map(lighterPart) })) },
-      permissions: chat.permissions.map(lighter),
-      questions: chat.questions.map(lighter),
-    },
+    layout: snapshot.layout,
   };
+  if (snapshot.transcriptUnknown === true) projected.transcriptUnknown = true;
+  return projected;
+}
+
+/** The chat view's own fields only (review S-5), with the 4 KB cut on the transcript, approvals and questions. */
+function projectChat(chat: ChatTabView): ChatTabView {
+  const projected: ChatTabView = {
+    panelId: chat.panelId,
+    agent: chat.agent,
+    generation: chat.generation,
+    status: chat.status,
+    canAttachImages: chat.canAttachImages,
+    controls: chat.controls,
+    commands: chat.commands,
+    permissions: chat.permissions.map(lighter),
+    questions: chat.questions.map(lighter),
+    queue: chat.queue,
+    messageCount: chat.messageCount,
+  };
+  if (chat.transcript) projected.transcript = { ...chat.transcript, messages: chat.transcript.messages.map(message => ({ ...message, parts: message.parts.map(lighterPart) })) };
+  if (chat.problem) projected.problem = chat.problem;
+  if (chat.notice !== undefined) projected.notice = chat.notice;
+  if (chat.banner) projected.banner = chat.banner;
+  if (chat.context) projected.context = chat.context;
+  if (chat.tasks) projected.tasks = chat.tasks;
+  if (chat.clearedAt !== undefined) projected.clearedAt = chat.clearedAt;
+  if (chat.sendNowSteers) projected.sendNowSteers = chat.sendNowSteers;
+  if (chat.mentions) projected.mentions = chat.mentions;
+  return projected;
 }
 
 /** A part with every string over 4 KB replaced in place by its length; a message's own text is kept whole. */
