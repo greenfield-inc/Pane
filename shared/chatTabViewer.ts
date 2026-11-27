@@ -403,9 +403,9 @@ export class ChatTabViewerRegistry {
  * the window another machine's mirror holds (D-3). Drawing 200 takes a long chat ~95 ms, which a
  * key repeat would wait behind.
  */
-export function firstPaintWindow(chat: ChatTabView): ChatTabView {
+export function firstPaintWindow(chat: ChatTabView, newest: number = FIRST_PAINT_MESSAGES): ChatTabView {
   const transcript = chat.transcript;
-  const extra = transcript ? transcript.messages.length - FIRST_PAINT_MESSAGES : 0;
+  const extra = transcript ? transcript.messages.length - newest : 0;
   if (!transcript || extra <= 0) return chat;
   return { ...chat, transcript: { ...transcript, start: transcript.start + extra, messages: transcript.messages.slice(extra) } };
 }

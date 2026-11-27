@@ -154,7 +154,7 @@ describe('typing, Enter or a click engages, and what was typed arrives once (T-1
     handover.chatTabShown('panel-b');
     handover.chatTabShown('panel-b');
 
-    expect(taken).toEqual([{ text: 'hello there', selectionStart: 11, selectionEnd: 11, focused: true, send: false }]);
+    expect(taken).toEqual([{ text: 'hello there', selectionStart: 11, selectionEnd: 11, focused: true, send: false, sendWithinMs: 60_000 }]);
     expect(state().engaging).toBeUndefined();
     expect(state().held[engage.engageKey(target)]).toBeUndefined();
     // The main area stays live while the restore under it finishes, at most 5 s.

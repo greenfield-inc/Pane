@@ -481,7 +481,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     const take = (draft: LaunchDraft) => {
       viewer.setDraft(draft.text);
       runtime.thread.composer.setText(draft.text);
-      if (draft.send) launchSend.current = { text: draft.text, until: Date.now() + LAUNCH_SEND_MS };
+      if (draft.send) launchSend.current = { text: draft.text, until: Date.now() + (draft.sendWithinMs ?? LAUNCH_SEND_MS) };
       setLaunchTick(tick => tick + 1);
       const box = input();
       if (!box) return;

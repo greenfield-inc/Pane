@@ -252,8 +252,9 @@ function switched(target: EngageTarget, panelId: string | undefined): void {
   const chat = heldRemoteChat(cachedRemoteSession(target.machineId, target.sessionId));
   // SAFETY: the window's own chat client is what the live chat tab reads through (ChatTabRoute).
   const liveClient = window.electronAPI?.chatTab as ChatTabClient | undefined;
-  // The newest 30 only: drawing 200 there is a long task while the switch finishes (D-6); its own read brings the rest.
-  if (chat && liveClient) chatTabViewer(liveClient, chat.panelId).prime(firstPaintWindow(chat), performance.now());
+  // The newest few only: the chat mounts there with its whole Session's workspace under the held
+  // view, and drawing more is a long task while the switch finishes (D-6); its own read brings the rest.
+  if (chat && liveClient) chatTabViewer(liveClient, chat.panelId).prime(firstPaintWindow(chat, LIVE_FIRST_PAINT_MESSAGES), performance.now());
   useRemoteEngage.setState(state => (state.engaging ? { engaging: { ...state.engaging, switched: true } } : {}));
   switchMark('engage:switched', { machineId: target.machineId, sessionId: target.sessionId });
   if (panelId && shownMeanwhile.has(panelId)) {
@@ -264,6 +265,10 @@ function switched(target: EngageTarget, panelId: string | undefined): void {
   liveWait = setTimeout(() => { liveWait = undefined; land(); }, LIVE_VIEW_WAIT_MS);
 }
 
+/** Messages the chat there first draws when an engage lands. */
+const LIVE_FIRST_PAINT_MESSAGES = 8;
+/** How long an Enter pressed during the switch waits for the chat there to be able to send it. */
+const ENTER_WAITS_MS = 60_000;
 let settleCap: ReturnType<typeof setTimeout> | undefined;
 /** At most this long after landing does the main area stay live while the connection still says restoring. */
 const SETTLE_CAP_MS = 5000;
@@ -296,6 +301,8 @@ function land(): void {
       selectionEnd: text.text.length,
       focused: true,
       send: text.send && !!text.text.trim(),
+      // The link may still be catching up after the switch: the Enter waits for the chat to be able to send.
+      sendWithinMs: ENTER_WAITS_MS,
     });
   }
   switchMark('engage:end', { machineId: engaging.machineId, sessionId: engaging.sessionId, status: 'landed' });
