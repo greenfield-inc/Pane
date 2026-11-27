@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Monitor, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import ChatTabPanel from './chatTab/ChatTabPanel';
@@ -291,18 +291,31 @@ export function EngageHold() {
 export function EngageKept() {
   const kept = useRemoteEngage(useShallow(keptEngage));
   const name = useAllMachinesStore(state => (kept ? state.machines.find(machine => machine.id === kept.machineId)?.label : undefined));
+  // Drawn again when a waiting Enter's deadline passes, so the bar stops saying it sends.
+  const [now, setNow] = useState(() => Date.now());
+  const sendsBy = kept?.sendsBy;
+  useEffect(() => {
+    if (sendsBy === undefined) return undefined;
+    setNow(Date.now());
+    const wait = sendsBy - Date.now();
+    if (wait < 0) return undefined;
+    const timer = setTimeout(() => setNow(Date.now()), wait + 1);
+    return () => clearTimeout(timer);
+  }, [sendsBy]);
   if (!kept) return null;
-  return <KeptBar kept={kept} machineName={name ?? 'the other machine'} />;
+  return <KeptBar kept={kept} machineName={name ?? 'the other machine'} now={now} />;
 }
 
 /** What `EngageKept` draws. */
-export function KeptBar({ kept, machineName }: { kept: NonNullable<ReturnType<typeof keptEngage>>; machineName: string }) {
+export function KeptBar({ kept, machineName, now = Date.now() }: { kept: NonNullable<ReturnType<typeof keptEngage>>; machineName: string; now?: number }) {
   const target = { machineId: kept.machineId, sessionId: kept.sessionId };
+  let sends = '';
+  if (kept.sendsBy !== undefined) sends = now <= kept.sendsBy ? ' It sends then.' : ' It goes in unsent: its 60 s to send have passed.';
   return (
     <div role="region" aria-label={`Not sent to ${machineName}`} data-testid="engage-kept" data-pending={kept.pending || undefined}
       className="fixed bottom-4 right-4 z-fixed w-[420px] max-w-[calc(100vw-2rem)] rounded-lg border border-border-primary bg-surface-primary p-3 text-text-primary shadow-dropdown">
       <div className="mb-2 flex items-start gap-2">
-        <p role={kept.pending ? 'status' : 'alert'} className="min-w-0 flex-1 text-xs text-text-secondary">{kept.pending ? kept.message : `Not sent yet to ${machineName}: ${kept.message}`}</p>
+        <p role={kept.pending ? 'status' : 'alert'} className="min-w-0 flex-1 text-xs text-text-secondary">{kept.pending ? `${kept.message}${sends}` : `Not sent yet to ${machineName}: ${kept.message}`}</p>
         <button type="button" className="flex-shrink-0 rounded p-0.5 text-text-tertiary hover:text-text-primary" aria-label="Discard what you typed" title="Discard what you typed"
           onClick={() => { holdRemoteText(target, ''); dismissKept(); }}>
           <X className="h-3.5 w-3.5" aria-hidden />

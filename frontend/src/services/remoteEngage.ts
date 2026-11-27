@@ -359,12 +359,14 @@ export function setEngageLinkUp(up: boolean): void {
 }
 
 /** What the kept bar shows: text typed into a Session and not delivered, with why; none while an engage runs. */
-export function keptEngage(state: RemoteEngageState): (EngageTarget & { text: string; message: string; pending: boolean }) | undefined {
+export function keptEngage(state: RemoteEngageState): (EngageTarget & { text: string; message: string; pending: boolean; sendsBy?: number }) | undefined {
   const failure = state.failure;
   if (!failure || state.engaging) return undefined;
   const held = state.held[engageKey(failure)];
   if (!held) return undefined;
-  return { machineId: failure.machineId, sessionId: failure.sessionId, text: held.text, message: failure.message, pending: failure.pending === true };
+  const kept = { machineId: failure.machineId, sessionId: failure.sessionId, text: held.text, message: failure.message, pending: failure.pending === true };
+  // An Enter waiting: the bar says whether it still sends, which depends on its deadline.
+  return held.send && held.sendBy !== undefined ? { ...kept, sendsBy: held.sendBy } : kept;
 }
 
 /** The person cleared the kept bar's text themselves. */
@@ -436,8 +438,7 @@ function deliverHeld(engaging: EngageTarget & { panelId?: string }, { focused, s
     // The chat there isn't open live (the link is down, or the person moved on): the text stays
     // visible in the kept bar, and that chat takes it once as it opens.
     undelivered.set(panelId, target);
-    const sending = sends && text.send;
-    useRemoteEngage.setState({ failure: { ...target, panelId, pending: true, message: `Not sent yet: it goes into ${sessionName(target)}'s message box on ${machineName(target.machineId)} once that chat opens${sending ? ', and sends then' : ''}.` } });
+    useRemoteEngage.setState({ failure: { ...target, panelId, pending: true, message: `Not sent yet: it goes into ${sessionName(target)}'s message box on ${machineName(target.machineId)} once that chat opens.` } });
     return;
   }
   undelivered.delete(panelId);

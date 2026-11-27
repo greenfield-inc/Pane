@@ -131,3 +131,18 @@ describe('what was typed and not sent stays on screen (QA 1781 F-1)', () => {
     expect(html).not.toContain('remote-engage-sending');
   });
 });
+
+describe('the kept bar never promises a send its deadline has passed (review 1781 nit)', () => {
+  const kept = { machineId: 'build', sessionId: 's1', text: 'ship it', message: 'Not sent yet: it goes into Release\'s message box on Build box once that chat opens.', pending: true };
+  it('says it sends then while the Enter is within its 60 s', async () => {
+    const { KeptBar } = await import('./RemoteSessionView');
+    const html = renderToStaticMarkup(<KeptBar kept={{ ...kept, sendsBy: 2000 }} machineName="Build box" now={1000} />);
+    expect(text(html)).toContain('once that chat opens. It sends then.');
+  });
+  it('says it goes in unsent once the 60 s have passed', async () => {
+    const { KeptBar } = await import('./RemoteSessionView');
+    const html = renderToStaticMarkup(<KeptBar kept={{ ...kept, sendsBy: 2000 }} machineName="Build box" now={2001} />);
+    expect(text(html)).not.toContain('It sends then');
+    expect(text(html)).toContain('It goes in unsent: its 60 s to send have passed.');
+  });
+});
