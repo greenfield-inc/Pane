@@ -255,6 +255,7 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
                     onAddRoute={() => openAddDevice('computer', { computerId: machine.computer?.id })}
                     onReorder={(routeIds) => (machine.computer ? reorder(machine.computer.id, routeIds) : Promise.resolve(null))}
                     onSetMine={(mine) => (machine.computer ? setMine(machine.computer.id, mine) : Promise.resolve(null))}
+                    tailscaleSignedOut={tailscaleSignedOut}
                     onUnlink={() => unlink(machine)}
                     onDetails={() => onOpenMachine(machine.id)}
                     localDetail={machine.kind === 'local'

@@ -134,7 +134,8 @@ Expand a row to see its routes in order, drag them to reorder, add one with
 **Add route** (it opens **Add a device › Computer**), and see who linked it ("Linked by Ana's iPhone"). **This is my computer** says
 whether the computer's chats are kept on this one to switch to at once: on by
 itself when its Tailscale owner is your login here, and yours to turn on (a
-relay-only computer) or off; **Use Tailscale** goes back to the check
+relay-only computer) or off; **Use Tailscale** goes back to the check. With
+Tailscale signed out here, the row says Pane can't tell whose computer it is
 ([SESSIONS.md](SESSIONS.md)). **Also linked** lists
 computers that reach this one but that this one doesn't list; link them back
 to reach them from here. **Watching this computer** lists computers you gave

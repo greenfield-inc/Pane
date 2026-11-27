@@ -799,6 +799,14 @@ test.describe('Settings', () => {
       expect(calls.map((call) => call.args)).toEqual([[{ computerId: 'build-box', mine: true }], [{ computerId: 'build-box', mine: null }]]);
     });
 
+    test('with Tailscale signed out here, "This is my computer" says Pane can\'t tell, not that the computer is someone else\'s', async ({ page }) => {
+      const content = await openRemoteAccess(page, { tailnetMachines: { ok: false, reason: 'Tailscale is signed out', fix: 'Open Tailscale and sign in.' } });
+      const row = content.getByTestId('machine-Build Box');
+      await row.getByRole('button', { name: 'Build Box routes and details' }).click();
+      await expect(row.getByTestId('computer-mine')).toContainText("Tailscale is signed out here, so Pane can't tell if this computer is yours");
+      await expect(row.getByTestId('computer-mine')).not.toContainText('Not on your Tailscale login');
+    });
+
     test('with Tailscale signed out here, a computer reached only over Tailscale asks for a link', async ({ page }) => {
       const content = await openRemoteAccess(page, { tailnetMachines: { ok: false, reason: 'Tailscale is signed out', fix: 'Open Tailscale and sign in.' } });
       await expect(content.getByTestId('machine-Build Box').getByLabel('Tailscale, not available here')).toBeVisible();

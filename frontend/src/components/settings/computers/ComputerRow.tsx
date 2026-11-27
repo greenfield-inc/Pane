@@ -32,6 +32,8 @@ export interface ComputerRowProps {
   onReorder: (routeIds: string[]) => Promise<string | null>;
   /** Saves "This is my computer": on, off, or null to follow Tailscale again; resolves to an error line, or null. */
   onSetMine: (mine: boolean | null) => Promise<string | null>;
+  /** Tailscale is signed out or missing here, so its owner check can't run. */
+  tailscaleSignedOut?: boolean;
   onUnlink: () => void;
   onDetails: () => void;
   /** Under the row: the active computer's last error and its fixes. */
@@ -41,7 +43,7 @@ export interface ComputerRowProps {
 }
 
 /** One computer in Settings › Remote Access › Computers: its routes as pills, and its detail when expanded. */
-export function ComputerRow({ machine, expanded, onToggle, disabled, busy, password, onPasswordChange, onPasswordCancel, onPick, onLink, onAddRoute, onReorder, onSetMine, onUnlink, onDetails, footer, localDetail }: ComputerRowProps) {
+export function ComputerRow({ machine, expanded, onToggle, disabled, busy, password, onPasswordChange, onPasswordCancel, onPick, onLink, onAddRoute, onReorder, onSetMine, tailscaleSignedOut = false, onUnlink, onDetails, footer, localDetail }: ComputerRowProps) {
   const dimmed = machine.presence === 'dimmed';
   const computer = machine.computer;
   const detailId = `computer-detail-${machine.id}`;
@@ -91,7 +93,7 @@ export function ComputerRow({ machine, expanded, onToggle, disabled, busy, passw
       {footer}
       {localDetail && expanded && <div id={detailId}>{localDetail}</div>}
       {computer && expanded && (
-        <ComputerDetail id={detailId} computer={computer} readOnly={machine.readOnly === true} routes={machine.routes ?? []} onAddRoute={onAddRoute} onReorder={onReorder} onSetMine={onSetMine} onUnlink={onUnlink} onDetails={onDetails} />
+        <ComputerDetail id={detailId} computer={computer} readOnly={machine.readOnly === true} routes={machine.routes ?? []} onAddRoute={onAddRoute} onReorder={onReorder} onSetMine={onSetMine} tailscaleSignedOut={tailscaleSignedOut} onUnlink={onUnlink} onDetails={onDetails} />
       )}
     </div>
   );
@@ -130,10 +132,12 @@ function linkedSentence(computer: RemoteComputer): string {
 }
 
 /** Whether this computer keeps the saved one's chats, and why, in one sentence (D-500). */
-function mineSentence(computer: RemoteComputer): string {
+function mineSentence(computer: RemoteComputer, tailscaleSignedOut: boolean): string {
   if (computer.mineOverride === true) return 'This is my computer: you turned it on, so its chats are kept here to switch to at once.';
   if (computer.mineOverride === false) return 'You turned This is my computer off, so its chats are never kept here.';
   if (computer.mine === 'tailscale') return 'Signed in to Tailscale as you, so its chats are kept here to switch to at once.';
+  // No Tailscale identity here: the check can't run, which says nothing about whose computer it is.
+  if (tailscaleSignedOut) return "Tailscale is signed out here, so Pane can't tell if this computer is yours, and its chats aren't kept here. Turn on This is my computer if it is yours.";
   return 'Not on your Tailscale login, so its chats are never kept here. Turn on This is my computer if it is yours.';
 }
 
@@ -153,12 +157,13 @@ interface ComputerDetailProps {
   onAddRoute: () => void;
   onReorder: (routeIds: string[]) => Promise<string | null>;
   onSetMine: (mine: boolean | null) => Promise<string | null>;
+  tailscaleSignedOut: boolean;
   onUnlink: () => void;
   onDetails: () => void;
 }
 
 /** Routes in order with drag to reorder, Add route, who linked it, and unlink. */
-function ComputerDetail({ id, computer, readOnly, routes, onAddRoute, onReorder, onSetMine, onUnlink, onDetails }: ComputerDetailProps) {
+function ComputerDetail({ id, computer, readOnly, routes, onAddRoute, onReorder, onSetMine, tailscaleSignedOut, onUnlink, onDetails }: ComputerDetailProps) {
   // The order shown while a reorder saves; the saved order replaces it once the config reloads.
   const [order, setOrder] = useState<string[] | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
@@ -247,7 +252,7 @@ function ComputerDetail({ id, computer, readOnly, routes, onAddRoute, onReorder,
           <>
             <dt className="text-text-tertiary">Yours</dt>
             <dd className="text-text-secondary" data-testid="computer-mine">
-              {mineSentence(computer)}
+              {mineSentence(computer, tailscaleSignedOut)}
               {computer.mineOverride !== undefined && (
                 <>
                   {' '}
