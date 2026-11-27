@@ -9,7 +9,7 @@ import { useRemoteRuntimeState } from './hooks/useRemoteRuntimeState';
 import { useConnectionPresence } from './hooks/useConnectionPresence';
 import { RemoteWorkspace } from './components/RemoteWorkspace';
 import { EngageHold } from './components/RemoteSessionView';
-import { useRemoteEngage } from './services/remoteEngage';
+import { endEngageSettling, useRemoteEngage } from './services/remoteEngage';
 import { TailnetHttpsBanner } from './components/TailnetHttpsBanner';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { followHostAccess } from './stores/readOnlyHostStore';
@@ -176,6 +176,11 @@ function App() {
   const { connectionState } = useRemoteRuntimeState();
   const shownConnectionCheck = connectionState.check?.outcome !== 'passed' ? connectionState.check ?? null : null;
   const { presence: connectionPresence } = useConnectionPresence(connectionState);
+  // An engage that landed keeps the main area live until the connection says connected (T-132).
+  const engageSettling = useRemoteEngage(state => state.settling === true);
+  useEffect(() => {
+    if (engageSettling && connectionPresence === 'connected' && connectionState.mode === 'remote' && connectionState.status === 'connected') endEngageSettling();
+  }, [engageSettling, connectionPresence, connectionState.mode, connectionState.status]);
 
   const openSettings = useCallback((target?: SettingsTarget) => {
     if (target) {
@@ -1033,7 +1038,7 @@ function App() {
   // A row opened on a machine that stopped answering shows why in place of the Pane.
   const offlineMachineShown = useAllMachinesStore(state => state.offlineNotice !== null);
   // An engage keeps another machine's Session on screen through its switch, taking text (T-132).
-  const engaging = useRemoteEngage(state => state.engaging !== undefined);
+  const engaging = useRemoteEngage(state => state.engaging !== undefined || state.settling === true);
 
   return (
     <ContextMenuProvider>

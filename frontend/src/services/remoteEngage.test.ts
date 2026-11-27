@@ -157,6 +157,10 @@ describe('typing, Enter or a click engages, and what was typed arrives once (T-1
     expect(taken).toEqual([{ text: 'hello there', selectionStart: 11, selectionEnd: 11, focused: true, send: false }]);
     expect(state().engaging).toBeUndefined();
     expect(state().held[engage.engageKey(target)]).toBeUndefined();
+    // The main area stays live while the restore under it finishes, at most 5 s.
+    expect(state().settling).toBe(true);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(state().settling).toBe(false);
   });
 
   it('a chat there that painted before the switch returned takes the text as soon as it does', async () => {

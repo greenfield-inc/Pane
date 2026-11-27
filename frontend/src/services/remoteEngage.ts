@@ -52,6 +52,12 @@ interface RemoteEngageState {
   held: Record<string, HeldText>;
   /** Why the last engage of this Session did not open it; what was typed stays beside it. */
   failure?: EngageTarget & { message: string };
+  /**
+   * The engage landed and its restore is still finishing: the main area stays live (not dimmed or
+   * inert) meanwhile, since the person is already typing in the chat there. App clears it once
+   * the connection says connected.
+   */
+  settling?: boolean;
 }
 
 export const useRemoteEngage = create<RemoteEngageState>(() => ({ held: {} }));
@@ -258,6 +264,17 @@ function switched(target: EngageTarget, panelId: string | undefined): void {
   liveWait = setTimeout(() => { liveWait = undefined; land(); }, LIVE_VIEW_WAIT_MS);
 }
 
+let settleCap: ReturnType<typeof setTimeout> | undefined;
+/** At most this long after landing does the main area stay live while the connection still says restoring. */
+const SETTLE_CAP_MS = 5000;
+
+/** The connection says connected (or the cap passed): the main area dims again when it drops. */
+export function endEngageSettling(): void {
+  clearTimeout(settleCap);
+  settleCap = undefined;
+  if (useRemoteEngage.getState().settling) useRemoteEngage.setState({ settling: false });
+}
+
 /** The live view took over: what was typed goes into the chat there once, and the mirror's view goes. */
 function land(): void {
   clearTimeout(liveWait);
@@ -269,7 +286,9 @@ function land(): void {
   const rest = { ...held };
   delete rest[key];
   // Ended first, so focus moving into the chat there is not taken back to the held box.
-  useRemoteEngage.setState({ engaging: undefined, held: rest });
+  useRemoteEngage.setState({ engaging: undefined, held: rest, settling: true });
+  clearTimeout(settleCap);
+  settleCap = setTimeout(endEngageSettling, SETTLE_CAP_MS);
   if (text && engaging.panelId) {
     handOverChatDraft(engaging.panelId, {
       text: text.text,
