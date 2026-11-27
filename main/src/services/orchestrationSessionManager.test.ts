@@ -311,8 +311,14 @@ describe('OrchestrationSessionManager', () => {
   });
 
   describe('through Agent Farm (T-63)', () => {
+    let snapshots = 0;
     const agentFarm = (installed: string[] = ['pane', 'greenfield']) => ({
       pluginHash: vi.fn(async (plugin: string) => installed.includes(plugin) ? `hash-${plugin}` : undefined),
+      // T-110: each snapshot is numbered; its plugins hash as the installed ones did when it was taken.
+      snapshot: vi.fn(async (_folder: string) => ({ path: `.agent-farm/snapshots/d${++snapshots}`, digest: `d${snapshots}`, plugins: Object.fromEntries(installed.map(plugin => [plugin, '1.0.0'])) })),
+      snapshotHashes: vi.fn(async (_folder: string): Promise<Record<string, string>> => Object.fromEntries(installed.map(plugin => [plugin, `receipt-${plugin}`]))),
+      // The installed plugin's receipt-listed files, as a snapshot copies them (review r2).
+      receiptHash: vi.fn(async (plugin: string) => installed.includes(plugin) ? `receipt-${plugin}` : undefined),
       profiles: vi.fn(async () => ({ profiles: [
         { ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false, defaultVariant: 'claude', variants: [{ name: 'claude', model: 'claude-opus-5-5' }, { name: 'codex', model: 'gpt-6-astra' }, { name: 'fast', model: 'claude-haiku-5-5' }] },
         { ref: 'greenfield/product-researcher', plugin: 'greenfield', version: '0.0.46', harness: 'codex', hidden: false },
@@ -341,6 +347,46 @@ describe('OrchestrationSessionManager', () => {
       expect(fromDialog.panel.state.customState).toMatchObject({ launch: { kind: 'profile', profile: 'greenfield/orchestrator', args: { task: 'x' } } });
       expect(port.pluginHash).not.toHaveBeenCalled();
       expect(port.profiles).not.toHaveBeenCalled();
+      // T-110: no snapshot, and no --snapshot for the lead.
+      expect(port.snapshot).not.toHaveBeenCalled();
+      expect(claude.session.agentFarmSnapshot).toBeUndefined();
+      expect(JSON.stringify(fromDialog.panel.state.customState)).not.toContain('snapshot');
+    }));
+
+    // T-110 (D-4): every Profiles-on Session gets one snapshot, and its lead starts from it.
+    it('saves a snapshot in a new Session\'s folder and starts its lead from it', async () => withChatTabs(async (fixture, port) => {
+      const created = await fixture.manager.create({ name: 'Frozen', agentProfile: 'greenfield/orchestrator' });
+      const folder = sessionWorkspacePath(created.session.id);
+      expect(port.snapshot).toHaveBeenCalledWith(folder);
+      const saved = created.session.agentFarmSnapshot;
+      expect(saved).toMatch(/^\.agent-farm\/snapshots\/d\d+$/);
+      expect(fixture.store.read().sessions.find(session => session.id === created.session.id)?.agentFarmSnapshot).toBe(saved);
+      expect(created.panel.state.customState).toMatchObject({ launch: { kind: 'profile', profile: 'greenfield/orchestrator', snapshot: path.join(folder, ...String(saved).split('/')) } });
+      // A Session whose agent keeps a terminal gets one too: its typed agent-farm commands share it.
+      const terminal = await fixture.manager.create({ name: 'Terminal lead', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+      expect(terminal.panel.type).toBe('terminal');
+      expect(terminal.session.agentFarmSnapshot).toMatch(/^\.agent-farm\/snapshots\//);
+    }));
+
+    it('still creates the Session when its snapshot can\'t be saved, and its lead starts as before', async () => withChatTabs(async (fixture, port) => {
+      port.snapshot.mockRejectedValueOnce(new Error('disk full'));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const created = await fixture.manager.create({ name: 'No snapshot', agentProfile: 'greenfield/orchestrator' });
+        expect(created.session.agentFarmSnapshot).toBeUndefined();
+        expect(JSON.stringify(created.panel.state.customState)).not.toContain('snapshot');
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('disk full'));
+        // Review F-2: the Session's own activity says it isn't pinned.
+        expect(created.session.activity.at(-1)?.message).toContain('No Agent Farm snapshot');
+        expect(created.session.activity.at(-1)?.message).toContain('until Reload profile');
+        // QA r3: a terminal lead with no snapshot has nothing Reload can act on, so the line points elsewhere.
+        port.snapshot.mockRejectedValueOnce(new Error('disk full'));
+        const terminal = await fixture.manager.create({ name: 'Terminal, no snapshot', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+        expect(terminal.session.agentFarmSnapshot).toBeUndefined();
+        expect(terminal.session.activity.at(-1)?.message).toContain('No Agent Farm snapshot');
+        expect(terminal.session.activity.at(-1)?.message).not.toContain('Reload profile');
+        expect(terminal.session.activity.at(-1)?.message).toContain('Start a new Session');
+      } finally { warn.mockRestore(); }
     }));
 
     it('refuses a named profile with Profiles off, and creates nothing', async () => withProfilesOff(async fixture => {
@@ -579,6 +625,8 @@ describe('OrchestrationSessionManager', () => {
         fixture.manager.attachChatTabs(port);
         const created = await fixture.manager.create({ name: 'Reloads', agentProfile: 'greenfield/orchestrator' });
         farm.pluginHash.mockImplementation(async (plugin: string) => plugin === 'greenfield' ? 'hash-greenfield-2' : `hash-${plugin}`);
+        // The Session has a snapshot (T-110), so its mark follows the installed receipt-listed files.
+        farm.receiptHash.mockImplementation(async (plugin: string) => plugin === 'greenfield' ? 'receipt-greenfield-2' : `receipt-${plugin}`);
         await fixture.manager.refreshPluginHashes(true);
         const marked = (await fixture.manager.list()).sessions.find(session => session.id === created.session.id);
         expect(marked?.agentProfileChanged).toBe(true);
@@ -586,6 +634,206 @@ describe('OrchestrationSessionManager', () => {
         expect(reloaded.agentProfile).toEqual({ ref: 'greenfield/orchestrator', hash: 'hash-greenfield-2' });
         expect(reloaded.agentProfileChanged).toBeUndefined();
         expect(port.relaunch).toHaveBeenCalledWith(created.panel.id, { launch: expect.objectContaining({ profile: 'greenfield/orchestrator' }), divider: 'Reloaded Greenfield orchestrator · conversation kept' });
+      }));
+
+      // T-110: the dot compares every plugin in the Session's snapshot with the installed one; Reload takes a new snapshot.
+      it('marks a Session when any plugin in its snapshot changed, and Reload restarts the lead on a new snapshot', async () => withChatTabs(async (fixture, farm) => {
+        const port = chatTabs();
+        fixture.manager.attachChatTabs(port);
+        const created = await fixture.manager.create({ name: 'Snapshotted', agentProfile: 'greenfield/orchestrator' });
+        const first = created.session.agentFarmSnapshot;
+        const folder = sessionWorkspacePath(created.session.id);
+        await fixture.manager.refreshPluginHashes(true);
+        expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileChanged).toBeUndefined();
+        // Review r2: a file the receipt doesn't list (a cache, .DS_Store) changes the folder's hash but not what a snapshot holds.
+        farm.pluginHash.mockImplementation(async (plugin: string) => `cluttered-${plugin}`);
+        await fixture.manager.refreshPluginHashes(true);
+        expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileChanged).toBeUndefined();
+        // Only pane changed, not the profile's own plugin: workers may run any plugin, so it shows.
+        farm.receiptHash.mockImplementation(async (plugin: string) => plugin === 'pane' ? 'receipt-pane-2' : `receipt-${plugin}`);
+        await fixture.manager.refreshPluginHashes(true);
+        expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileChanged).toBe(true);
+        expect(farm.snapshotHashes).toHaveBeenCalledWith(path.join(folder, ...String(first).split('/')));
+        farm.snapshotHashes.mockImplementation(async () => ({ greenfield: 'receipt-greenfield', pane: 'receipt-pane-2' }));
+        const reloaded = await fixture.manager.reloadProfile({ sessionId: created.session.id });
+        expect(reloaded.agentFarmSnapshot).not.toBe(first);
+        expect(reloaded.agentProfileChanged).toBeUndefined();
+        expect(port.relaunch).toHaveBeenCalledWith(created.panel.id, expect.objectContaining({ launch: expect.objectContaining({ snapshot: path.join(folder, ...String(reloaded.agentFarmSnapshot).split('/')) }) }));
+        await fixture.manager.refreshPluginHashes(true);
+        expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileChanged).toBeUndefined();
+      }));
+
+      // QA F1: with the sidebar idle nothing lists Sessions, so the host re-checks on its own every 10 s.
+      it('lights the dot on its own within one 10 s check while nothing lists Sessions', async () => withChatTabs(async (fixture, farm) => {
+        fixture.manager.attachChatTabs(chatTabs());
+        const created = await fixture.manager.create({ name: 'Watched', agentProfile: 'greenfield/orchestrator' });
+        await fixture.manager.refreshPluginHashes(true);
+        const changed = vi.fn();
+        fixture.manager.on('changed', changed);
+        vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+        try {
+          fixture.manager.watchProfileChanges();
+          farm.receiptHash.mockImplementation(async (plugin: string) => plugin === 'greenfield' ? 'receipt-greenfield-2' : `receipt-${plugin}`);
+          await vi.advanceTimersByTimeAsync(10_000);
+          await vi.waitFor(() => expect(changed).toHaveBeenCalledWith(expect.objectContaining({ sessionId: created.session.id, kind: 'updated' })));
+          fixture.manager.stopWatchingProfileChanges();
+        } finally {
+          fixture.manager.stopWatchingProfileChanges();
+          vi.useRealTimers();
+        }
+        expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileChanged).toBe(true);
+      }));
+
+      // Review F-1 (D-9): a terminal lead keeps its snapshot; Reload re-snapshots it without relaunching the lead.
+      it('reloads a terminal-lead Session\'s snapshot without relaunching its lead, so tabs opened afterwards get it', async () => withChatTabs(async (fixture, farm) => {
+        const port = chatTabs();
+        fixture.manager.attachChatTabs(port);
+        const created = await fixture.manager.create({ name: 'Terminal lead', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+        expect(created.panel.type).toBe('terminal');
+        expect(created.session.agentProfile).toBeUndefined();
+        const first = created.session.agentFarmSnapshot;
+        farm.receiptHash.mockImplementation(async (plugin: string) => `receipt-${plugin}-2`);
+        await fixture.manager.refreshPluginHashes(true);
+        expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileChanged).toBe(true);
+        farm.snapshotHashes.mockImplementation(async () => ({ pane: 'receipt-pane-2', greenfield: 'receipt-greenfield-2' }));
+        const reloaded = await fixture.manager.reloadProfile({ sessionId: created.session.id });
+        expect(reloaded.agentFarmSnapshot).not.toBe(first);
+        expect(reloaded.agentProfileChanged).toBeUndefined();
+        expect(port.relaunch).not.toHaveBeenCalled();
+        expect(reloaded.activity.at(-1)?.message).toContain('tabs opened from now on');
+        expect(fixture.store.read().sessions.find(session => session.id === created.session.id)?.agentFarmSnapshot).toBe(reloaded.agentFarmSnapshot);
+      }));
+
+      // Review F-3: a Reload or Switch refused for a cheap reason takes no snapshot.
+      it('takes no snapshot for a Reload or Switch it refuses before changing anything', async () => withChatTabs(async (fixture, farm) => {
+        const port = chatTabs();
+        fixture.manager.attachChatTabs(port);
+        const terminal = await fixture.manager.create({ name: 'Terminal lead', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+        const chat = await fixture.manager.create({ name: 'Chat lead', agentProfile: 'greenfield/product-researcher' });
+        const taken = () => farm.snapshot.mock.calls.length;
+        let before = taken();
+        await expect(fixture.manager.switchProfile({ sessionId: terminal.session.id }, 'pane/claude')).rejects.toMatchObject({ code: 'SESSION_PROFILE_TERMINAL' });
+        expect(taken()).toBe(before);
+        expect((await fixture.manager.switchProfile({ sessionId: chat.session.id }, 'greenfield/product-researcher')).effect).toBe('current');
+        expect(taken()).toBe(before);
+        farm.profiles.mockResolvedValue({ profiles: [{ ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.1.0', harness: 'claude', hidden: false }], linked: [] });
+        before = taken();
+        await expect(fixture.manager.reloadProfile({ sessionId: chat.session.id })).rejects.toMatchObject({ code: 'SESSION_PROFILE_GONE' });
+        expect(taken()).toBe(before);
+        // A Session with neither a profile nor a snapshot (from before both) has nothing to reload.
+        fixture.store.write({ ...fixture.store.read(), sessions: fixture.store.read().sessions.map(session => session.id === terminal.session.id ? { ...session, agentFarmSnapshot: undefined } : session) });
+        await expect(fixture.manager.reloadProfile({ sessionId: terminal.session.id })).rejects.toMatchObject({ code: 'SESSION_PROFILE_NONE' });
+        expect(taken()).toBe(before);
+        expect(port.relaunch).not.toHaveBeenCalled();
+      }));
+
+      // Review F-5: a Switch whose new snapshot fails changes nothing.
+      it('switches nothing when the new snapshot can\'t be saved', async () => withChatTabs(async (fixture, farm) => {
+        const port = chatTabs();
+        fixture.manager.attachChatTabs(port);
+        const created = await fixture.manager.create({ name: 'Keeps its profile', agent: 'claude' });
+        farm.snapshot.mockRejectedValueOnce(new PaneError('AGENT_FARM_SNAPSHOT_FAILED', 'Agent Farm couldn\'t save the Session\'s snapshot: disk full.', 'Restart Pane.'));
+        await expect(fixture.manager.switchProfile({ sessionId: created.session.id }, 'greenfield/orchestrator')).rejects.toMatchObject({ code: 'AGENT_FARM_SNAPSHOT_FAILED', message: expect.stringContaining('The Session was not switched.') });
+        expect(port.relaunch).not.toHaveBeenCalled();
+        expect(fixture.store.read().sessions.find(session => session.id === created.session.id)).toMatchObject({ agentProfile: { ref: 'pane/claude' }, agentFarmSnapshot: created.session.agentFarmSnapshot });
+      }));
+
+      // Review F-4: the 10 s check reads only what the mark needs.
+      it('makes the 10 s check skip the profile list and the whole-folder hash of plugins only snapshotted Sessions use', async () => withChatTabs(async (fixture, farm) => {
+        fixture.manager.attachChatTabs(chatTabs());
+        await fixture.manager.create({ name: 'Snapshotted', agentProfile: 'greenfield/orchestrator' });
+        await fixture.manager.refreshPluginHashes(true);
+        farm.profiles.mockClear();
+        farm.pluginHash.mockClear();
+        farm.receiptHash.mockClear();
+        vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+        try {
+          fixture.manager.watchProfileChanges();
+          await vi.advanceTimersByTimeAsync(10_000);
+          await vi.waitFor(() => expect(farm.receiptHash).toHaveBeenCalled());
+        } finally {
+          fixture.manager.stopWatchingProfileChanges();
+          vi.useRealTimers();
+        }
+        expect(farm.profiles).not.toHaveBeenCalled();
+        expect(farm.pluginHash).not.toHaveBeenCalled();
+      }));
+
+      // Review r2 N-1: with the 10 s check running, listing Sessions still refreshes the gone mark, both ways.
+      it('keeps the gone mark current from listing while the 10 s check runs', async () => withChatTabs(async (fixture, farm) => {
+        fixture.manager.attachChatTabs(chatTabs());
+        const created = await fixture.manager.create({ name: 'Goes and comes back', agentProfile: 'greenfield/product-researcher' });
+        const listed = { profiles: [{ ref: 'greenfield/product-researcher', plugin: 'greenfield', version: '0.1.0', harness: 'codex', hidden: false }], linked: [] };
+        const removed = { profiles: [{ ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.1.0', harness: 'claude', hidden: false }], linked: [] };
+        farm.profiles.mockResolvedValue(listed);
+        const gone = async () => (await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileGone;
+        vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+        try {
+          fixture.manager.watchProfileChanges();
+          await vi.advanceTimersByTimeAsync(10_000);
+          farm.profiles.mockResolvedValue(removed);
+          await vi.advanceTimersByTimeAsync(10_000);
+          await fixture.manager.list();
+          await vi.waitFor(async () => expect(await gone()).toBe(true));
+          farm.profiles.mockResolvedValue(listed);
+          await vi.advanceTimersByTimeAsync(10_000);
+          await fixture.manager.list();
+          await vi.waitFor(async () => expect(await gone()).toBeUndefined());
+        } finally {
+          fixture.manager.stopWatchingProfileChanges();
+          vi.useRealTimers();
+        }
+      }));
+
+      // Review r2 F-3: a chat lead's Reload with Chat tabs off is refused before it writes a snapshot.
+      it('refuses a chat lead\'s Reload with Chat tabs off before taking a snapshot', async () => withChatTabs(async (fixture, farm) => {
+        fixture.manager.attachChatTabs(chatTabs());
+        const created = await fixture.manager.create({ name: 'Chat lead', agentProfile: 'greenfield/orchestrator' });
+        Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false });
+        const before = farm.snapshot.mock.calls.length;
+        await expect(fixture.manager.reloadProfile({ sessionId: created.session.id })).rejects.toMatchObject({ code: 'SESSION_PROFILE_UNSUPPORTED' });
+        expect(farm.snapshot.mock.calls.length).toBe(before);
+      }));
+
+      // Review r2 N-5: a chat lead whose profile update() dropped is told the truth.
+      it('tells a chat lead that lost its profile to switch, not that it started before profiles', async () => withChatTabs(async fixture => {
+        fixture.manager.attachChatTabs(chatTabs());
+        const created = await fixture.manager.create({ name: 'Lost its profile', agent: 'claude' });
+        fixture.store.write({ ...fixture.store.read(), sessions: fixture.store.read().sessions.map(session => session.id === created.session.id ? { ...session, agentProfile: undefined } : session) });
+        const refusal = fixture.manager.reloadProfile({ sessionId: created.session.id });
+        await expect(refusal).rejects.toMatchObject({ code: 'SESSION_PROFILE_NONE', next: expect.stringContaining('Switch profile') });
+        await expect(refusal).rejects.not.toMatchObject({ message: expect.stringContaining('started before') });
+      }));
+
+      // Review r2 N-3: with no snapshot, the mark shows only for a chat lead, where Reload can act.
+      it('shows no changed mark for a terminal lead with a profile and no snapshot', async () => withChatTabs(async (fixture, farm) => {
+        fixture.manager.attachChatTabs(chatTabs());
+        const created = await fixture.manager.create({ name: 'Old terminal lead', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+        fixture.store.write({ ...fixture.store.read(), sessions: fixture.store.read().sessions.map(session => session.id === created.session.id ? { ...session, agentProfile: { ref: 'pane/claude', hash: 'hash-pane' }, agentFarmSnapshot: undefined } : session) });
+        farm.pluginHash.mockImplementation(async (plugin: string) => `changed-${plugin}`);
+        await fixture.manager.refreshPluginHashes(true);
+        expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileChanged).toBeUndefined();
+      }));
+
+      it('reloads nothing when the new snapshot can\'t be saved', async () => withChatTabs(async (fixture, farm) => {
+        const port = chatTabs();
+        fixture.manager.attachChatTabs(port);
+        const created = await fixture.manager.create({ name: 'Keeps its snapshot', agentProfile: 'greenfield/orchestrator' });
+        farm.snapshot.mockRejectedValueOnce(new PaneError('AGENT_FARM_SNAPSHOT_FAILED', 'Agent Farm couldn\'t save the Session\'s snapshot: disk full.', 'Restart Pane.'));
+        await expect(fixture.manager.reloadProfile({ sessionId: created.session.id })).rejects.toMatchObject({ code: 'AGENT_FARM_SNAPSHOT_FAILED', message: expect.stringContaining('Nothing was reloaded.') });
+        expect(port.relaunch).not.toHaveBeenCalled();
+        expect(fixture.store.read().sessions.find(session => session.id === created.session.id)?.agentFarmSnapshot).toBe(created.session.agentFarmSnapshot);
+      }));
+
+      it('takes a new snapshot when the Session switches profile, so a plugin installed since is in it', async () => withChatTabs(async (fixture, farm) => {
+        const port = chatTabs();
+        fixture.manager.attachChatTabs(port);
+        const created = await fixture.manager.create({ name: 'Switches', agent: 'claude' });
+        const calls = farm.snapshot.mock.calls.length;
+        const switched = await fixture.manager.switchProfile({ sessionId: created.session.id }, 'greenfield/orchestrator');
+        expect(farm.snapshot.mock.calls.length).toBe(calls + 1);
+        expect(switched.session.agentFarmSnapshot).not.toBe(created.session.agentFarmSnapshot);
+        expect(port.relaunch).toHaveBeenCalledWith(created.panel.id, expect.objectContaining({ launch: expect.objectContaining({ snapshot: expect.stringContaining(String(switched.session.agentFarmSnapshot).split('/').pop()) }) }));
       }));
 
       // T-83 P3: greenfield 0.1.0 removed most profiles; a Session that ran one asks the person to pick again.

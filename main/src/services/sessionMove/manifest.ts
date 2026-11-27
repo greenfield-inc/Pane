@@ -99,6 +99,11 @@ export interface MoveManifest {
     agentVersions: Record<string, string | null>;
     /** Agent Farm profiles the tabs launch, with their versions. */
     profiles: Record<string, string | null>;
+    /**
+     * Those of `profiles` that every tab launching it can run from a snapshot travelling with the
+     * Session (T-110): the target needs no plugin installed for them. Absent from older Panes.
+     */
+    snapshotProfiles?: string[];
     /** Env var names the Session's Panes have set here. */
     envNames: string[];
   };
@@ -181,6 +186,7 @@ export const moveManifestSchema = boundary.object({
     paneVersion: boundary.string,
     agentVersions: nullableStringRecord,
     profiles: nullableStringRecord,
+    snapshotProfiles: boundary.optional(boundary.array(boundary.string)),
     envNames: boundary.array(boundary.string),
   }),
   session: boundary.jsonObject,

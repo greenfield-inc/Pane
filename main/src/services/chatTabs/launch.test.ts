@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import path from 'path';
 import { chatLaunchForTerminal, chatLaunchFromCommand, chatTabEnv, sessionChatLaunch, sessionFolderMeta } from './launch';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../../core/runtime';
@@ -49,6 +49,16 @@ describe('which terminal launches a chat tab can run', () => {
       expect(chatLaunchFromCommand(`${path.join(getAppDirectory(), 'elsewhere', 'agent-farm')} run greenfield/planner`, 'claude')).toBeUndefined();
       expect(chatLaunchFromCommand(`${path.join(getAppDirectory(), 'bin', 'agent-farm-launch', 'agent-farm')} run greenfield/planner`, 'claude'))
         .toEqual({ kind: 'profile', profile: 'greenfield/planner' });
+    });
+
+    // T-110: Agent Farm 0.3.1 prints --snapshot in each link line, so the tab keeps its parent's files.
+    it('carries a link line\'s --snapshot with Profiles on, and keeps the terminal with it off', () => {
+      readProfilesSwitchFrom(() => ({ sessionProfilesEnabled: true }));
+      expect(chatLaunchFromCommand(`${shim()} run greenfield/planner --config-root ${root()} --parent greenfield/orchestrator@af-1 --snapshot '/Users/me/.pane/sessions/s 1/.agent-farm/snapshots/d1'`, 'claude'))
+        .toEqual({ kind: 'profile', profile: 'greenfield/planner', parent: 'greenfield/orchestrator@af-1', snapshot: '/Users/me/.pane/sessions/s 1/.agent-farm/snapshots/d1' });
+      expect(chatLaunchFromCommand('agent-farm run greenfield/planner --snapshot', 'claude')).toBeUndefined();
+      readProfilesSwitchFrom(() => undefined);
+      expect(chatLaunchForTerminal('agent-farm run greenfield/planner --snapshot /s/d1', 'claude')).toEqual({ unsupported: '--snapshot' });
     });
 
     it('keeps the terminal with Profiles off, as on main', () => {
@@ -153,5 +163,19 @@ describe('the environment a chat tab agent starts with', () => {
     const env = chatTabEnv(panel, { agent: 'claude', launch: { kind: 'agent' }, cwd: folder, status: 'starting', orchestrationSessionId: 'o-1' });
     expect(env.GIT_CEILING_DIRECTORIES).toBe(path.dirname(folder));
     expect(env.PANE_ORCHESTRATION_SESSION_ID).toBe('o-1');
+  });
+  // T-110 (D-4): an agent-farm command the agent runs reads the Session's snapshot; a lead's follows its launch's after a Reload.
+  it('exports the tab\'s Agent Farm snapshot with Profiles on, the launch\'s first', () => {
+    runtime();
+    try {
+      readProfilesSwitchFrom(() => ({ sessionProfilesEnabled: true }));
+      expect(chatTabEnv(panel, { agent: 'claude', launch: { kind: 'agent' }, cwd: '/w', status: 'starting', agentFarmSnapshot: '/s/.agent-farm/snapshots/d1' }).AGENT_FARM_SNAPSHOT).toBe('/s/.agent-farm/snapshots/d1');
+      expect(chatTabEnv(panel, { agent: 'claude', launch: { kind: 'profile', profile: 'greenfield/orchestrator', snapshot: '/s/.agent-farm/snapshots/d2' }, cwd: '/w', status: 'starting', agentFarmSnapshot: '/s/.agent-farm/snapshots/d1' }).AGENT_FARM_SNAPSHOT).toBe('/s/.agent-farm/snapshots/d2');
+      // Review F-5: an inherited value shows what Profiles off leaves alone, and what Profiles on drops.
+      vi.stubEnv('AGENT_FARM_SNAPSHOT', '/inherited/d0');
+      expect(chatTabEnv(panel, { agent: 'claude', launch: { kind: 'agent' }, cwd: '/w', status: 'starting' }).AGENT_FARM_SNAPSHOT).toBeUndefined();
+      readProfilesSwitchFrom(() => undefined);
+      expect(chatTabEnv(panel, { agent: 'claude', launch: { kind: 'agent' }, cwd: '/w', status: 'starting', agentFarmSnapshot: '/s/.agent-farm/snapshots/d1' }).AGENT_FARM_SNAPSHOT).toBe('/inherited/d0');
+    } finally { readProfilesSwitchFrom(() => undefined); vi.unstubAllEnvs(); }
   });
 });

@@ -26,6 +26,7 @@ import { plainProfileAgent } from '../../../../shared/agentProfiles';
 import { profilesOn } from '../agentFarm/profilesFeature';
 import { agentFarmConfigRoot } from '../agentFarm/bundledAgentFarm';
 import { isAgentFarmShimPath } from '../runpaneShim';
+import { withSnapshotEnv } from '../agentFarm/sessionSnapshot';
 
 /** API keys a person may set for chat tabs on this machine, kept in the OS secure store. */
 export interface ChatTabSecrets { apiKey(agent: ChatAgent): string | undefined }
@@ -84,7 +85,9 @@ export function chatTabEnv(panel: ToolPanel, state: ChatPanelState, projectEnv: 
   if (state.sessionFolder) session.PANE_SESSION_DIR = state.sessionFolder;
   // Autopilot's tab: its run folder, for its documents (D-67). Never a Session (D-69).
   if (state.autopilotRunId) { session.PANE_AUTOPILOT_RUN_ID = state.autopilotRunId; session.PANE_AUTOPILOT_DIR = state.cwd; }
-  return withRunpaneBinOnPath({ ...env, ...session });
+  // T-110 (D-4): the snapshot the tab resolves from, so an agent-farm command its agent runs reads the same files.
+  const snapshot = state.launch.kind === 'profile' && state.launch.snapshot ? state.launch.snapshot : state.agentFarmSnapshot;
+  return withRunpaneBinOnPath(withSnapshotEnv({ ...env, ...session }, snapshot, profilesOn()));
 }
 
 /** An agent installed from the ACP Registry: how it starts (P5). Undefined for any other id. */
@@ -197,7 +200,8 @@ function fullAccessLaunch(chat: AgentChatConfig | undefined, launch: ChatTabLaun
  * tab can't run the same way. `--arg k=v` always carries over. With Profiles on (T-83 P3) so does
  * what Agent Farm prints for a launch link: the CLI as the path to Pane's own `agent-farm` shim (any
  * other path is the person's own executable and keeps its terminal),
- * `--parent <token>`, and `--config-root` naming Pane's own config root, which chat tabs always use.
+ * `--parent <token>`, `--snapshot <folder>` (T-110), and `--config-root` naming Pane's own config
+ * root, which chat tabs always use.
  */
 function agentFarmRunLaunch(tokens: readonly string[], on: boolean = profilesOn()): { launch: Extract<ChatTabLaunch, { kind: 'profile' }> } | { unsupported: string } | undefined {
   const cli = tokens[0] ?? '';
@@ -205,6 +209,7 @@ function agentFarmRunLaunch(tokens: readonly string[], on: boolean = profilesOn(
   if (!named || tokens[1] !== 'run' || !tokens[2] || tokens[2].startsWith('-')) return undefined;
   const args: Record<string, string> = {};
   let parent: string | undefined;
+  let snapshot: string | undefined;
   for (let index = 3; index < tokens.length; index += 1) {
     const token = tokens[index];
     const [flag, inline] = on && token.startsWith('--') && token.includes('=') ? [token.slice(0, token.indexOf('=')), token.slice(token.indexOf('=') + 1)] : [token, undefined];
@@ -216,6 +221,8 @@ function agentFarmRunLaunch(tokens: readonly string[], on: boolean = profilesOn(
       args[value.slice(0, separator)] = value.slice(separator + 1);
     } else if (on && flag === '--parent' && value && !value.startsWith('-')) {
       parent = value;
+    } else if (on && flag === '--snapshot' && value && !value.startsWith('-')) {
+      snapshot = value;
     } else if (on && flag === '--config-root' && value && path.resolve(value) === path.resolve(agentFarmConfigRoot(getAppDirectory()))) {
       continue;
     } else {
@@ -225,6 +232,7 @@ function agentFarmRunLaunch(tokens: readonly string[], on: boolean = profilesOn(
   const launch: Extract<ChatTabLaunch, { kind: 'profile' }> = { kind: 'profile', profile: tokens[2] };
   if (Object.keys(args).length) launch.args = args;
   if (parent) launch.parent = parent;
+  if (snapshot) launch.snapshot = snapshot;
   return { launch };
 }
 

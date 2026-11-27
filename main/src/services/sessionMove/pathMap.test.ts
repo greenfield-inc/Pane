@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { claudeProjectDirName } from '../agentTranscript/claude';
-import { buildPathMap, rewriteJson, mapPath, rewriteText } from './pathMap';
+import { buildPathMap, rewriteJson, mapPath, rewriteLaunchCommand, rewriteText, snapshotArguments } from './pathMap';
 
 const map = buildPathMap({
   sourceHome: '/Users/tylerbrown',
@@ -75,5 +75,49 @@ describe('rewriteText', () => {
     const odd = buildPathMap({ sourceHome: '/a', targetHome: 'C:\\Users\\b "q"', entries: [] });
     const state = { cwd: '/a/repo', url: 'file:///a/repo/x.html', nested: [{ path: '/a/y' }], n: 2, flag: true, none: null };
     expect(rewriteJson(odd, state)).toEqual({ cwd: 'C:\\Users\\b "q"/repo', url: 'file://C:\\Users\\b "q"/repo/x.html', nested: [{ path: 'C:\\Users\\b "q"/y' }], n: 2, flag: true, none: null });
+  });
+});
+
+// T-110 review F-11: a link-line tab's stored --snapshot wins over Agent Farm's record when the tab is
+// restored ('{command} --resume <id>'), so a move must point it at the moved snapshot, quoted for there.
+describe('rewriteLaunchCommand', () => {
+  const map = buildPathMap({ sourceHome: '/Users/a', targetHome: '/Users/Jo B', entries: [{ from: '/Users/a/.pane/sessions/s', to: '/Users/Jo B/.pane/sessions/s' }] });
+  it('points --snapshot at the moved snapshot as one quoted word, and rewrites the other paths as before', () => {
+    expect(rewriteLaunchCommand(map, 'agent-farm run greenfield/planner --parent greenfield/orchestrator@af-1 --snapshot /Users/a/.pane/sessions/s/.agent-farm/snapshots/d1'))
+      .toBe("agent-farm run greenfield/planner --parent greenfield/orchestrator@af-1 --snapshot '/Users/Jo B/.pane/sessions/s/.agent-farm/snapshots/d1'");
+    expect(rewriteLaunchCommand(map, "agent-farm run x --snapshot='/Users/a/.pane/sessions/s/.agent-farm/snapshots/d1' --arg k=v"))
+      .toBe("agent-farm run x --snapshot='/Users/Jo B/.pane/sessions/s/.agent-farm/snapshots/d1' --arg k=v");
+  });
+
+  it('leaves a word unquoted when the moved path needs no quoting, and a command without --snapshot as rewriteText does', () => {
+    const plain = buildPathMap({ sourceHome: '/Users/a', targetHome: '/home/b', entries: [{ from: '/Users/a/.pane/sessions/s', to: '/home/b/.pane/sessions/s' }] });
+    expect(rewriteLaunchCommand(plain, 'agent-farm run x --snapshot "/Users/a/.pane/sessions/s/.agent-farm/snapshots/d1"')).toBe('agent-farm run x --snapshot /home/b/.pane/sessions/s/.agent-farm/snapshots/d1');
+    expect(rewriteLaunchCommand(map, 'claude --settings /Users/a/x.json')).toBe(rewriteText(map, 'claude --settings /Users/a/x.json'));
+  });
+});
+
+// Review F-6: one reader for a command's --snapshot, shared by the move's rewrite and its check, reading POSIX quoting.
+describe('snapshotArguments', () => {
+  it('reads the folder of each --snapshot, bare, quoted or with =, as the shell would', () => {
+    const folders = (command: string) => snapshotArguments(command).map(argument => argument.folder);
+    expect(folders('agent-farm run x --snapshot /s/d1')).toEqual(['/s/d1']);
+    expect(folders("agent-farm run x --snapshot '/Jo B/d1' --arg k=v")).toEqual(['/Jo B/d1']);
+    expect(folders('agent-farm run x --snapshot="/Jo B/d1"')).toEqual(['/Jo B/d1']);
+    expect(folders("agent-farm run x --snapshot '/Users/o'\\''brien/d1'")).toEqual(["/Users/o'brien/d1"]);
+    expect(folders('agent-farm run x --snapshots /s/d1 --no-snapshot')).toEqual([]);
+  });
+
+  it('gives the span it read, so the word can be replaced in place', () => {
+    const command = "agent-farm run x --snapshot '/a b/d1' --arg k=v";
+    const [argument] = snapshotArguments(command);
+    expect(command.slice(argument.start, argument.end)).toBe("--snapshot '/a b/d1'");
+  });
+
+  it('moves a folder with an apostrophe and reads it back on a second move', () => {
+    const first = buildPathMap({ sourceHome: '/Users/a', targetHome: "/Users/o'brien", entries: [{ from: '/Users/a/.pane/sessions/s', to: "/Users/o'brien/.pane/sessions/s" }] });
+    const moved = rewriteLaunchCommand(first, 'agent-farm run x --snapshot /Users/a/.pane/sessions/s/.agent-farm/snapshots/d1');
+    expect(snapshotArguments(moved).map(argument => argument.folder)).toEqual(["/Users/o'brien/.pane/sessions/s/.agent-farm/snapshots/d1"]);
+    const second = buildPathMap({ sourceHome: "/Users/o'brien", targetHome: '/home/c', entries: [{ from: "/Users/o'brien/.pane/sessions/s", to: '/home/c/.pane/sessions/s' }] });
+    expect(rewriteLaunchCommand(second, moved)).toBe('agent-farm run x --snapshot /home/c/.pane/sessions/s/.agent-farm/snapshots/d1');
   });
 });

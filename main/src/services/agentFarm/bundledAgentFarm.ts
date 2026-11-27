@@ -5,7 +5,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
 import yaml from 'js-yaml';
-import { reasonOf } from '../../../../shared/paneError';
+import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { hashDirectory } from '../skillCacheManager';
 import { syncedPluginEdits } from './profileSyncFile';
@@ -13,6 +13,7 @@ import { writeRecoveryNote } from './agentFarmRecovery';
 import { linkedAgentRefs, panePluginFiles, panePluginInstalled, parseProfileListJson, profileListEntries, writePanePluginSource } from './agentFarmProfiles';
 import { PANE_PROFILE_PLUGIN } from '../../../../shared/agentProfiles';
 import type { AgentFarmProfileList } from '../../../../shared/types/agentFarmProfiles';
+import { parseSnapshotCreated, type SessionSnapshot } from './sessionSnapshot';
 
 const execFileAsync = promisify(execFile);
 
@@ -741,4 +742,22 @@ export async function reinstallBundledPlugin(paneDir: string, name: string, bund
     await fs.writeFile(manifestPath, `${JSON.stringify(next, null, 2)}\n`);
   }
   return version;
+}
+
+/**
+ * Saves a Session's snapshot (T-110) with the bundled Agent Farm: `snapshot create --directory
+ * <Session folder> --json` against Pane's config root. The same installed files give the same
+ * snapshot, so calling it again without an install between returns the folder it returned before.
+ */
+export async function createPaneSessionSnapshot(paneDir: string, sessionFolder: string, run: AgentFarmRunner = runAgentFarm, bundle?: BundledAgentFarm | null): Promise<SessionSnapshot> {
+  const agentFarm = paneAgentFarmProcess(paneDir, ['snapshot', 'create', '--directory', sessionFolder, '--json'], { profiles: true, bundle });
+  if (!agentFarm) throw new PaneError('AGENT_FARM_SNAPSHOT_FAILED', `This Pane build does not include ${AGENT_FARM_PACKAGE}, so it can't save the Session's snapshot.`, 'Reinstall Pane from runpane.com.');
+  await fs.mkdir(sessionFolder, { recursive: true });
+  let stdout: string;
+  try { stdout = await run(agentFarm); }
+  catch (error) {
+    const reason = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1) || reasonOf(error);
+    throw new PaneError('AGENT_FARM_SNAPSHOT_FAILED', `Agent Farm couldn't save the Session's snapshot: ${reason}.`, 'Restart Pane, which reinstalls its bundled Agent Farm, then try again.');
+  }
+  return parseSnapshotCreated(stdout, sessionFolder);
 }

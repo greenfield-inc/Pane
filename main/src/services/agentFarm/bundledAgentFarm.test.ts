@@ -11,6 +11,7 @@ import {
   bundledAgentFarm,
   agentFarmTelemetrySync,
   bundledAgentFarmProcess,
+  createPaneSessionSnapshot,
   installBundledAgentFarm,
   paneAgentFarmHarness,
   listPaneAgentFarmProfiles,
@@ -733,15 +734,15 @@ describe('paneAgentFarmProcess', () => {
 
 describe('the pinned package', () => {
   // T-83 P1: Agent Farm 0.3.0 carries greenfield 0.1.0 (three profiles; every helper is a linked agent).
-  it('is 0.3.0 in both package.json files, and resolves and answers --version with this Node', () => {
+  it('is 0.3.1 in both package.json files, and resolves and answers --version with this Node', () => {
     const pin = (file: string) => JSON.parse(readFileSync(path.join(__dirname, file), 'utf8')).dependencies['@greenfieldco/agent-farm'];
-    expect([pin('../../../../package.json'), pin('../../../package.json')]).toEqual(['0.3.0', '0.3.0']);
+    expect([pin('../../../../package.json'), pin('../../../package.json')]).toEqual(['0.3.1', '0.3.1']);
     const bundle = bundledAgentFarm();
-    expect(bundle?.version).toBe('0.3.0');
+    expect(bundle?.version).toBe('0.3.1');
     if (!bundle) return;
     const process = bundledAgentFarmProcess(bundle, ['--version'], tempDir());
     // --version takes no config root; run the entry alone.
-    expect(execFileSync(process.executable, [bundle.entry, '--version'], { env: process.env, encoding: 'utf8' }).trim()).toBe('0.3.0');
+    expect(execFileSync(process.executable, [bundle.entry, '--version'], { env: process.env, encoding: 'utf8' }).trim()).toBe('0.3.1');
   });
 
   // electron-builder strips `scripts` from every package.json it packs, which changes a bundled
@@ -756,5 +757,28 @@ describe('the pinned package', () => {
     if (!bundle) throw new Error('the pinned Agent Farm package is missing');
     expect(readdirSync(path.join(bundle.root, 'plugins'))).not.toContain('dcouple');
     expect(readdirSync(path.join(bundle.root, 'plugins', 'greenfield', 'profiles')).filter((file) => file.endsWith('.yaml')).sort()).toEqual(['business.yaml', 'orchestrator.yaml', 'seo.yaml']);
+  });
+});
+
+// T-110: a Session's snapshot, saved by the bundled CLI in the Session folder.
+describe('createPaneSessionSnapshot', () => {
+  it('runs snapshot create for the Session folder against Pane\'s config root, and keeps the path relative', async () => {
+    const paneDir = tempDir();
+    const sessionFolder = path.join(paneDir, 'sessions', 's1');
+    const calls: AgentFarmProcess[] = [];
+    const snapshot = await createPaneSessionSnapshot(paneDir, sessionFolder, async process => {
+      calls.push(process);
+      return JSON.stringify({ path: path.join(sessionFolder, '.agent-farm', 'snapshots', 'd1'), digest: 'd1', plugins: { greenfield: '0.1.2' } });
+    }, fakeBundle());
+    expect(snapshot).toEqual({ path: '.agent-farm/snapshots/d1', digest: 'd1', plugins: { greenfield: '0.1.2' } });
+    expect(calls[0].args.slice(1)).toEqual(['snapshot', 'create', '--directory', sessionFolder, '--json', '--config-root', agentFarmConfigRoot(paneDir)]);
+    expect(existsSync(sessionFolder)).toBe(true);
+  });
+
+  it('says what failed and what to do when the CLI fails or the build has none', async () => {
+    const paneDir = tempDir();
+    await expect(createPaneSessionSnapshot(paneDir, path.join(paneDir, 's'), async () => { throw Object.assign(new Error('Command failed'), { stderr: 'note\nError: disk full\n' }); }, fakeBundle()))
+      .rejects.toMatchObject({ code: 'AGENT_FARM_SNAPSHOT_FAILED', message: expect.stringContaining('Error: disk full'), next: expect.stringContaining('Restart Pane') });
+    await expect(createPaneSessionSnapshot(paneDir, path.join(paneDir, 's'), async () => '', null)).rejects.toMatchObject({ code: 'AGENT_FARM_SNAPSHOT_FAILED', next: expect.stringContaining('Reinstall Pane') });
   });
 });

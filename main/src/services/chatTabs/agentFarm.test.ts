@@ -145,6 +145,28 @@ describe('Agent Farm profiles in chat tabs', () => {
       ['run', 'greenfield/planner', '--print-acp', '--acp-adapter', '/adapter.js'],
     ]);
   });
+
+  // T-110: a Session's lead, and a tab started from a link line, resolve from their snapshot at every start.
+  it('passes the launch\'s snapshot as --snapshot, only with Profiles on', async () => {
+    const directory = scratch();
+    const calls: string[][] = [];
+    const recording = async (args: string[], cwd: string, env: Record<string, string>) => { calls.push(args); return bundled(args, cwd, env); };
+    const { ELECTRON_RUN_AS_NODE: _unset, ...env } = inherited();
+    const on = new AgentFarmProfiles({ ...PROFILES_ON, sessionProfile: async () => undefined, bundled: recording, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    await on.print('greenfield/planner', {}, 'claude', directory, env, 'greenfield/orchestrator@af-1', '/s/.agent-farm/snapshots/d1');
+    const off = new AgentFarmProfiles({ profilesOn: () => false, sessionProfile: async () => undefined, executable: () => undefined, bundled: recording, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    await off.print('greenfield/planner', {}, 'claude', directory, env, undefined, '/s/.agent-farm/snapshots/d1');
+    expect(calls).toEqual([
+      ['run', 'greenfield/planner', '--print-acp', '--acp-adapter', '/adapter.js', '--parent', 'greenfield/orchestrator@af-1', '--snapshot', '/s/.agent-farm/snapshots/d1'],
+      ['run', 'greenfield/planner', '--print-acp', '--acp-adapter', '/adapter.js'],
+    ]);
+  });
+
+  it('says Reload profile is the way on when Agent Farm refuses an unreadable snapshot', async () => {
+    const profiles = new AgentFarmProfiles({ ...PROFILES_ON, sessionProfile: async () => undefined, bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    await expect(profiles.print('greenfield/orchestrator', {}, 'claude', scratch(), { PATH: process.env.PATH ?? '' }, undefined, '/s/.agent-farm/snapshots/gone'))
+      .rejects.toMatchObject({ code: 'CHAT_PROFILE_SNAPSHOT_UNREADABLE', message: "Agent Farm can't start greenfield/orchestrator from its snapshot: Snapshot /s/.agent-farm/snapshots/gone is missing.", next: expect.stringContaining('Reload the Session\'s profile') });
+  });
 });
 
 // As main runs profiles (T-63's flag off): the person's own agent-farm first, the bundled copy without one.
