@@ -13,11 +13,12 @@ export interface SplitPixels {
 
 /**
  * Each node's place in a stage of `box`: a split divides its box by its sizes (any unit;
- * equally when it has none), and a group at the root takes the whole stage. Given as
+ * equally when it has none), no pane under `minPane` while the box has room (what Allotment
+ * would enforce), and a group at the root takes the whole stage. Given as
  * Allotment's `defaultSizes`, the sizes fill the stage it is mounted in, so it can lay
  * its panes out before the first paint instead of after its own resize observer reports.
  */
-export function splitPixelSizes(root: PanelLayoutNode, box: StageBox): SplitPixels {
+export function splitPixelSizes(root: PanelLayoutNode, box: StageBox, minPane = 0): SplitPixels {
   const sizes = new Map<string, number[]>();
   const boxes = new Map<string, StageBox>();
   const rounded = { width: Math.round(box.width), height: Math.round(box.height) };
@@ -38,6 +39,19 @@ export function splitPixelSizes(root: PanelLayoutNode, box: StageBox): SplitPixe
       given += size;
       return size;
     });
+    // A pane under the minimum takes it from the largest panes, as Allotment would clamp it.
+    const floor = Math.min(minPane, Math.floor(total / pixels.length));
+    for (let index = 0; index < pixels.length; index++) {
+      let short = floor - pixels[index];
+      while (short > 0) {
+        const largest = pixels.reduce((best, size, at) => (at !== index && size > pixels[best] ? at : best), index === 0 ? 1 : 0);
+        const spare = Math.min(short, pixels[largest] - floor);
+        if (spare <= 0) break;
+        pixels[largest] -= spare;
+        pixels[index] += spare;
+        short -= spare;
+      }
+    }
     sizes.set(node.id, pixels);
     node.children.forEach((child, index) => walk(child, row ? { width: pixels[index], height: place.height } : { width: place.width, height: pixels[index] }));
   })(root, rounded);

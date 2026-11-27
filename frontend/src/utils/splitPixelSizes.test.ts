@@ -27,4 +27,10 @@ describe('splitPixelSizes', () => {
     expect(boxes.get('chat')).toEqual({ width: 500, height: 801 });
     expect(boxes.get('b')).toEqual({ width: 500, height: 400 });
   });
+
+  it('keeps every pane at the minimum while the box has room, taking it from the largest', () => {
+    const root: PanelLayoutNode = { type: 'split', id: 'root', direction: 'row', sizes: [100, 450, 450], children: [group('a'), group('b'), group('c')] };
+    expect(splitPixelSizes(root, { width: 1000, height: 900 }, 120).sizes.get('root')).toEqual([120, 430, 450]);
+    expect(splitPixelSizes(root, { width: 300, height: 900 }, 120).sizes.get('root')).toEqual([100, 100, 100]);
+  });
 });

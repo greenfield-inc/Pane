@@ -105,6 +105,9 @@ export interface SplitLayoutProps {
 // Component
 // ---------------------------------------------------------------------------
 
+/** No pane narrower or shorter than this. */
+const MIN_PANE_PX = 120;
+
 export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
   layout,
   panels,
@@ -179,9 +182,10 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
   useLayoutEffect(() => {
     if (mounted !== undefined || !stageRef.current) return;
     const { width, height } = stageRef.current.getBoundingClientRect();
-    // A stage with no size yet (hidden): Allotment sizes itself when it shows, as before.
-    setMounted(width > 0 && height > 0 ? splitPixelSizes(layout.root, { width, height }) : null);
-  }, [mounted, layout.root]);
+    // A stage with no size yet (hidden), or a maximized group (Allotment applies hidden panes only
+    // once it has measured): Allotment sizes itself when it reports, as before.
+    setMounted(width > 0 && height > 0 && !zoomedGroupId ? splitPixelSizes(layout.root, { width, height }, MIN_PANE_PX) : null);
+  }, [mounted, layout.root, zoomedGroupId]);
   const handles = useRef(new Map<string, AllotmentHandle>());
   const laidOut = useRef(new Set<string>());
   useLayoutEffect(() => {
@@ -261,7 +265,9 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
           if (handle) handles.current.set(node.id, handle);
           else handles.current.delete(node.id);
         }}
-        defaultSizes={mounted?.sizes.get(node.id) ?? (node.type === 'split' ? node.sizes : undefined)}
+        // Measured sizes only for the first mount: a split mounted later (a column promoted to the
+        // root, say) takes the model's sizes, which follow every sash drag since.
+        defaultSizes={(!sized && mounted?.sizes.get(node.id)) || (node.type === 'split' ? node.sizes : undefined)}
         proportionalLayout
         onChange={handleChange}
         onDragEnd={handleDragEnd}
@@ -271,7 +277,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
           return (
             <Allotment.Pane
               key={child.id}
-              minSize={120}
+              minSize={MIN_PANE_PX}
               visible={isVisible}
             >
               {paneContent(child.id, renderNode(child))}
@@ -286,7 +292,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
     isTabDragging, draggedPanelId, dropZones, onDropZoneChange,
     onDropTab, onDragStart, onDragEnd, onStripDrop, getPanelTabPresentation, zoomedGroupId, emptyState,
     showAddTool, alwaysShowClose, keepPermanentTabsInGroups, renderAddTool,
-    onToggleMaximize, hidden, renderPanelContent, mounted, paneContent,
+    onToggleMaximize, hidden, renderPanelContent, mounted, sized, paneContent,
   ]);
 
   // Measured first: the empty stage takes the place Allotment's root then fills (both fill their parent).

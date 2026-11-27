@@ -633,8 +633,12 @@ test('arrow keys show chat Sessions at once, and only a settle starts an agent (
 // split draws that split in its first frame, and one without draws its chat full width at
 // once; neither shows the chat centered first and then pushes it aside.
 
-/** One painted frame: the Session shown (not kept dimmed behind the cursor), its chat group as [left, width] and composer as [left, width, height]. */
-interface ColumnFrame { t: number; session: string | null; group: number[] | null; composer: number[] | null }
+/**
+ * One sample of what the window shows: the Session on screen (not one kept dimmed behind the
+ * cursor), each of its panel groups as [left, width] in order (so a split arriving late shows),
+ * and its chat composer as [left, width, height].
+ */
+interface ColumnFrame { t: number; via: 'commit' | 'frame' | 'painted'; session: string | null; groups: number[][]; composer: number[] | null }
 declare global {
   var __paneColumnFrames: ColumnFrame[] | undefined;
   /** In the main process: the screencast frames of the move in flight (SESSION_SWITCH_FRAMES). */
@@ -643,9 +647,9 @@ declare global {
 }
 
 /**
- * From the next keydown, for `ms`: what each frame painted. Read in a task posted from the
- * frame's rAF, so after that frame's layout, resize observers and paint (a read inside rAF
- * would see a split before its own resize observer lays it out, which is never painted).
+ * From the next keydown, for `ms`: the Session shown, sampled at every DOM commit (a mutation
+ * observer, which runs before any resize observer could lay a split out, so an unsized pane is
+ * seen whether or not that state is painted), at each frame, and after each frame's paint.
  */
 async function recordColumns(page: Page, ms: number): Promise<void> {
   await page.evaluate(ms => {
@@ -659,25 +663,30 @@ async function recordColumns(page: Page, ms: number): Promise<void> {
       if (rect.width <= 0) return null;
       return withHeight ? [+rect.left.toFixed(1), +rect.width.toFixed(1), +rect.height.toFixed(1)] : [+rect.left.toFixed(1), +rect.width.toFixed(1)];
     };
-    const painted = new MessageChannel();
-    let frameAt = 0;
-    painted.port1.onmessage = () => {
+    const sample = (via: ColumnFrame['via']) => {
       if (start === undefined) return;
+      const now = performance.now();
+      if (now - start > ms) return;
       // The Session's own workspace, not the one kept dimmed behind the cursor while it is read.
       const content = Array.from(document.querySelectorAll('[data-session-content-id]')).find(element => !element.closest('[data-session-shown-before]'));
-      const composer = content?.querySelector('textarea[data-chat-composer]');
-      frames.push({ t: +(frameAt - start).toFixed(1), session: content?.getAttribute('data-session-content-id') ?? null, group: box(composer?.closest('[data-panel-group-id]')), composer: box(composer, true) });
+      const groups = content ? Array.from(content.querySelectorAll('[data-panel-group-id]')).map(group => box(group) ?? [0, 0]) : [];
+      frames.push({ t: +(now - start).toFixed(1), via, session: content?.getAttribute('data-session-content-id') ?? null, groups, composer: box(content?.querySelector('textarea[data-chat-composer]'), true) });
     };
+    const observer = new MutationObserver(() => sample('commit'));
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['style', 'class', 'data-session-content-id', 'data-session-shown-before'] });
+    const painted = new MessageChannel();
+    painted.port1.onmessage = () => sample('painted');
     const tick = (now: number) => {
-      frameAt = now;
+      sample('frame');
       painted.port2.postMessage(null);
       if (start === undefined || now - start <= ms) requestAnimationFrame(tick);
+      else observer.disconnect();
     };
     requestAnimationFrame(tick);
   }, ms);
 }
 
-/** Per Session shown, in order: the frames whose chat is not where that showing ends (more than 1 px off). */
+/** Per Session shown, in order: the samples whose chat or groups are not where that showing ends (more than 1 px off). */
 function columnMoves(frames: ColumnFrame[]): Array<{ session: string; first: ColumnFrame; last: ColumnFrame; moved: ColumnFrame[] }> {
   const off = (a: number[] | null, b: number[] | null) => !a || !b || a.length !== b.length || a.some((value, index) => Math.abs(value - b[index]) > 1);
   const runs: Array<{ session: string; frames: ColumnFrame[] }> = [];
@@ -689,7 +698,8 @@ function columnMoves(frames: ColumnFrame[]): Array<{ session: string; first: Col
   }
   return runs.map(({ session, frames: shown }) => {
     const last = shown[shown.length - 1];
-    return { session, first: shown[0], last, moved: shown.filter(frame => off(frame.group, last.group) || off(frame.composer, last.composer)) };
+    const moved = shown.filter(frame => off(frame.composer, last.composer) || frame.groups.length !== last.groups.length || frame.groups.some((group, index) => off(group, last.groups[index])));
+    return { session, first: shown[0], last, moved };
   });
 }
 
@@ -781,11 +791,10 @@ test('the chat column holds still from the first preview frame to settle, with a
       writeFileSync(path.join(OUT, `t140-${name}.json`), JSON.stringify({ runs: runs.map(run => ({ ...run, session: named.get(run.session) ?? run.session, moved: run.moved.length })), frames }, null, 2));
       for (const run of runs) {
         if (run.moved.length === 0) continue;
-        failures.push(`${name}: ${named.get(run.session) ?? run.session}'s chat was off where it ended in ${run.moved.length} painted frame(s); first ${JSON.stringify(run.first)}, end ${JSON.stringify(run.last)}, off: ${JSON.stringify(run.moved.slice(0, 3))}`);
+        failures.push(`${name}: ${named.get(run.session) ?? run.session}'s chat or split was off where it ended in ${run.moved.length} of ${frames.length} samples; first ${JSON.stringify(run.first)}, end ${JSON.stringify(run.last)}, off: ${JSON.stringify(run.moved.slice(0, 3))}`);
       }
       return runs;
     };
-    const splitShown = (session: Seeded) => page.evaluate(id => document.querySelectorAll(`[data-session-content-id="${CSS.escape(id)}"] [data-panel-group-id]`).length > 1, session.id);
     for (const [session, key, name, split] of [
       [splitRow, 'ArrowDown', 'split-not-opened', true],
       [plainRow, 'ArrowDown', 'plain-not-opened', false],
@@ -794,13 +803,21 @@ test('the chat column holds still from the first preview frame to settle, with a
       [splitRow, 'ArrowUp', 'split-cached', true],
     ] as const) {
       const runs = await record(name, [key], 0);
-      expect(runs.at(-1)?.session, `${name}: ends on ${session.name}`).toBe(session.id);
-      expect(await splitShown(session), `${name}: ${session.name} ${split ? 'has' : 'has no'} right split`).toBe(split);
+      const shown = runs.at(-1);
+      expect(shown?.session, `${name}: ends on ${session.name}`).toBe(session.id);
+      // From its first sample: the split (or none) is there at once, since every sample matches the last.
+      expect((shown?.last.groups.length ?? 0) > 1, `${name}: ${session.name} ${split ? 'has' : 'has no'} right split`).toBe(split);
     }
     // Quickly, as a person scans: 120 ms apart, down over rows not opened yet, then back up over them.
     await focusRow(page, beyond);
-    await record('fast-down-not-opened', fast.map(() => 'ArrowDown' as const), 120);
-    await record('fast-up-held', fast.map(() => 'ArrowUp' as const), 120);
+    const passed = (runs: Array<{ session: string }>) => runs.map(run => run.session).filter((id, index, all) => all.indexOf(id) === index);
+    // Not opened: a Session whose peek outlasts the 120 ms stays behind the dimmed one, so only the last must show.
+    const down = await record('fast-down-not-opened', fast.map(() => 'ArrowDown' as const), 120);
+    expect(down.at(-1)?.session, 'the fast walk down ends on its last row').toBe(fast[fast.length - 1].id);
+    // Held now: each one shows as the cursor reaches it, in order.
+    const up = await record('fast-up-held', fast.map(() => 'ArrowUp' as const), 120);
+    const upOrder = [...fast].reverse().slice(1).concat(beyond).map(session => session.id);
+    expect(passed(up).filter(id => upOrder.includes(id)), 'the fast walk up shows every held row in order').toEqual(upOrder);
     expect(failures, 'the chat column holds still from the first frame to settle').toEqual([]);
   } finally {
     await app.close().catch(() => undefined);
