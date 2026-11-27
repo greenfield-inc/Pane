@@ -1,3 +1,4 @@
+import { isReadOnlyHost, useReadOnlyHost } from '../stores/readOnlyHostStore';
 import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './CreateOrchestrationSessionDialog';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
@@ -15,7 +16,7 @@ import {
   useOrchestrationSessionStore,
   type OrchestrationSessionAvailability,
 } from '../stores/orchestrationSessionStore';
-import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 import type { OrchestrationSessionArchivedPanes, OrchestrationSessionUpdateInput } from '../../../shared/types/orchestrationSession';
 import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '../../../shared/types/orchestrationSession';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
@@ -90,7 +91,7 @@ function sessionOrderError(cause: unknown): string {
   return `The Session order was not saved, so the list is back in its previous order. ${sentence}${next}`;
 }
 
-function sessionTestId(session: OrchestrationSessionRecord, list: SessionOrderList): string {
+function sessionTestId(session: OrchestrationSessionSummary, list: SessionOrderList): string {
   const isLegacy = session.id === LEGACY_ORCHESTRATION_SESSION_ID;
   if (list === 'rail') return isLegacy ? 'compact-pane-chat' : `compact-orchestration-session-${session.id}`;
   if (isLegacy) return list === 'pinned' ? 'orchestration-pinned-pane-chat' : 'orchestration-pane-chat';
@@ -103,7 +104,7 @@ function dropEdge(event: { clientY: number; currentTarget: Element }): SessionDr
   return event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
 }
 
-function statusLabel(session: OrchestrationSessionRecord): string {
+function statusLabel(session: OrchestrationSessionSummary): string {
   if (session.blockers.length > 0) return 'Blocked';
   if (session.report) return 'Report available';
   return 'No report yet';
@@ -225,7 +226,7 @@ export function OrchestrationSessionNav({
   }, [refresh]);
 
   /** A person clicked this Session row: resume only its chat when Settings asks. */
-  const resumeChatOnOpen = useCallback((session: OrchestrationSessionRecord) => {
+  const resumeChatOnOpen = useCallback((session: OrchestrationSessionSummary) => {
     const chatPanels = usePanelStore.getState().getSessionPanels(session.internalSessionId);
     // Unloaded chat tabs may be paused; resuming a chat that is running changes nothing.
     const chatPaused = Boolean(session.paused) || chatPanels.length === 0 || panePausedMark(chatPanels) !== undefined;
@@ -255,7 +256,7 @@ export function OrchestrationSessionNav({
   }, [toggleStoredSessionExpanded]);
 
   const openSessionMenu = useCallback((
-    session: OrchestrationSessionRecord,
+    session: OrchestrationSessionSummary,
     x: number,
     y: number,
     trigger?: HTMLElement,
@@ -274,7 +275,7 @@ export function OrchestrationSessionNav({
     });
   }, []);
 
-  const handleSessionContextMenu = useCallback((event: ReactMouseEvent<HTMLElement>, session: OrchestrationSessionRecord) => {
+  const handleSessionContextMenu = useCallback((event: ReactMouseEvent<HTMLElement>, session: OrchestrationSessionSummary) => {
     event.preventDefault();
     event.stopPropagation();
     // Not a trigger: a right-click leaves focus where it was, but a dialog closes back to this row.
@@ -285,7 +286,7 @@ export function OrchestrationSessionNav({
     list === 'pinned' ? pinnedSessions : activeSessions
   ), [activeSessions, pinnedSessions]);
 
-  const moveSession = useCallback(async (session: OrchestrationSessionRecord, order: string[]) => {
+  const moveSession = useCallback(async (session: OrchestrationSessionSummary, order: string[]) => {
     setActionError(null);
     setOrderAnnouncement(`Moved ${session.name || 'Pane Chat'} to position ${order.indexOf(session.id) + 1} of ${order.length}`);
     try {
@@ -297,9 +298,10 @@ export function OrchestrationSessionNav({
     }
   }, [refresh, reorder]);
 
-  const handleSessionKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>, session: OrchestrationSessionRecord, list: SessionOrderList) => {
+  const handleSessionKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>, session: OrchestrationSessionSummary, list: SessionOrderList) => {
     if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
       event.preventDefault();
+      if (isReadOnlyHost()) return;
       const order = stepOrder(listSessions(list).map(item => item.id), session.id, event.key === 'ArrowUp' ? -1 : 1);
       if (!order) return;
       focusAfterMove.current = sessionTestId(session, list);
@@ -328,7 +330,7 @@ export function OrchestrationSessionNav({
   }, [draggedSessionId]);
 
   /** Drag handlers for one Session in one list: the row starts the drag, the whole Session takes drops. */
-  const sessionDragProps = (session: OrchestrationSessionRecord, list: SessionOrderList) => {
+  const sessionDragProps = (session: OrchestrationSessionSummary, list: SessionOrderList) => {
     // Only a drag that started in this list, over a Session other than the dragged one.
     const fromThisList = () => {
       const origin = dragOrigin.current;
@@ -446,7 +448,7 @@ export function OrchestrationSessionNav({
   const sessionsVisible = availabilityIsVisible(availability);
   const hasPinnedContent = pinnedSessions.length > 0 || Boolean(pinnedPaneRows);
 
-  const renderSessionRow = (session: OrchestrationSessionRecord, placement: SessionRowPlacement): ReactNode => {
+  const renderSessionRow = (session: OrchestrationSessionSummary, placement: SessionRowPlacement): ReactNode => {
     const visibleAssociations = session.associations.filter(association => (
       !availablePaneIds || availablePaneIds.has(association.paneId)
     ));
@@ -551,7 +553,7 @@ export function OrchestrationSessionNav({
                 const bounds = event.currentTarget.getBoundingClientRect();
                 openSessionMenu(session, bounds.left, bounds.bottom, event.currentTarget);
               }}
-              className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
+              className="needs-full-access inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
             >
               <MoreHorizontal className="h-3.5 w-3.5" />
             </button>
@@ -578,7 +580,7 @@ export function OrchestrationSessionNav({
               data-compact-rail-item
               aria-label="New Session"
               onClick={() => setShowCreate(true)}
-              className="flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
+              className="needs-full-access flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
             >
               <Plus className="h-4 w-4" />
             </button>
@@ -716,7 +718,7 @@ export function OrchestrationSessionNav({
               event.stopPropagation();
               setShowCreate(true);
             }}
-            className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
+            className="needs-full-access inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -769,6 +771,7 @@ interface SessionContextMenuProps {
 }
 
 function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: SessionContextMenuProps) {
+  const readOnly = useReadOnlyHost();
   const moveBlockedReason = useMoveToHostBlockedReason();
   const [renaming, setRenaming] = useState<SessionContextMenuState | null>(null);
   const [name, setName] = useState('');
@@ -805,7 +808,7 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
 
   return (<>
     <TerminalPopover
-      visible={menu !== null}
+      visible={menu !== null && !readOnly}
       x={menu?.x ?? 0}
       y={menu?.y ?? 0}
       onClose={onClose}

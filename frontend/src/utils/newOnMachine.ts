@@ -2,7 +2,7 @@ import { preferredMachineColorSlot } from '../../../shared/utils/machineColor';
 import { machineLetter } from '../../../shared/utils/machineMarks';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { MachineCommand, MachineReadChannel, MachineResult, MachineState } from '../../../shared/types/machineConnections';
-import type { OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
+import { SESSION_LIST_SUMMARY, type OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
 import type { CreateSessionRequest } from '../types/session';
 import type { MachineEntry, MachineOs } from './machineList';
 import { startOwnPaneCreation } from './ownPaneCreations';
@@ -53,7 +53,8 @@ interface MachineReply {
  */
 export function newMachines(states: readonly MachineState[], entries: readonly MachineEntry[], currentId: string): NewMachine[] {
   const known = states.length > 0 ? states : [{ id: currentId, label: 'This computer', kind: 'local', status: 'online', offlineSince: null } satisfies MachineState];
-  return known.map((state) => {
+  // Nothing can be created on a machine this computer only watches.
+  return known.filter((state) => state.access !== 'read').map((state) => {
     const entry = entries.find((candidate) => candidate.id === state.id);
     const name = entry?.name ?? state.label;
     const current = state.id === currentId;
@@ -118,7 +119,7 @@ function toReply(result: MachineResult): MachineReply & { data?: JsonValue } {
   return { success: reply.success, error: reply.error ?? undefined, details: reply.details ?? undefined, command: reply.command ?? undefined, data: reply.data };
 }
 
-async function read<Value>(machineId: string, machineName: string, channel: MachineReadChannel, args: string[], schema: BoundarySchema<Value>): Promise<Value> {
+async function read<Value>(machineId: string, machineName: string, channel: MachineReadChannel, args: JsonValue[], schema: BoundarySchema<Value>): Promise<Value> {
   const reply = toReply(await machinesApi().read(machineId, channel, args));
   if (!reply.success) throw new Error(`${machineName} did not answer: ${reply.error ?? 'it gave no reason'}. Pick the machine again to retry.`);
   return decodeBoundary(reply.data, schema);
@@ -145,7 +146,7 @@ export async function readRuntimes(machine: Pick<NewMachine, 'id' | 'name'>): Pr
 
 /** The names of the machine's Sessions, so an unnamed Session gets the next free name there. */
 export async function readSessionNames(machine: Pick<NewMachine, 'id' | 'name'>): Promise<Array<{ name: string }>> {
-  return (await read(machine.id, machine.name, 'orchestration-sessions:list', [], sessionNamesSchema)).sessions;
+  return (await read(machine.id, machine.name, 'orchestration-sessions:list', [SESSION_LIST_SUMMARY], sessionNamesSchema)).sessions;
 }
 
 export interface PaneCreation {

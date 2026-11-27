@@ -8,12 +8,15 @@ import type { AgentChatMessage, AgentChatReceipt } from '../../../../shared/type
 import type { TerminalPausedMark, ToolPanel } from '../../../../shared/types/panels';
 import { CHAT_CONVERSATION_LIMIT, CHAT_FULL_ACCESS_CONTROL, type ChatPanelState, type ChatTabConversation, type ChatTabSwitchBanner, type ChatTabEvent, type ChatTabAnswer, type ChatTabProblem, type ChatTabQueuedPrompt, type ChatTabSend, type ChatTabStatus, type ChatTabTranscript, type ChatTabView, type ChatTurnTime } from '../../../../shared/types/chatTab';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
+import { readOnlyPaneCaller } from '../../daemon/commandRegistry';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import type { AgentCommand } from './agentProcess';
 import { ChatTabRuntime, chatFailure, isAuthRequired, type RuntimeExit } from './runtime';
 import { ChatTranscript, type TurnMarker } from './transcript';
 import type { PauseOutcome } from '../terminalPanelManager';
 import { QueuedBodies } from './queuedBodies';
+import { SentMessages } from './sentMessages';
+import { agentContent, contentTexts, promptContent, type PromptBody } from './skillDispatch';
 import { agentConfig, agentLabel } from '../../../../shared/agents';
 import { chatPausedViewSchema, type ChatPausedView } from '../../../../shared/types/chatTabDecoders';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
@@ -155,10 +158,12 @@ export class ChatTabManager {
   private lastGeneration = 0;
   private lastUpdateAt = 0;
   private readonly bodies: QueuedBodies;
+  private readonly sentMessages: SentMessages;
   private readonly name: (agent: string) => string;
 
   constructor(private readonly options: ChatTabManagerOptions) {
     this.name = options.agentName ?? agentLabel;
+    this.sentMessages = new SentMessages(path.join(options.spoolDirectory, 'sent-messages'));
     this.bodies = new QueuedBodies(panelId => path.join(options.spoolDirectory, safeName(panelId), 'queue'));
   }
 
@@ -171,7 +176,7 @@ export class ChatTabManager {
   view(panelId: string, limit = DEFAULT_VIEW_LIMIT, start = true): ChatTabView {
     const state = this.required(panelId);
     const tab = this.tab(panelId);
-    if (start && !tab.runtime && !tab.starting && state.status !== 'stopped') void this.ensure(panelId).catch(() => undefined);
+    if (start && !readOnlyPaneCaller() && !tab.runtime && !tab.starting && state.status !== 'stopped') void this.ensure(panelId).catch(() => undefined);
     // A tab whose agent is not running shows the newest messages it saved (F-lite), without starting it.
     if (!tab.transcript && !tab.held) this.loadRecent(panelId, tab);
     return this.snapshot(panelId, state, tab, limit);
@@ -552,9 +557,10 @@ export class ChatTabManager {
     // drain reports a missing copy when the turn ends.
     if (!body) return;
     const content = promptContent(body);
+    const sent = this.sentContent(panelId, runtime, body);
     tab.steering = next.operationId;
     let outcome: string;
-    try { outcome = await runtime.steer(content); }
+    try { outcome = await runtime.steer(sent); }
     catch (error) { outcome = reasonOf(error); }
     finally { tab.steering = undefined; }
     const state = this.options.store.state(panelId);
@@ -564,7 +570,8 @@ export class ChatTabManager {
       this.publish(panelId);
     }
     if (outcome === 'injected' && tab.runtime === runtime && state?.queue?.some(item => item.operationId === next.operationId)) {
-      for (const event of tab.transcript?.userMessage(next.operationId, content, true) ?? []) this.options.send('chat-tab:event', event);
+      this.rememberTyped(panelId, body.text, sent);
+      for (const event of tab.transcript?.userMessage(next.operationId, content, true, sent) ?? []) this.options.send('chat-tab:event', event);
       this.update(panelId, current => ({
         ...current, queue: current.queue?.filter(item => item.operationId !== next.operationId),
         receipts: current.receipts?.map(receipt => receipt.operationId === next.operationId ? { ...receipt, state: 'completed' } : receipt),
@@ -574,6 +581,20 @@ export class ChatTabManager {
     }
     // The turn may have ended while the steer was in flight; drain waits for a turn that still runs.
     if (state) this.drain(panelId);
+  }
+
+  /** A message in the form its agent runs a skill named in it. What Pane stores, queues and shows stays as typed. */
+  private sentContent(panelId: string, runtime: ChatTabRuntime, body: PromptBody): ContentBlock[] {
+    return agentContent(body, runtime.commands(), agentConfig(this.required(panelId).agent)?.chat?.skills);
+  }
+
+  /** Keeps the typed text of a message whose agent's history will hold another form of it. */
+  private rememberTyped(panelId: string, text: string | undefined, sent: ContentBlock[]): void {
+    const { acpSessionId, agent } = this.required(panelId);
+    const parts = contentTexts(sent);
+    // A typed `/name` goes as it is, but is kept too, so its history entry is never taken for a split message's.
+    const last = agentConfig(agent)?.chat?.skills === 'meta' ? parts.at(-1) : undefined;
+    if (text && acpSessionId && last?.startsWith('/')) this.sentMessages.add(acpSessionId, { text, parts });
   }
 
   async cancel(panelId: string): Promise<void> {
@@ -739,7 +760,7 @@ export class ChatTabManager {
       // Inside the try: a chat-tabs folder that cannot be written leaves the tab stopped with Restart, not starting.
       const saved = this.required(panelId);
       const turnTimes = saved.turnTimes && saved.turnTimes.sessionId === saved.acpSessionId ? saved.turnTimes.turns : undefined;
-      transcript = tab.transcript = new ChatTranscript(panelId, tab.generation, { spoolFile: path.join(this.options.spoolDirectory, safeName(panelId), 'transcript.jsonl'), windowMessages: this.options.windowMessages, turnTimes });
+      transcript = tab.transcript = new ChatTranscript(panelId, tab.generation, { spoolFile: path.join(this.options.spoolDirectory, safeName(panelId), 'transcript.jsonl'), windowMessages: this.options.windowMessages, turnTimes, sentMessages: this.sentMessages.of(saved.acpSessionId) });
       launch = await this.options.launcher.resolve(panel, this.required(panelId));
     } catch (error) {
       const failure = chatFailure(error, { code: 'CHAT_LAUNCH_FAILED', next: 'Press Restart.' });
@@ -776,6 +797,7 @@ export class ChatTabManager {
         if (event && !tab.loading) this.options.send('chat-tab:event', event);
       },
       terminalAuth: launch.ownCli === true,
+      skills: agentConfig(this.required(panelId).agent)?.chat?.skills,
     });
     tab.runtime = runtime;
     tab.approveOnce = launch.approveOnce === true;
@@ -795,14 +817,22 @@ export class ChatTabManager {
       const request: NewSessionRequest = { cwd: state.cwd, mcpServers: launch.mcpServers ?? [] };
       if (launch.meta) request._meta = launch.meta;
       const open = async () => {
-        if (state.acpSessionId) {
-          tab.loading = true;
-          try { await runtime.load({ ...request, sessionId: state.acpSessionId }); } finally { tab.loading = false; }
-          transcript.replayed();
-        } else {
+        const create = async () => {
           const created = await runtime.create(request);
           this.update(panelId, current => ({ ...current, acpSessionId: created.sessionId, settings: { ...launch.initialSettings, ...current.settings } }));
-        }
+        };
+        if (!state.acpSessionId) return create();
+        tab.loading = true;
+        try { await runtime.load({ ...request, sessionId: state.acpSessionId }); }
+        catch (error) {
+          // An agent saves a conversation with its first message, so one that never had a turn can't be
+          // reopened: it starts again. A conversation that had turns and is gone says so.
+          const hadTurns = state.turnTimes?.sessionId === state.acpSessionId;
+          if (hadTurns || !(error instanceof PaneError) || error.code !== 'CHAT_CONVERSATION_NOT_FOUND') throw error;
+          console.log(`[ChatTabs] ${panelId} starts a new conversation: ${state.acpSessionId} had no message, so the agent never saved it.`);
+          return create();
+        } finally { tab.loading = false; }
+        transcript.replayed();
       };
       await open();
       if (launch.mode) await runtime.setMode(launch.mode);
@@ -914,8 +944,10 @@ export class ChatTabManager {
     tab.toolsRunning = undefined;
     const generation = tab.generation;
     const content = promptContent(body);
+    const sent = this.sentContent(panelId, runtime, body);
+    this.rememberTyped(panelId, body.text, sent);
     const startedAt = new Date().toISOString();
-    for (const event of tab.transcript?.userMessage(next.operationId, content) ?? []) this.options.send('chat-tab:event', event);
+    for (const event of tab.transcript?.userMessage(next.operationId, content, false, sent) ?? []) this.options.send('chat-tab:event', event);
     this.update(panelId, current => ({ ...current, queue: current.queue?.slice(1), turn: { operationId: next.operationId, startedAt }, status: 'working' }));
     this.bodies.remove(panelId, next.operationId);
     const finish = (outcome: 'completed' | 'failed', stopReason: string, error?: PaneError) => {
@@ -940,7 +972,7 @@ export class ChatTabManager {
       this.drain(panelId);
     };
     this.publish(panelId);
-    void runtime.prompt(content).then(result => finish('completed', result.stopReason), error => { void runtime.exitsWithin(250).then(exited => finish('failed', exited ? 'exited' : 'error', chatFailure(error))); });
+    void runtime.prompt(sent).then(result => finish('completed', result.stopReason), error => { void runtime.exitsWithin(250).then(exited => finish('failed', exited ? 'exited' : 'error', chatFailure(error))); });
   }
 
   /**
@@ -1146,6 +1178,10 @@ export class ChatTabManager {
       ...extras(state, runtime),
     };
     if (state.banner) view.banner = state.banner;
+    // Autopilot's folder holds its run files, so its chat lists none.
+    view.mentions = {};
+    if (!state.autopilotRunId) view.mentions.files = true;
+    if (agentConfig(state.agent)?.chat?.skills) view.mentions.skills = true;
     return view;
   }
 
@@ -1264,14 +1300,6 @@ function publishedState(view: ChatTabView, tab: Tab): AgentState {
 
 function promptSize(body: Pick<ChatTabSend, 'text' | 'images'>): number {
   return body.text.length + (body.images ?? []).reduce((sum, image) => sum + image.data.length, 0);
-}
-
-/** A queued message as ACP prompt content. */
-function promptContent(body: { text?: string; images?: Array<{ mimeType: string; data: string }> }): ContentBlock[] {
-  return [
-    ...(body.text ? [{ type: 'text' as const, text: body.text }] : []),
-    ...(body.images ?? []).map(image => ({ type: 'image' as const, mimeType: image.mimeType, data: image.data })),
-  ];
 }
 
 /** Context usage, background tasks, the last /clear and whether Send now steers, each only when there is one. */

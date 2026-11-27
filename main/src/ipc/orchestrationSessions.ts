@@ -1,19 +1,21 @@
 import { customCommandResumeSchema } from '../../../shared/types/customCommandResume';
 import { listWSLDistributions } from '../utils/wslUtils';
 import type { IpcMain } from 'electron';
-import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
+import { readOnlyPaneCaller, teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionArchiveResult,
   OrchestrationSessionOpenResult,
+  OrchestrationSessionListOptions,
   OrchestrationSessionSelector,
   OrchestrationSessionView,
 } from '../../../shared/types/orchestrationSession';
 import type { Session } from '../types/session';
 import { getChatTabManager } from '../services/chatTabs';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
+import { SESSION_SNAPSHOTS_CHANNEL, type SessionSnapshotsRequest } from '../../../shared/types/sessionSnapshot';
 import { previewOrchestrationSessionArchive, updateOrchestrationSession } from './runpane';
 import { clientShowsChatTab, panelsForClient, storedPanelLayout } from './panels';
 import {
@@ -117,13 +119,13 @@ export function registerOrchestrationSessionHandlers(
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:promote');
 
 
-  commandRegistry.register('orchestration-sessions:list', async () => {
-    return invokeSafely(() => requireManager().list());
+  commandRegistry.register('orchestration-sessions:list', async (options?: PaneCommandValue) => {
+    return invokeSafely(() => requireManager().list(decodeListOptions(options)));
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:list');
 
-  commandRegistry.register('orchestration-sessions:select', async (value: PaneCommandValue) => {
-    return invokeSafely(() => requireManager().select(decodeSelector(value)));
+  commandRegistry.register('orchestration-sessions:select', async (value: PaneCommandValue, options?: PaneCommandValue) => {
+    return invokeSafely(() => requireManager().select(decodeSelector(value), decodeListOptions(options)));
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:select');
 
@@ -190,7 +192,7 @@ export function registerOrchestrationSessionHandlers(
       const start = resume !== false || view.panel.type !== 'chat' || !getChatTabManager().isPaused(view.panel.id);
       const result = openResult(view, options, start);
       // The list as it is now, after anything that changed while the view was read.
-      if (select === true) result.list = await requireManager().list();
+      if (select === true) result.list = await requireManager().list({ summary: true });
       return result;
     });
   });
@@ -224,8 +226,8 @@ export function registerOrchestrationSessionHandlers(
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:archive-preview');
 
-  commandRegistry.register('orchestration-sessions:reorder', async (value: PaneCommandValue) => {
-    return invokeSafely(() => requireManager().reorder(decodeBoundary(value, reorderSchema).sessionIds));
+  commandRegistry.register('orchestration-sessions:reorder', async (value: PaneCommandValue, options?: PaneCommandValue) => {
+    return invokeSafely(() => requireManager().reorder(decodeBoundary(value, reorderSchema).sessionIds, decodeListOptions(options)));
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:reorder');
 
@@ -272,6 +274,44 @@ export function registerOrchestrationSessionHandlers(
     return invokeSafely(() => requireManager().overview(decodeSelector(value)));
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:overview');
+
+  // Host snapshots (T-116 PR 4) for the owner's other machines: reads only, no tab, no agent start.
+  commandRegistry.register(SESSION_SNAPSHOTS_CHANNEL, async (request?: PaneCommandValue) => {
+    return invokeSafely(async () => {
+      refuseAllButOwner();
+      const snapshots = services.sessionSnapshots;
+      if (!snapshots) throw new Error('Session snapshots are not initialized');
+      return snapshots.snapshots(decodeSnapshotsRequest(request));
+    }, { withCode: true });
+  });
+  commandRegistry.bindChannel(ipcMain, SESSION_SNAPSHOTS_CHANNEL);
+}
+
+const snapshotsRequestSchema = boundary.object({
+  since: boundary.optional(boundary.number),
+  epoch: boundary.optional(boundary.string),
+  held: boundary.optional(boundary.record(boundary.object({ generation: boundary.number, count: boundary.number, revision: boundary.number }))),
+});
+
+function decodeSnapshotsRequest(value: PaneCommandValue | undefined): SessionSnapshotsRequest {
+  if (value === undefined) return {};
+  const decoded = decodeBoundary(value, snapshotsRequestSchema);
+  const request: SessionSnapshotsRequest = {};
+  if (decoded.since !== undefined) request.since = decoded.since;
+  if (decoded.epoch !== undefined) request.epoch = decoded.epoch;
+  if (decoded.held !== undefined) request.held = decoded.held;
+  return request;
+}
+
+/** Snapshots copy the newest messages of every chat Session ahead of opening, so only the owner's own machines read them. */
+function refuseAllButOwner(): void {
+  const teammate = teammatePaneCaller();
+  if (!teammate && !readOnlyPaneCaller()) return;
+  throw new PaneError(
+    'SESSION_SNAPSHOTS_OWNER_ONLY',
+    `Only this computer's owner can read its Session snapshots, so ${teammate ?? 'a device paired Read only'} cannot. Nothing was read.`,
+    'Open the Session itself instead; the owner can give this device full access in Settings › Remote Access.',
+  );
 }
 
 function selectorSchemaFields() {
@@ -281,18 +321,24 @@ function selectorSchemaFields() {
   };
 }
 
+const listOptionsSchema = boundary.object({ summary: boundary.optional(boundary.boolean) });
+
+/** A list's options; anything else (an older caller's extra argument) reads as a request for full records. */
+function decodeListOptions(value: PaneCommandValue | undefined): OrchestrationSessionListOptions {
+  return { summary: decodeOptionalBoundary(value, listOptionsSchema)?.summary === true };
+}
+
 function decodeSelector(value: PaneCommandValue): OrchestrationSessionSelector {
   return decodeBoundary(value, selectorSchema);
 }
 
-async function invokeSafely<Value>(operation: () => Promise<Value>): Promise<object> {
+async function invokeSafely<Value>(operation: () => Promise<Value>, options: { withCode?: boolean } = {}): Promise<object> {
   try {
     return { success: true, data: await operation() };
   } catch (error) {
-    return {
-      success: false,
-      // Electron IPC keeps only text, so a PaneError carries its next step as "Next: ...".
-      error: error instanceof PaneError ? paneErrorText(error) : error instanceof Error ? error.message : 'Sessions operation failed',
-    };
+    // Electron IPC keeps only text, so a PaneError carries its next step as "Next: ...". `withCode`
+    // adds its code for a caller that acts on it (another machine's mirror on SESSION_SNAPSHOTS_OWNER_ONLY).
+    if (error instanceof PaneError) return { success: false, error: paneErrorText(error), ...(options.withCode && { code: error.code }) };
+    return { success: false, error: error instanceof Error ? error.message : 'Sessions operation failed' };
   }
 }

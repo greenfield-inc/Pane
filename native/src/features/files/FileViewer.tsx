@@ -259,7 +259,7 @@ function CodeView({ content, language }: { content: string; language: Parameters
       contentContainerStyle={styles.code}
       renderItem={({ item, index }) => (
         <View style={styles.line}>
-          <Text style={[styles.mono, styles.number, { width: gutter * 8.5 + 4, color: theme.colors.textMuted }]}>{index + 1}</Text>
+          <Text style={[styles.mono, styles.number, { width: (gutter * 8.5 + 4) * theme.uiScale, color: theme.colors.textMuted }]}>{index + 1}</Text>
           <Text selectable style={[styles.mono, styles.shrink, { color: theme.colors.text }]}>
             {item.map((token: Token, at: number) => (
               <Text key={at} style={token.scope && theme.syntax[token.scope] ? { color: theme.syntax[token.scope] } : undefined}>{token.text}</Text>
@@ -276,11 +276,11 @@ function MarkdownView({ content }: { content: string }) {
   const { colors } = theme;
   const renderer = useLinkRenderer();
   const rendered = useMarkdown(content, { colorScheme: theme.scheme, renderer, styles: {
-    text: { color: colors.text, fontSize: 16, lineHeight: 26 },
+    text: { color: colors.text, fontSize: 16 * theme.uiScale, lineHeight: 26 * theme.uiScale },
     link: { color: colors.accentText },
     codespan: { color: colors.text, backgroundColor: colors.surfaceRaised, fontFamily: monoFontFamily, fontStyle: 'normal' },
     code: { backgroundColor: colors.surfaceRaised, borderRadius: 8, padding: 10 },
-    codeText: { color: colors.text, fontSize: 13, fontFamily: monoFontFamily },
+    codeText: { color: colors.text, fontSize: 13 * theme.uiScale, fontFamily: monoFontFamily },
     paragraph: { marginTop: 0, marginBottom: 12 },
     h1: { color: colors.text },
     h2: { color: colors.text },

@@ -162,7 +162,7 @@ const view: ChatTabView = {
 const chatClient: ChatTabClient = {
   get: async () => structuredClone(view), history: async () => [], send: async (_panel, request) => ({ operationId: request.operationId, state: 'accepted' }), receipt: async () => undefined,
   unqueue: async () => {}, sendNow: async () => {}, editQueued: async () => {}, clear: async () => {}, stopTask: async () => {}, cancel: async () => {}, permission: async () => {}, answer: async () => {}, restart: async () => {}, signIn: async () => ({ panelId: 'chat' }),
-  configure: async () => {}, onEvent: () => () => {}, onState: () => () => {}, conversations: async () => [], resume: async () => {}, dismissBanner: async () => {},
+  configure: async () => {}, onEvent: () => () => {}, onState: () => () => {}, conversations: async () => [], resume: async () => {}, dismissBanner: async () => {}, files: async () => [],
 };
 const actions: ChatTurnActions = {
   device: { openedHere: [], phase: () => chatPhase, frame: async () => frame, open: panelId => { window.qaPower.push(`open:${panelId}`); } },

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ChatTabQueuedPrompt } from '../../../../shared/types/chatTab';
 import { ChatQueue, type ChatQueueProps } from './ChatQueue';
-import { isClearCommand, matchingCommands, withPaneCommands } from './chatCommands';
 
 const item = (operationId: string, text: string, extra: Partial<ChatTabQueuedPrompt> = {}): ChatTabQueuedPrompt => ({ operationId, text, queuedAt: '2026-11-08T10:00:00.000Z', ...extra });
 const render = (props: Partial<ChatQueueProps>) => renderToStaticMarkup(<ChatQueue queue={[]} working={false} disabled={false}
@@ -27,18 +26,5 @@ describe('ChatQueue', () => {
 
   it('renders nothing with an empty queue', () => {
     expect(render({})).toBe('');
-  });
-});
-
-describe('/clear', () => {
-  it("is Pane's own command, listed first and replacing the agent's", () => {
-    const commands = withPaneCommands([{ name: 'clear', description: 'agent clear' }, { name: 'compact' }]);
-    expect(commands.map(command => command.description ?? command.name)).toEqual(['Start a fresh conversation in this tab', 'compact']);
-    expect(matchingCommands('/cl', commands).map(command => command.name)).toEqual(['clear']);
-  });
-
-  it('matches only the command alone', () => {
-    expect(isClearCommand(' /clear ')).toBe(true);
-    expect(isClearCommand('/clear the cache')).toBe(false);
   });
 });

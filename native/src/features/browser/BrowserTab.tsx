@@ -1,4 +1,5 @@
 import type { BrowserFrame, BrowserInput, BrowserTabView } from '@shared/types/browserStream';
+import { browserLoginLine } from '@shared/types/browser';
 import type { BrowserPanelState, ToolPanel } from '@shared/types/panels';
 import { isHostLocalUrl, normalizeUrl } from '@shared/utils/browserUrl';
 import { browserInputQueue, fitFrame, keyboardField, movesFocus, pagePoint, PhoneControl, type FrameBox } from '@shared/utils/browserStreamInput';
@@ -100,7 +101,7 @@ function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBa
   const [space, setSpace] = useState(box);
   useEffect(() => { if (box && !keyboardOpen) setSpace(box); }, [box, keyboardOpen]);
   const stream = useBrowserStream(panel.id, focused && active, space && { ...space, scale: PixelRatio.get() });
-  const { frame, view, stop } = stream;
+  const { frame, view, stop, hurry } = stream;
   const host = view?.host || profile.label;
 
   // Input goes to the host in order through one queue for the tab's life.
@@ -140,13 +141,14 @@ function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBa
   const send = useCallback((input: BrowserInput | null) => {
     if (stopRef.current && stopRef.current !== 'older') return;
     onInputRef.current();
+    hurry();
     // After Enter, Tab or a navigation the page may focus a password field by itself: type securely until the host says.
     if (movesFocus(input)) {
       fieldRef.current = 'password';
       setField('password');
     }
     queue(input);
-  }, [queue]);
+  }, [queue, hurry]);
   const [control] = useState(() => new PhoneControl());
   useEffect(() => { if (view) control.view(view); }, [control, view]);
 
@@ -305,6 +307,14 @@ function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBa
     seenDownload.current = download.at;
     setNotice(`Downloaded ${download.name} on ${host}`);
   }, [view, download, host]);
+  const login = view?.logins?.at(-1);
+  const seenLogin = useRef(0);
+  useEffect(() => {
+    // The host lists a fill for a minute, so each one shows once here, the one that started the stream too.
+    if (!login || login.at <= seenLogin.current) return;
+    seenLogin.current = login.at;
+    setNotice(browserLoginLine(login));
+  }, [login]);
   useEffect(() => {
     if (stream.reloadedAt !== undefined) setNotice(`The page reloaded on ${host}.`);
   }, [stream.reloadedAt, host]);

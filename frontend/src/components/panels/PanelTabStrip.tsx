@@ -5,6 +5,7 @@
  * (via PanelGroupView) so there is one tab-rendering implementation.
  */
 
+import { isReadOnlyHost, useReadOnlyHost } from '../../stores/readOnlyHostStore';
 import React, { useCallback, useEffect, useState, useRef, useMemo, useSyncExternalStore } from 'react';
 import { Pause, Pencil, Play, Radio, X } from 'lucide-react';
 import { cn } from '../../utils/cn';
@@ -131,6 +132,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   const chatTabsEnabled = useConfigStore(state => isChatTabsEnabled(state.config));
   // Read even with chat tabs off: an agent tab still offers Switch to chat, disabled, with Turn on.
   const chatAgents = useChatAgents(window.electronAPI.chatTab);
+  const readOnly = useReadOnlyHost();
   const [switchingPanel, setSwitchingPanel] = useState<ToolPanel | null>(null);
   const hotkeys = useHotkeyStore(s => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
@@ -140,7 +142,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
 
   // --- Rename handlers ---
   const startRename = useCallback((panel: ToolPanel) => {
-    if (panel.type === 'diff') return;
+    if (panel.type === 'diff' || isReadOnlyHost()) return;
     setEditingPanelId(panel.id);
     setEditingTitle(panel.title);
   }, []);
@@ -405,7 +407,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         // Only a tab this desktop streams from another computer has a choice (StreamedBrowserPanel).
         const choice = streamChoices.all().get(panel.id);
         const live = choice !== undefined && offersViewLive(choice, page);
-        const menuItems: DropdownItem[] = isDisabled ? [] : [
+        const menuItems: DropdownItem[] = isDisabled || readOnly ? [] : [
           ...(live ? [{ id: 'view-live', label: 'View live', icon: Radio, onClick: () => { viewLive(panel.id, page); onPanelSelect(panel); } }] : []),
           ...(!isPermanent && !isDiffPanel ? [{ id: 'rename', label: 'Rename tab…', icon: Pencil, onClick: () => startRename(panel) }] : []),
           ...switchToChatMenuItems(panel, chatTabsEnabled, chatAgents, () => setSwitchingPanel(panel)),
@@ -506,7 +508,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                 type="button"
                 aria-label={`Close ${displayTitle}`}
                 className={cn(
-                  "absolute z-20 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded transition-opacity transition-colors text-text-muted hover:bg-surface-hover hover:text-status-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle",
+                  "needs-full-access absolute z-20 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded transition-opacity transition-colors text-text-muted hover:bg-surface-hover hover:text-status-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle",
                   alwaysShowClose ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                   compact ? "right-1" : "right-1.5",
                 )}

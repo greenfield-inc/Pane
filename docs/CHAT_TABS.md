@@ -187,6 +187,42 @@ A terminal Codex that runs through Codex's shared background service
 (`codex app-server daemon`) stays that thread's writer after the terminal stops,
 so loading it in chat fails with "in use by another Codex client".
 
+## Files and skills in a message
+
+Type `@`, `$` or `/` at the start of a word. One menu opens above the message box,
+on desktop, the web app and the phone, and a pick goes into the text.
+
+| Sign | Lists | A pick writes |
+| --- | --- | --- |
+| `@` | files and folders of the tab's folder; with nothing typed, the files this Pane changed, then top-level folders and files | `@path`, or `@"path"` when it has a space; a folder ends with `/` |
+| `$` | the agent's skills | `$name` |
+| `/` first in the message | the agent's commands and skills, plus Pane's own **/clear** and **/resume** | `/name` for a command, `$name` for a skill |
+| `/` later in the message | skills whose name it begins | `$name` |
+
+- **Keys**: the first row is chosen. ↑ and ↓ wrap, Enter or Tab picks, Escape closes
+  the menu for that word. Under a `/` later in the message no row is chosen at first:
+  Enter sends, Tab takes the top skill, ↓ or ↑ chooses a row and Enter then picks it. On the phone a tap picks.
+- **What opens nothing**: code (backticks and fences), pasted text, money (`$5`, `$10k`),
+  an email address, a word with a second slash. A later `/` also needs a letter next and no dot.
+- A picked file is highlighted in the box and stays plain text. In a sent message,
+  files and folders (an `@` word with a slash, a file extension or quotes) and skills
+  are marked. A click on a file opens it under the tab's folder.
+- **Which files** (`chat-tab:files`): the host finds the folder from the tab, never from
+  the client, and only lists one inside the tab's Pane. In a git worktree git says what is
+  there, so gitignored files stay out. Nested repositories, links that leave the folder and
+  names a reference could not hold (a double quote, a line break) stay out too. A Session's
+  chat lists its Session folder without hidden names. Autopilot's chat lists no files.
+  Files come from the computer that runs the tab. Read-only and glasses devices cannot call it.
+- **Which skills**: Claude and Codex say which of their entries are skills
+  (`chat.skills` in the agents config). For other agents `$` opens nothing and `/` lists
+  everything, at the start only.
+- **What the agent gets**: Codex reads `$name` in the text. Claude runs one skill per message,
+  as the last part of it, so Pane sends the message whole with its skills as `/name`, then the last
+  `$name` outside code and the text after it as a part of its own, after any images. Claude runs
+  that one; earlier skills stay named in the text. A message that starts with a command goes as typed. The chat shows
+  the message as typed, also after a restart: Pane keeps its text beside the conversation, for any tab that opens it, since
+  Claude's own history holds only the skill's part.
+
 ## Continuing a past conversation (/resume)
 
 Any chat tab can continue another conversation from its folder. Type `/resume`
@@ -313,8 +349,8 @@ composer marks it in amber like a mode that never asks.
   Medium"), then send. The permission mode moves into that button's sheet as
   **Permissions**, below Model, Effort and the other settings; each choice shows
   a check and On/Off settings are switches. A mode that never asks (Bypass), or
-  Pane's Full access when on, leaves a small shield on the row. The `/` menu lists
-  the agent's own commands and skills, plus Pane's own **/clear**; **Stop** (or Esc in the composer) cancels the turn.
+  Pane's Full access when on, leaves a small shield on the row. **Stop** (or Esc in the composer) cancels the turn.
+  What `@`, `$` and `/` open is under [Files and skills in a message](#files-and-skills-in-a-message).
 - **Status bar** (D-222, D-253, D-267, D-276): one muted line just above the composer,
   items split by dots, each opening what it names:
   - **Context left** ("Ctx 41%", amber at 20% or less) opens the tokens used,
@@ -449,7 +485,8 @@ After Pane restarts, a chat tab starts again when you open it (or on
 replays the history) and shows it. A turn that was running when Pane closed is
 marked *Stopped when Pane closed*; a message sent then continues the same
 conversation. If the agent exits, the tab shows why with **Restart**, which
-loads the same conversation.
+loads the same conversation. An agent saves a conversation with its first
+message, so a tab that never had one starts a new conversation instead.
 
 Auto-pause (Settings > Pause) stops the agent of a chat tab idle for
 `chatIdleReleaseMinutes` (30 by default), which frees its memory. It skips the
@@ -566,6 +603,9 @@ Session whose orchestrator is that chat tab fails with
 | Agent catalog (`chat-tab:agents`) | `main/src/services/chatTabs/agentCatalog.ts`, `frontend/src/stores/chatAgentsStore.ts`, `frontend/src/components/settings/categories/AgentsSettings.tsx` |
 | Host runtime, transcript, launcher, Agent Farm profiles, Notify bridge, Switch to chat | `main/src/services/chatTabs/` |
 | Commands (`chat-tab:*`) | `main/src/ipc/chatTabs.ts` |
+| @, $ and / rules, shared by every client and the host | `shared/composerMentions.ts` |
+| File search (`chat-tab:files`, `file:search`) | `main/src/services/fileSearch.ts` |
+| How a skill is sent | `main/src/services/chatTabs/skillDispatch.ts`, `sentMessages.ts` |
 | runpane | `main/src/ipc/runpaneChatTabs.ts`, `main/src/ipc/runpane.ts` |
 | Shared types, presentation, decoders | `shared/types/chatTab.ts`, `shared/chatTabPresentation.ts`, `shared/chatTabPermissions.ts`, `shared/chatTabQuestions.ts`, `shared/types/chatTabDecoders.ts` |
 | Viewer (window, paging, catch-up), shared by every client | `shared/chatTabViewer.ts` |

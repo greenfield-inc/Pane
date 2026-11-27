@@ -1,7 +1,7 @@
 import type { RemoteDaemonClient } from '@shared/remoteClient';
 import type { AgentChatReceipt } from '@shared/types/agentChat';
 import type { ChatTabClient, ChatTabView } from '@shared/types/chatTab';
-import { decodeChatAgents, decodeChatConversations, decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '@shared/types/chatTabDecoders';
+import { decodeChatAgents, decodeChatConversations, decodeChatFiles, decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '@shared/types/chatTabDecoders';
 
 import { invokeChannel } from '@/daemon/invoke';
 
@@ -34,6 +34,7 @@ export function chatTabClient(client: RemoteDaemonClient): ChatTabClient {
     conversations: async panelId => decodeChatConversations(await invokeChannel(client, 'chat-tab:conversations', [panelId])),
     resume: (panelId, sessionId) => invokeChannel(client, 'chat-tab:resume', [panelId, sessionId]),
     dismissBanner: panelId => invokeChannel(client, 'chat-tab:dismiss-banner', [panelId]),
+    files: async (panelId, query) => decodeChatFiles(await invokeChannel(client, 'chat-tab:files', [panelId, query])),
     agents: async () => decodeChatAgents(await invokeChannel(client, 'chat-tab:agents', [])),
     onEvent: callback => client.onEvent(event => {
       if (event.type === 'daemon-event' && event.payload.channel === 'chat-tab:event') callback(decodeChatTabEvent(event.payload.args[0]));

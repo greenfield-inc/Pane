@@ -5,6 +5,7 @@ import { Input, Textarea } from '../../ui/Input';
 import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
+import { ControllerSettingsSection } from '../../../controller/ControllerSettings';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import type { TerminalShortcut, UpdateConfigRequest } from '../../../types/config';
 import type { KeyboardShortcutOverrides } from '../../../../../shared/utils/keyboardBindings';
@@ -154,6 +155,7 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
           View all Pane keyboard shortcuts
         </button>
       </SettingsSection>
+      <ControllerSettingsSection />
       <SettingsSection
         title="Terminal key reporting"
         description="How Pane encodes keystrokes for the program running inside a terminal."

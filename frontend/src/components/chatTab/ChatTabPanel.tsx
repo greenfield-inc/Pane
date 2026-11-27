@@ -1,3 +1,4 @@
+import { useReadOnlyHost } from '../../stores/readOnlyHostStore';
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode, type RefObject } from 'react';
 import {
   AssistantRuntimeProvider, AttachmentPrimitive, ComposerPrimitive, ThreadPrimitive,
@@ -13,14 +14,19 @@ import { switchMark } from '../../../../shared/switchMarks';
 import { useSessionShow } from '../../contexts/SessionShowContext';
 import { toAssistantMessage } from '../agentChat/convertMessage';
 import type { ActiveMachine } from '../../stores/activeMachineStore';
+import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import { ChatProblem } from './ChatProblem';
 import { ChatQuestionCard } from './ChatQuestionCard';
 import { ChatPermissionCard } from './ChatPermissionCard';
 import { ChatTurnView, WorkerNoteLine, type ChatTurnActions } from './ChatTurns';
 import { ChatBlocksContext, type ChatRendering } from './chatRendering';
-import { ChatCommandMenu } from './ChatCommandMenu';
-import { CLEAR_COMMAND, isClearCommand, isResumeCommand, matchingCommands, withPaneCommands, type ChatMenuCommand } from './chatCommands';
+import { ChatComposerMenu } from './ChatComposerMenu';
+import { ChatReferencesContext, type ChatReferences } from './chatReferences';
+import { ComposerHighlight } from './ComposerHighlight';
+import { CLEAR_COMMAND, isClearCommand, isResumeCommand, menuCommands } from './chatCommands';
+import { useComposerMenu } from './useComposerMenu';
+import { COMPOSER_MENU_TEXT, composerPlaceholder, skillNames } from '../../../../shared/composerMentions';
 import { ChatQueue } from './ChatQueue';
 import { ChatSwitchBanner } from './ChatSwitchBanner';
 import { ConversationPicker } from './ConversationPicker';
@@ -42,6 +48,7 @@ import { takeLaunchDraft } from '../../utils/launchOutline';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
+import { noteSendConfirmed, useControllerTarget } from '../../controller/controllerTargets';
 
 /** A small preview of an attached image, read from the dropped or pasted file itself. */
 function ImagePreview() {
@@ -159,7 +166,10 @@ export interface ChatTabPanelProps {
   /** The machine the tab's agent runs on, named on an approval for a remote one. */
   machine?: ActiveMachine | null;
   actions?: ChatTurnActions;
+  /** Shown in the empty box as given; without it the box names what it can mention. */
   placeholder?: string;
+  /** A Session orchestrator's chat, for the empty box's text. */
+  session?: boolean;
   /** The Session's workers (the orchestrator's chat). */
   workers?: ChatWorkerLine[];
   /** Copies a dropped, pasted or picked file to the chat's machine (D-139); without it only images attach. */
@@ -190,6 +200,9 @@ export interface ChatTabPanelProps {
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
 const PASTE_LIMIT = 1024 * 1024;
 
+/** Input that arrives whole: pasted or dropped text opens no menu. */
+const PASTE_INPUTS: ReadonlySet<string> = new Set(['insertFromPaste', 'insertFromDrop', 'insertFromYank']);
+
 /** A chat tab: one agent conversation over ACP, with no terminal (D-20). */
 const NO_ACTIONS: ChatTurnActions = {};
 /** How long after the handover an Enter pressed before the chat loaded may still send. */
@@ -209,7 +222,7 @@ function TurnsSkeleton() {
   </>;
 }
 
-export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
+export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, session, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
   // A Session the sidebar cursor only shows (T-87): its chat reads never start the agent,
   // and it paints the window the Session's one open or peek call returned.
@@ -225,7 +238,6 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const [busy, setBusy] = useState(false);
   /** Paged with Earlier or Newer messages: stay put until the reader scrolls back to the live end, even once the window reaches it. */
   const [paged, setPaged] = useState(false);
-  const [commandIndex, setCommandIndex] = useState(0);
   /** "Continue a past conversation", from /resume or the Switch to chat banner's "Pick another" (D-277). */
   const [picking, setPicking] = useState(false);
   const loadConversations = useCallback(() => client.conversations(panelId), [client, panelId]);
@@ -275,14 +287,28 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
   const stopped = view?.status === 'stopped';
-  const disabled = !connected || stopped || !view;
+  const readOnly = useReadOnlyHost();
+  const disabled = !connected || stopped || !view || readOnly;
+  // Reading a chat starts no agent for a read-only viewer, so one nobody opened has no transcript to wait for.
+  const notRunning = readOnly && !snapshot.transcript && !view?.problem && (view?.status === 'idle' || view?.status === 'stopped');
   const agentName = view ? chatAgentLabel(catalog, view.agent) : 'the agent';
-  const commands = matchingCommands(snapshot.draft, clearable ? withPaneCommands(view?.commands ?? []) : view?.commands ?? []);
+  const commands = useMemo(() => menuCommands(view?.commands ?? [], clearable), [view?.commands, clearable]);
+  // The same set while the names stay the same, so a published view does not re-render every message.
+  const skillKey = JSON.stringify([...skillNames(view?.commands ?? [])].sort());
+  const skills = useMemo(() => new Set(decodeBoundary(JSON.parse(skillKey), boundary.array(boundary.string))), [skillKey]);
+  const { onOpenFile } = actions;
+  const references = useMemo<ChatReferences>(() => ({
+    skills,
+    // A read-only viewer sees references marked, with no link: opening a file is the owner's.
+    openFile: onOpenFile && !readOnly ? (path => void onOpenFile(path).then(
+      opened => viewer.setError(opened ? undefined : COMPOSER_MENU_TEXT.fileGone),
+      error => viewer.setError(ipcErrorMessage(error, 'The file could not be opened.')),
+    )) : undefined,
+  }), [skills, onOpenFile, readOnly, viewer]);
   /** Cmd/Ctrl+Enter: the message being sent goes ahead of the queue and interrupts the turn (D-211, D-222 item 7). */
   const sendNowNext = useRef(false);
   /** /clear while a turn runs asks first. */
   const [confirmClear, setConfirmClear] = useState(false);
-  const activeCommand = commands[Math.min(commandIndex, commands.length - 1)];
   const composerRow = useMemo(() => arrangeComposerControls(view?.controls ?? []), [view?.controls]);
   const settingsLocked = disabled || view?.status !== 'idle';
   const actionsRef = useRef<HTMLDivElement>(null);
@@ -302,6 +328,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     if (receipt.state === 'failed') return false;
     viewer.setDraft('');
     runtime.thread.composer.setText('');
+    noteSendConfirmed(panelId);
     return true;
   };
   const deliver = async (request: ChatTabSend, retry: boolean): Promise<boolean> => {
@@ -416,6 +443,22 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       if (shownComposers.get(viewer) === composer) shownComposers.delete(viewer);
     };
   }, [runtime, viewer]);
+  // A game controller's dictation (added to the draft), Send (Y) and jump to bottom (frontend/src/controller).
+  useControllerTarget(findRootRef, {
+    panelId,
+    kind: 'chat',
+    insertText: text => {
+      const current = runtime.thread.composer.getState().text.trimEnd();
+      const next = current ? `${current} ${text}` : text;
+      viewer.setDraft(next);
+      runtime.thread.composer.setText(next);
+    },
+    send: () => {
+      if (sendDisabled || !runtime.thread.composer.getState().text.trim()) return;
+      void runtime.thread.composer.send();
+    },
+    jumpToBottom: () => followLiveEnd.current?.(),
+  });
   // The launch outline's message box (index.html) hands over as this tab first paints: its text and
   // caret, focus when it had it, and an Enter pressed before the chat loaded, which sends that text
   // once (D-62) if the chat can send it soon after; an edit or a chat that stays unable drops it.
@@ -531,17 +574,15 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   function openPicker() {
     viewer.setDraft('');
     runtime.thread.composer.setText('');
-    setCommandIndex(0);
     setPicking(true);
   }
-  const pickCommand = (command: ChatMenuCommand) => {
-    // Pane's own command runs at once; the agent's is completed in the composer for its arguments.
-    if (command.source === 'pane') { openPicker(); return; }
-    const text = `/${command.name} `;
-    viewer.setDraft(text);
-    runtime.thread.composer.setText(text);
-    setCommandIndex(0);
-  };
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const composerMenu = useComposerMenu({
+    client, panelId, view, draft: snapshot.draft, commands, skills, input: inputRef,
+    setText: text => { viewer.setDraft(text); runtime.thread.composer.setText(text); },
+    runPaneCommand: openPicker,
+  });
+  const menuOpen = !!composerMenu.menu;
 
   return <AssistantRuntimeProvider runtime={runtime}><CopyProgressContext.Provider value={copies}>
     <ThreadPrimitive.Root ref={findRootRef} className="agent-chat chat-tab relative flex h-full min-h-0 flex-col" data-status={view?.status ?? 'starting'} data-link-pane={rendering.paneId} {...dragProps}>
@@ -555,12 +596,12 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             : `PNG, JPEG, WebP or GIF images up to ${megabytes(MAX_IMAGE_BYTES)}.`}</p>
         </div>
       </div>}
-      {view?.problem && stoppedNotice && stopped && !view.problem.action ? stoppedNotice : view?.problem && <ChatProblem problem={view.problem} agent={agentName} busy={busy || !connected}
-        restart={!(stoppedNotice && stopped)}
+      {view?.problem && stoppedNotice && stopped && !view.problem.action ? stoppedNotice : view?.problem && <ChatProblem problem={view.problem} agent={agentName} busy={busy || !connected || readOnly}
+        restart={!readOnly && !(stoppedNotice && stopped)}
         onRestart={() => void act(() => client.restart(panelId))}
         onSignIn={() => void act(() => client.signIn(panelId))}
         onInstall={url => void window.electronAPI?.openExternal(url)} />}
-      {view?.banner && <ChatSwitchBanner banner={view.banner} busy={busy || !connected}
+      {view?.banner && <ChatSwitchBanner banner={view.banner} busy={busy || !connected || readOnly}
         onPickAnother={() => setPicking(true)} onDismiss={() => void act(() => client.dismissBanner(panelId))} />}
       {snapshot.error && <div role="alert" className="chat-alert">{snapshot.error}</div>}
       {picking && <ConversationPicker load={loadConversations} onResume={resumeConversation} onClose={() => setPicking(false)} />}
@@ -569,7 +610,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         <button type="button" className="chat-icon" aria-label="Dismiss" title="Dismiss" onClick={() => setAttachProblems([])}><X className="h-3.5 w-3.5" /></button>
       </div>}
       {turns.length > 0 && <div className="chat-header-bar">
-        {clearable && <button type="button" className="chat-copy chat-copy-all" disabled={disabled} title="Start a fresh conversation in this tab (/clear)" onClick={requestClear}>
+        {clearable && <button type="button" className="needs-full-access chat-copy chat-copy-all" disabled={disabled} title="Start a fresh conversation in this tab (/clear)" onClick={requestClear}>
           <Eraser className="h-3.5 w-3.5" aria-hidden /><span>Clear</span>
         </button>}
         <ChatCopyButton label="Copy conversation" className="chat-copy chat-copy-all" showLabel text={copyConversation} />
@@ -580,11 +621,12 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`}
           </button>}
           {view?.clearedAt && (snapshot.transcript?.start ?? 0) === 0 && <ClearedDivider at={view.clearedAt} />}
+          {notRunning && <p role="status" className="chat-notice">This chat isn’t running. Its messages show here once its owner opens it.</p>}
           {!snapshot.transcript && !view?.problem && (view?.status === 'starting' || !view) && <p role="status" className="chat-notice">Starting {agentName}…</p>}
-          <SkeletonSwap loading={!snapshot.transcript && !view?.problem && !!view && view.status !== 'starting'} skeleton={<TurnsSkeleton />}>
-            <ChatBlocksContext.Provider value={rendering}>
+          <SkeletonSwap loading={!snapshot.transcript && !view?.problem && !!view && view.status !== 'starting' && !notRunning} skeleton={<TurnsSkeleton />}>
+            <ChatBlocksContext.Provider value={rendering}><ChatReferencesContext.Provider value={references}>
               {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} />)}
-            </ChatBlocksContext.Provider>
+            </ChatReferencesContext.Provider></ChatBlocksContext.Provider>
           </SkeletonSwap>
           {notes.map(note => <WorkerNoteLine key={note.worker.paneId} note={note} onOpen={actions.onOpenWorker} />)}
           {snapshot.hasNewer && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingNewer} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadNewer(); }}>
@@ -596,7 +638,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       <div ref={footerRef} className="chat-composer-footer">
         <ScrollToLatest viewer={viewer} hasNewer={snapshot.hasNewer} follow={followLiveEnd} />
         {dock}
-        {snapshot.pendingDelivery && <div className="chat-dock" role="status">
+        {snapshot.pendingDelivery && <div className="needs-full-access chat-dock" role="status">
           <span>Delivery is unconfirmed.</span>
           <button type="button" className="chat-button chat-button-outline" disabled={!connected} onClick={() => void deliver(snapshot.pendingDelivery!, false)}>Check delivery</button>
           <button type="button" className="chat-button chat-button-outline" disabled={!connected} onClick={() => void deliver(snapshot.pendingDelivery!, true)}>Retry same message</button>
@@ -610,17 +652,20 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           <button type="button" className="chat-button chat-button-outline" onClick={() => setConfirmClear(false)}>Cancel</button>
           <button type="button" className="chat-button chat-button-primary" disabled={disabled} onClick={clearConversation}>Clear</button>
         </dialog>}
-        <ChatQueue queue={view?.queue ?? []} working={working} steers={view?.sendNowSteers} disabled={disabled} label={rendering.queued}
+        <ChatQueue queue={view?.queue ?? []} working={working} steers={view?.sendNowSteers} disabled={disabled} skills={skills} label={rendering.queued}
           onRemove={operationId => void act(() => client.unqueue(panelId, operationId))}
           onSendNow={operationId => void act(() => client.sendNow(panelId, operationId))}
           onEdit={editQueued} />
         {view && <ChatStatusBar context={view.context} tasks={view.tasks}
           queued={view.queue.length} pr={pr} agents={agentsWorking} onOpenAgent={actions.onOpenWorker} working={working} sendNowSteers={view.sendNowSteers} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
           onStopTask={taskId => void act(() => client.stopTask(panelId, taskId))} onShowQueue={showQueue} />}
-        <ComposerPrimitive.Root className="chat-composer" data-pane-part="chat-composer">
-          <ChatCommandMenu commands={commands} active={Math.min(commandIndex, commands.length - 1)} onPick={pickCommand} />
+        {readOnly && <p role="status" className="chat-notice">Read only: you can watch this chat, and its owner sends the messages.</p>}
+        <ComposerPrimitive.Root className="needs-full-access chat-composer" data-pane-part="chat-composer">
+          {composerMenu.menu && <ChatComposerMenu id={composerMenu.listId} menu={composerMenu.menu} active={composerMenu.active} onHover={composerMenu.hover} onPick={composerMenu.pick} />}
           <div className="flex flex-wrap gap-2 empty:hidden"><ComposerPrimitive.Attachments components={{ Attachment }} /></div>
-          <ComposerPrimitive.Input data-chat-composer={panelId} readOnly={!!snapshot.pendingDelivery} aria-label={`Message ${agentName}`} placeholder={placeholder ?? 'Ask anything'} rows={1}
+          <div className="chat-input-box">
+          <ComposerHighlight input={inputRef} text={snapshot.draft} marks={composerMenu.marks} className="chat-input" />
+          <ComposerPrimitive.Input ref={inputRef} {...composerMenu.inputProps} data-chat-composer={panelId} readOnly={!!snapshot.pendingDelivery} aria-label={`Message ${agentName}`} placeholder={placeholder ?? composerPlaceholder(view?.mentions, { session, phone })} rows={1}
             // Pasted images and files attach through attachFiles, which shows any refusal.
             addAttachmentOnPaste={false}
             onPaste={event => {
@@ -635,7 +680,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
               event.preventDefault();
               attachFiles(files);
             }}
-            onChange={event => { viewer.setDraft(event.target.value); setCommandIndex(0); }}
+            onChange={event => { composerMenu.changed(event.target, PASTE_INPUTS.has('inputType' in event.nativeEvent ? String(event.nativeEvent.inputType) : '')); viewer.setDraft(event.target.value); }}
+            onSelect={event => composerMenu.caretMoved(event.currentTarget)}
             onKeyDown={event => {
               // Keys that pick an IME candidate are the input method's.
               if (event.nativeEvent.isComposing) return;
@@ -646,12 +692,12 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
                 return;
               }
               // Esc stops the turn, as it does for the agent in a terminal.
-              if (event.key === 'Escape' && working && !activeCommand) {
+              if (event.key === 'Escape' && working && !menuOpen) {
                 event.preventDefault();
                 void act(() => client.cancel(panelId));
                 return;
               }
-              if (clearable && event.key === 'Enter' && !event.shiftKey && isClearCommand(snapshot.draft) && (!activeCommand || activeCommand.name === CLEAR_COMMAND.name)) {
+              if (clearable && event.key === 'Enter' && !event.shiftKey && isClearCommand(snapshot.draft) && (!composerMenu.active || ('command' in composerMenu.active && composerMenu.active.command.name === CLEAR_COMMAND.name))) {
                 event.preventDefault();
                 requestClear();
                 return;
@@ -663,16 +709,10 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
                 void runtime.thread.composer.send();
                 return;
               }
-              if (!activeCommand) return;
-              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                event.preventDefault();
-                setCommandIndex(index => (index + (event.key === 'ArrowDown' ? 1 : commands.length - 1)) % commands.length);
-              } else if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey && snapshot.draft !== `/${activeCommand.name}`)) {
-                event.preventDefault();
-                pickCommand(activeCommand);
-              }
+              composerMenu.keyDown(event);
             }}
             className="chat-input" />
+          </div>
           <div ref={actionsRef} className="chat-composer-actions" data-layout={phone ? 'phone' : 'desktop'} data-working={working || undefined}>
             {attachments && <ComposerPrimitive.AddAttachment aria-label={saveFile ? 'Attach files' : 'Attach image'} title={saveFile ? 'Attach photos or files' : 'Attach image'} className="chat-icon"><Plus className="h-4 w-4" /></ComposerPrimitive.AddAttachment>}
             {/* Model and mode stay on the composer row (D-267). */}

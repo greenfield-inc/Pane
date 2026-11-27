@@ -14,11 +14,15 @@ import { leaseEndLabel } from '../../notify/notifyFormat';
 import { formatDuration } from '../../loops/loopRunView';
 import { LOCAL_MACHINE_ID } from '../../../../../shared/types/machineConnections';
 import {
+  leaseReferenceText,
+  loginSiteOrigin,
+  loginSitesProblem,
   paneSecretKey,
   paneSecretNameProblem,
   paneSecretProjectProblem,
   paneSecretReferenceProblem,
   SECRET_LEASE_DEFAULT_MS,
+  type PaneLoginUse,
   type PaneSecretReferenceSummary,
   type PaneSecretsOverview,
   type PaneSecretSummary,
@@ -87,14 +91,94 @@ function ConfirmBar({ label, text, action, onConfirm, onCancel }: { label: strin
   );
 }
 
-function SecretRow({ secret, moveVault, onSet, onDelete, onMove }: {
+interface ReadSites {
+  sites: string[];
+  problem: string | null;
+}
+
+/** Typed sites, separated by spaces, commas or lines, as the exact origins a login may be filled on. */
+function readSites(typed: string): ReadSites {
+  const parts = typed.split(/[\s,]+/).filter(Boolean);
+  const bad = parts.find((part) => loginSiteOrigin(part) === null);
+  if (bad) return { sites: [], problem: `"${bad}" can't be a login's site. Use an https address, such as https://bank.example.` };
+  const sites = [...new Set(parts.flatMap((part) => loginSiteOrigin(part) ?? []))];
+  return { sites, problem: sites.length === 0 ? null : loginSitesProblem(sites) };
+}
+
+/** Where a login may be filled, and the exact origins that means. Empty is allowed only where a plain secret is too. */
+function SitesInput({ value, onChange, autoFocus, label }: { value: string; onChange: (value: string) => void; autoFocus?: boolean; label: string }) {
+  const { sites, problem } = readSites(value);
+  return (
+    <Input
+      aria-label={label}
+      placeholder="Sign-in site, e.g. https://bank.example"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      error={problem ?? undefined}
+      helperText={sites.length > 0 ? `A login. Agents can fill it on ${sites.join(', ')} and nowhere else, and no command gets it.` : 'Add a site to save a password or PIN as a login that agents fill in browser tabs.'}
+      className="font-mono text-sm"
+      autoFocus={autoFocus}
+      fullWidth
+    />
+  );
+}
+
+function SitesForm({ address, sites, onSave, onCancel }: { address: string; sites: string[] | undefined; onSave: (sites: string[]) => Promise<boolean>; onCancel: () => void }) {
+  const [value, setValue] = useState(sites?.join(' ') ?? '');
+  const [busy, setBusy] = useState(false);
+  const read = readSites(value);
+  const ready = read.sites.length > 0 && !read.problem;
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!ready) return;
+    setBusy(true);
+    const saved = await onSave(read.sites);
+    setBusy(false);
+    if (saved) onCancel();
+  };
+  return (
+    <form className="mt-2 space-y-2" onSubmit={(event) => void submit(event)} aria-label={`Sites for ${address}`}>
+      <SitesInput label={`Sign-in sites for ${address}`} value={value} onChange={setValue} autoFocus />
+      {!sites && <p className="text-xs text-text-tertiary">Commands that use {address} now stop getting it.</p>}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+        <Button type="submit" size="sm" disabled={!ready || busy}>{sites ? 'Save sites' : 'Use as a login'}</Button>
+      </div>
+    </form>
+  );
+}
+
+/** A login's sites and its latest use. */
+function LoginLine({ sites, uses }: { sites: string[]; uses: PaneLoginUse[] }) {
+  const last = uses[0];
+  return (
+    <div className="mt-1 space-y-0.5 text-xs text-text-tertiary" data-testid="pane-secret-login">
+      <p className="break-all">Login for <span className="font-mono text-text-secondary">{sites.join(', ')}</span></p>
+      {last
+        ? uses.slice(0, 3).map((use) => (
+          <p key={`${use.at}:${use.machine ?? ''}`} className="break-words">
+            {use.agent} in {use.pane} filled it on <span className="font-mono">{use.site}</span>{use.machine ? ` on ${use.machine}` : ''} {formatDistanceToNow(use.at)}
+          </p>
+        ))
+        : <p>No recent fills.</p>}
+    </div>
+  );
+}
+
+function usesOf(uses: readonly PaneLoginUse[], secret: { project: string; name: string }): PaneLoginUse[] {
+  return uses.filter((use) => use.project === secret.project && use.name === secret.name);
+}
+
+function SecretRow({ secret, uses, moveVault, onSet, onSites, onDelete, onMove }: {
   secret: PaneSecretSummary;
+  uses: PaneLoginUse[];
   moveVault: string | null;
+  onSites: (sites: string[]) => Promise<boolean>;
   onSet: (value: string) => Promise<boolean>;
   onDelete: () => Promise<boolean>;
   onMove: () => Promise<boolean>;
 }) {
-  const [mode, setMode] = useState<'idle' | 'replace' | 'confirm-delete' | 'moving'>('idle');
+  const [mode, setMode] = useState<'idle' | 'replace' | 'sites' | 'confirm-delete' | 'moving'>('idle');
   const address = paneSecretKey(secret.project, secret.name);
   return (
     <div className="py-3" data-testid="pane-secret-row" data-secret={address}>
@@ -106,7 +190,8 @@ function SecretRow({ secret, moveVault, onSet, onDelete, onMove }: {
         </span>
         {(mode === 'idle' || mode === 'moving') && (
           <span className="flex shrink-0 gap-1">
-            <Button
+            {/* A login from 1Password is added with its own reference, so a login has no Move. */}
+            {!secret.sites && <Button
               type="button"
               variant="ghost"
               size="sm"
@@ -120,12 +205,15 @@ function SecretRow({ secret, moveVault, onSet, onDelete, onMove }: {
               }}
             >
               Move to 1Password
-            </Button>
+            </Button>}
+            <Button type="button" variant="ghost" size="sm" disabled={mode === 'moving'} onClick={() => setMode('sites')}>{secret.sites ? 'Edit sites' : 'Use as a login'}</Button>
             <Button type="button" variant="secondary" size="sm" disabled={mode === 'moving'} onClick={() => setMode('replace')}>Replace</Button>
             <Button type="button" variant="ghost" size="sm" disabled={mode === 'moving'} onClick={() => setMode('confirm-delete')}>Delete</Button>
           </span>
         )}
       </div>
+      {secret.sites && <LoginLine sites={secret.sites} uses={uses} />}
+      {mode === 'sites' && <SitesForm address={address} sites={secret.sites} onSave={onSites} onCancel={() => setMode('idle')} />}
       {mode === 'replace' && (
         <div className="mt-2">
           <ValueForm
@@ -153,13 +241,16 @@ function SecretRow({ secret, moveVault, onSet, onDelete, onMove }: {
 }
 
 /** A 1Password reference: its address, never a value, and whether this desktop holds a lease on it. */
-function ReferenceRow({ reference, leasedUntil, now, onDelete }: {
+function ReferenceRow({ reference, uses, leasedUntil, now, onSites, onDelete }: {
   reference: PaneSecretReferenceSummary;
+  uses: PaneLoginUse[];
+  onSites: (sites: string[]) => Promise<boolean>;
   leasedUntil: number | null;
   now: number;
   onDelete: () => Promise<boolean>;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [editing, setEditing] = useState(false);
   const address = paneSecretKey(reference.project, reference.name);
   return (
     <div className="py-3" data-testid="pane-secret-reference-row" data-secret={address}>
@@ -170,10 +261,18 @@ function ReferenceRow({ reference, leasedUntil, now, onDelete }: {
         <span className="min-w-0 flex-1 truncate text-xs text-text-tertiary" data-testid="pane-secret-lease-state">
           {leasedUntil ? `leased until ${leaseEndLabel(leasedUntil, now)}` : 'no lease'}
         </span>
-        {!confirming && (
-          <Button type="button" variant="ghost" size="sm" onClick={() => setConfirming(true)}>Remove</Button>
+        {!confirming && !editing && (
+          <span className="flex shrink-0 gap-1">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(true)}>{reference.sites ? 'Edit sites' : 'Use as a login'}</Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setConfirming(true)}>Remove</Button>
+          </span>
         )}
       </div>
+      {reference.sites && <LoginLine sites={reference.sites} uses={uses} />}
+      {editing && (
+        <SitesForm address={address} sites={reference.sites} onSave={onSites} onCancel={() => setEditing(false)} />
+      )}
+      {editing && leasedUntil !== null && <p className="mt-1 text-xs text-text-tertiary">A new site works from the next lease; a removed one stops now.</p>}
       {confirming && (
         <ConfirmBar
           label={`Remove ${address}`}
@@ -189,25 +288,27 @@ function ReferenceRow({ reference, leasedUntil, now, onDelete }: {
 
 function AddReferenceForm({ typed, onAdd, onCancel }: {
   typed: PaneSecretSummary[];
-  onAdd: (project: string, name: string, reference: string) => Promise<boolean>;
+  onAdd: (project: string, name: string, reference: string, sites?: string[]) => Promise<boolean>;
   onCancel: () => void;
 }) {
   const [project, setProject] = useState('');
   const [name, setName] = useState('');
   const [reference, setReference] = useState('');
+  const [sites, setSites] = useState('');
+  const chosen = readSites(sites);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const projectProblem = project ? paneSecretProjectProblem(project.trim()) : null;
   const nameProblem = name ? paneSecretNameProblem(name.trim()) : null;
   const referenceProblem = reference ? paneSecretReferenceProblem(reference.trim()) : null;
-  const ready = project.trim() && name.trim() && reference.trim() && !projectProblem && !nameProblem && !referenceProblem;
+  const ready = project.trim() && name.trim() && reference.trim() && !projectProblem && !nameProblem && !referenceProblem && !chosen.problem;
   const replacesTyped = typed.some((secret) => secret.project === project.trim() && secret.name === name.trim());
   const address = paneSecretKey(project.trim(), name.trim());
   const add = async () => {
     setBusy(true);
     let added = false;
     try {
-      added = await onAdd(project.trim(), name.trim(), reference.trim());
+      added = await onAdd(project.trim(), name.trim(), reference.trim(), chosen.sites.length > 0 ? chosen.sites : undefined);
     } finally {
       setBusy(false);
     }
@@ -239,6 +340,7 @@ function AddReferenceForm({ typed, onAdd, onCancel }: {
         className="font-mono text-sm"
         fullWidth
       />
+      <SitesInput label="Reference sign-in site" value={sites} onChange={setSites} />
       {confirming ? (
         <ConfirmBar
           label={`Replace ${address}`}
@@ -286,7 +388,7 @@ function Check({ label, checked, disabled, onChange, note, address }: {
       <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 rounded border-border-primary accent-interactive" />
       <span className={cn('min-w-0', disabled && 'text-text-muted')}>
         {label}
-        {address && <span className="block truncate font-mono text-xs text-text-tertiary" title={address}>{address}</span>}
+        {address && <span className="block break-all font-mono text-xs text-text-tertiary">{address}</span>}
         {note && <span className="block text-xs text-text-tertiary">{note}</span>}
       </span>
     </label>
@@ -315,6 +417,7 @@ function StartLeaseForm({ project, references, machines, lengthMs, now, onStart,
   const [names, setNames] = useState(() => new Set(references.map((reference) => reference.name)));
   const [picked, setPicked] = useState(() => new Set(machines.some((machine) => machine.id === LOCAL_MACHINE_ID && !machine.refusal) ? [LOCAL_MACHINE_ID] : []));
   const [busy, setBusy] = useState(false);
+  const shown = new Map(references.map((reference) => [reference.name, leaseReferenceText(reference.reference, reference.sites)]));
   const start = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
@@ -324,6 +427,7 @@ function StartLeaseForm({ project, references, machines, lengthMs, now, onStart,
       ok = await onStart({
         project,
         names: references.flatMap((reference) => (names.has(reference.name) ? [reference.name] : [])),
+        references: Object.fromEntries(shown),
         machines: machines.flatMap((machine) => (picked.has(machine.id) ? [machine.id] : [])),
       });
     } finally {
@@ -336,7 +440,7 @@ function StartLeaseForm({ project, references, machines, lengthMs, now, onStart,
       <fieldset className="space-y-1.5">
         <legend className="mb-1 text-xs font-medium text-text-secondary">Secrets</legend>
         {references.map((reference) => (
-          <Check key={reference.name} label={reference.name} address={reference.reference} checked={names.has(reference.name)} onChange={(on) => setNames(toggled(names, reference.name, on))} />
+          <Check key={reference.name} label={reference.name} address={shown.get(reference.name)} checked={names.has(reference.name)} onChange={(on) => setNames(toggled(names, reference.name, on))} />
         ))}
       </fieldset>
       <fieldset className="space-y-1.5">
@@ -442,21 +546,23 @@ function ActiveLeases({ leases, now, run }: { leases: SecretLeaseOnMachine[]; no
   );
 }
 
-function AddSecretForm({ onAdd, onCancel }: { onAdd: (project: string, name: string, value: string) => Promise<boolean>; onCancel: () => void }) {
+function AddSecretForm({ onAdd, onCancel }: { onAdd: (project: string, name: string, value: string, sites?: string[]) => Promise<boolean>; onCancel: () => void }) {
   const [project, setProject] = useState('');
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
+  const [sites, setSites] = useState('');
+  const chosen = readSites(sites);
   const [busy, setBusy] = useState(false);
   const projectProblem = project ? paneSecretProjectProblem(project.trim()) : null;
   const nameProblem = name ? paneSecretNameProblem(name.trim()) : null;
-  const ready = project.trim() && name.trim() && value && !projectProblem && !nameProblem;
+  const ready = project.trim() && name.trim() && value && !projectProblem && !nameProblem && !chosen.problem;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!ready) return;
     setBusy(true);
     const sent = value;
     setValue('');
-    const added = await onAdd(project.trim(), name.trim(), sent);
+    const added = await onAdd(project.trim(), name.trim(), sent, chosen.sites.length > 0 ? chosen.sites : undefined);
     setBusy(false);
     if (added) onCancel();
   };
@@ -471,6 +577,7 @@ function AddSecretForm({ onAdd, onCancel }: { onAdd: (project: string, name: str
         </div>
       </div>
       <SecretValueInput aria-label="Secret value" placeholder="Value" value={value} onValueChange={setValue} className="font-mono text-sm" />
+      <SitesInput label="Secret sign-in site" value={sites} onChange={setSites} />
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
         <Button type="submit" size="sm" disabled={!ready || busy}>Save securely</Button>
@@ -480,12 +587,13 @@ function AddSecretForm({ onAdd, onCancel }: { onAdd: (project: string, name: str
 }
 
 /** One project: its typed secrets and 1Password references, its lease length, and Start lease. */
-function ProjectSection({ project, overview, now, run, set, remove }: {
+function ProjectSection({ project, overview, now, run, set, setSites, remove }: {
   project: string;
   overview: PaneSecretsOverview;
   now: number;
   run: Run;
   set: (project: string, name: string, value: string) => Promise<boolean>;
+  setSites: (project: string, name: string, sites: string[]) => Promise<boolean>;
   remove: (project: string, name: string) => Promise<boolean>;
 }) {
   const [leasing, setLeasing] = useState(false);
@@ -510,7 +618,9 @@ function ProjectSection({ project, overview, now, run, set, remove }: {
           <SecretRow
             key={`typed:${secret.name}`}
             secret={secret}
+            uses={usesOf(overview.loginUses, secret)}
             moveVault={overview.moveVault}
+            onSites={(sites) => setSites(project, secret.name, sites)}
             onSet={(value) => set(project, secret.name, value)}
             onDelete={() => remove(project, secret.name)}
             onMove={async () => (await run(() => window.electronAPI.paneSecrets.moveToOnePassword(project, secret.name), `Pane could not move ${paneSecretKey(project, secret.name)} to 1Password.`)).ok}
@@ -520,6 +630,8 @@ function ProjectSection({ project, overview, now, run, set, remove }: {
           <ReferenceRow
             key={`ref:${reference.name}`}
             reference={reference}
+            uses={usesOf(overview.loginUses, reference)}
+            onSites={(sites) => setSites(project, reference.name, sites)}
             leasedUntil={leasedUntil(reference.name)}
             now={now}
             onDelete={() => remove(project, reference.name)}
@@ -594,12 +706,14 @@ export function SecretsSettings() {
     await refresh();
     return response.success ? { ok: true, data: response.data } : { ok: false };
   };
-  const set = async (project: string, name: string, value: string) =>
-    (await run(() => window.electronAPI.paneSecrets.set(project, name, value), `Pane could not save ${paneSecretKey(project, name)}.`)).ok;
+  const set = async (project: string, name: string, value: string, sites?: string[]) =>
+    (await run(() => window.electronAPI.paneSecrets.set(project, name, value, sites), `Pane could not save ${paneSecretKey(project, name)}.`)).ok;
   const remove = async (project: string, name: string) =>
     (await run(() => window.electronAPI.paneSecrets.delete(project, name), `Pane could not delete ${paneSecretKey(project, name)}.`)).ok;
-  const setReference = async (project: string, name: string, reference: string) =>
-    (await run(() => window.electronAPI.paneSecrets.setReference(project, name, reference), `Pane could not add ${paneSecretKey(project, name)}.`)).ok;
+  const setSites = async (project: string, name: string, sites: string[]) =>
+    (await run(() => window.electronAPI.paneSecrets.setSites(project, name, sites), `Pane could not save the sites for ${paneSecretKey(project, name)}.`)).ok;
+  const setReference = async (project: string, name: string, reference: string, sites?: string[]) =>
+    (await run(() => window.electronAPI.paneSecrets.setReference(project, name, reference, sites), `Pane could not add ${paneSecretKey(project, name)}.`)).ok;
 
   const projects = [...new Set([...(overview?.secrets ?? []), ...(overview?.references ?? [])].map((secret) => secret.project))].sort((a, b) => a.localeCompare(b));
 
@@ -609,6 +723,7 @@ export function SecretsSettings() {
         <div className="space-y-2">
           <p className="text-sm text-text-secondary">
             Any agent on your machines can use these with <code className="font-mono text-text-primary">runpane secrets exec</code>. Values are never shown again.
+            A login is the exception: agents can only fill it in a browser tab, on the sites you choose.
             A 1Password secret has a value only while a lease you start is active.{' '}
             <button type="button" className="inline-flex items-center gap-1 text-interactive hover:underline" onClick={() => void window.electronAPI.openExternal(DOCS_URL)}>
               How secrets work <ExternalLink className="h-3 w-3" aria-hidden="true" />
@@ -640,7 +755,7 @@ export function SecretsSettings() {
           <p className="text-sm text-text-tertiary">No secrets yet. When an agent asks you for one, or you add one, it shows here.</p>
         )}
         {overview && projects.map((project) => (
-          <ProjectSection key={project} project={project} overview={overview} now={now} run={run} set={set} remove={remove} />
+          <ProjectSection key={project} project={project} overview={overview} now={now} run={run} set={set} setSites={setSites} remove={remove} />
         ))}
         {overview && overview.leases.length > 0 && <ActiveLeases leases={overview.leases} now={now} run={run} />}
       </div>

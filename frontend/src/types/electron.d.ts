@@ -57,6 +57,7 @@ import type {
   OrchestrationSessionListResult,
   OrchestrationSessionOpenOptions,
   OrchestrationSessionOpenResult,
+  OrchestrationSessionSummary,
   OrchestrationSessionArchivePreview,
   OrchestrationSessionArchiveResult,
   OrchestrationSessionArchiveSelection,
@@ -111,7 +112,7 @@ interface RendererDiagnosticPayload {
 /** What the `machines:read` channels All machines uses answer, as each machine's own handler returns it. */
 interface MachineReadAnswers {
   'sessions:get-all-with-projects': IPCResponse<Array<Project & { sessions: Session[] }>>;
-  'orchestration-sessions:list': IPCResponse<OrchestrationSessionListResult>;
+  'orchestration-sessions:list': IPCResponse<OrchestrationSessionListResult<OrchestrationSessionSummary>>;
   'panels:agent-statuses': IPCResponse<PanelAgentStatusEvent[]>;
   'orchestration-sessions:activity-list': IPCResponse<SessionActivity[]>;
   'permission:getPending': IPCResponse<PanePermissionRequest[]>;
@@ -151,12 +152,14 @@ interface ElectronAPI {
   };
   paneSecrets: {
     list: () => Promise<IPCResponse<PaneSecretsOverview>>;
-    /** Data is true when it replaced a saved value. */
-    set: (project: string, name: string, value: string) => Promise<IPCResponse<boolean>>;
+    /** Data is true when it replaced a saved value. With `sites` it saves a login. */
+    set: (project: string, name: string, value: string, sites?: string[]) => Promise<IPCResponse<boolean>>;
+    /** Makes a saved secret a login for these sites, or changes a login's sites. */
+    setSites: (project: string, name: string, sites: string[]) => Promise<IPCResponse<boolean>>;
     /** Deletes a typed secret, or removes a 1Password reference. */
     delete: (project: string, name: string) => Promise<IPCResponse<boolean>>;
     /** Points a name at a 1Password item. Data is true when it replaced (deleted) a typed secret of that name. */
-    setReference: (project: string, name: string, reference: string) => Promise<IPCResponse<boolean>>;
+    setReference: (project: string, name: string, reference: string, sites?: string[]) => Promise<IPCResponse<boolean>>;
     /** Reads 1Password once (it may ask for Touch ID or Windows Hello) and leases to the machines named. */
     startLease: (request: SecretLeaseStartRequest) => Promise<IPCResponse<SecretLeaseStartResult>>;
     /** Ends a lease here and on every machine that holds it. */
@@ -288,8 +291,9 @@ interface ElectronAPI {
 
   orchestrationSessions: {
     runtimes: () => Promise<IPCResponse<{ distributions: string[] }>>;
-    list: () => Promise<IPCResponse<OrchestrationSessionListResult>>;
-    select: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionListResult>>;
+    /** Summary records (T-127): read a Session's activity log and profile with `get`. */
+    list: () => Promise<IPCResponse<OrchestrationSessionListResult<OrchestrationSessionSummary>>>;
+    select: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionListResult<OrchestrationSessionSummary>>>;
     create: (input: OrchestrationSessionCreateInput) => Promise<IPCResponse<OrchestrationSessionView<Session>>>;
     get: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionView<Session>>>;
     /** Reads a Session to show it, changing nothing and starting no agent (T-87). */
@@ -298,7 +302,7 @@ interface ElectronAPI {
     open?: (selector: OrchestrationSessionSelector, options?: OrchestrationSessionOpenOptions) => Promise<IPCResponse<OrchestrationSessionOpenResult<Session>>>;
     update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput) => Promise<IPCResponse<OrchestrationSessionRecord>>;
     /** Saves the order of the listed Sessions among the places they hold; leaves every Session record unchanged. */
-    reorder: (sessionIds: string[]) => Promise<IPCResponse<OrchestrationSessionListResult>>;
+    reorder: (sessionIds: string[]) => Promise<IPCResponse<OrchestrationSessionListResult<OrchestrationSessionSummary>>>;
     setAgent: (selector: OrchestrationSessionSelector, agent: PaneChatAgent) => Promise<IPCResponse<OrchestrationSessionView<Session>>>;
     associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput) => Promise<IPCResponse<OrchestrationSessionRecord>>;
     detach: (selector: OrchestrationSessionSelector, paneId?: string) => Promise<IPCResponse<OrchestrationSessionRecord>>;

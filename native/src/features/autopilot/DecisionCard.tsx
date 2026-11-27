@@ -11,7 +11,7 @@ import { sinceLabel } from '@/features/allMachines/allMachinesList';
 import { ApprovalActions } from '@/features/approvals/ApprovalActions';
 import { receiptLines } from '@/features/approvals/approvals';
 import { useNotifyCommand } from '@/features/notify/hooks';
-import { useTheme, withAlpha } from '@/theme';
+import { scaleBox, useTheme, withAlpha } from '@/theme';
 import { Icon, Skeleton, Text } from '@/ui';
 
 import { answerBar, cardState, type CardState } from './autopilot';
@@ -128,7 +128,7 @@ export function DecisionCard({ notifyId, item, variant, onOpen, answer }: {
  * option rows. `testID` names the skeleton for the screen that draws it.
  */
 export function DecisionCardSkeleton({ testID }: { testID: string }) {
-  const { colors } = useTheme();
+  const { colors, uiScale } = useTheme();
   return (
     <View testID={testID} accessible accessibilityLabel="Loading the question" style={[styles.card, { borderColor: colors.border, backgroundColor: colors.surface }]}>
       <View style={styles.head}>
@@ -142,7 +142,7 @@ export function DecisionCardSkeleton({ testID }: { testID: string }) {
       </View>
       {[0.5, 0.35].map(width => (
         <View key={width} style={[styles.option, { borderTopColor: colors.border }]}>
-          <View style={styles.radioBox}><Skeleton width={20} height={20} radius={10} /></View>
+          <View style={scaleBox(styles.radioBox, uiScale)}><Skeleton width={20} height={20} radius={10} /></View>
           <Skeleton width={`${width * 100}%`} height={16} style={styles.boneOption} />
         </View>
       ))}
@@ -164,7 +164,7 @@ function OptionRow({ option, divider, pickable, sending, onPick, testID }: { opt
       style={({ pressed }) => [styles.option, { borderTopColor: divider, backgroundColor: pressed ? colors.surfacePressed : 'transparent' }]}
     >
       {/* Fixed box: the radio and the sending spinner swap without moving the label. */}
-      <View style={styles.radioBox}>
+      <View style={scaleBox(styles.radioBox, theme.uiScale)}>
         {sending ? <ActivityIndicator size="small" color={colors.textSecondary} /> : (
           <View style={[styles.radio, { borderColor: option.recommended ? colors.text : colors.border }]}>
             {option.recommended ? <View style={[styles.dot, { backgroundColor: colors.text }]} /> : null}
@@ -195,7 +195,7 @@ function Outcome({ state, undo, busy }: { state: CardState; undo: () => void; bu
   }
   return (
     <View testID={`decision-${state.kind}`} style={[styles.option, { borderTopColor: colors.border }]}>
-      <View style={styles.radioBox}><Icon ios="checkmark.circle" android="check_circle" size={18} color={colors.success} /></View>
+      <View style={scaleBox(styles.radioBox, theme.uiScale)}><Icon ios="checkmark.circle" android="check_circle" size={18} color={colors.success} /></View>
       <View style={styles.fill}>
         <Text variant="body" tone="secondary">{state.answer}</Text>
         <Text variant="subhead" tone="muted">{state.kind === 'answered' ? state.recorded : 'by you · sending, you can still undo it'}</Text>

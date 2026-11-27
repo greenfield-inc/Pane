@@ -61,7 +61,7 @@ async function setup(options: { visibility?: WorkspaceAccessPolicy['visibility']
     await during.run?.(channel);
     return { ran: channel };
   });
-  for (const channel of ['runpane:panels:screen', 'runpane:panels:submit', 'runpane:panels:input', 'runpane:panels:resume', 'sessions:mark-viewed', 'notify:remote-command', 'file:write', 'git:commit', 'runpane:machine:exec', 'remote:settings:update', 'terminal:input', 'panels:initialize', 'terminal:setVisibility', GLASSES_COMMANDS.vouch, 'orchestration-sessions:create', 'runpane:panes:create']) {
+  for (const channel of ['runpane:panels:screen', 'runpane:panels:submit', 'runpane:panels:input', 'runpane:panels:resume', 'sessions:mark-viewed', 'notify:remote-command', 'file:write', 'chat-tab:files', 'git:commit', 'runpane:machine:exec', 'remote:settings:update', 'terminal:input', 'panels:initialize', 'terminal:setVisibility', GLASSES_COMMANDS.vouch, 'orchestration-sessions:create', 'runpane:panes:create']) {
     record(channel);
   }
   registry.register(GLASSES_COMMANDS.createPairingSecret, (request: PaneCommandValue) => {
@@ -185,7 +185,7 @@ describe('glasses on the workspace listener', () => {
     }
 
     // Starting a terminal at a chosen folder or size, or registering as a viewer that never acks output, stays out.
-    for (const channel of ['file:write', 'git:commit', 'runpane:machine:exec', 'remote:settings:update', 'terminal:input', 'panels:initialize', 'terminal:setVisibility',
+    for (const channel of ['file:write', 'chat-tab:files', 'git:commit', 'runpane:machine:exec', 'remote:settings:update', 'terminal:input', 'panels:initialize', 'terminal:setVisibility',
       GLASSES_COMMANDS.createPairingSecret, GLASSES_COMMANDS.list, GLASSES_COMMANDS.revoke]) {
       const refused = await host.invoke(channel, [{}], host.fromGlasses(token));
       expect({ channel, status: refused.status, code: errorCode(refused) })

@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { FolderOpen, MoreHorizontal, Navigation, Pause, Play, Plus, Shield } from 'lucide-react';
+import { newestFirst } from '../../../../shared/approvalOrder';
 import type { AutopilotSnapshot } from '../../../../shared/types/autopilot';
 import { cn } from '../../utils/cn';
 import { markAutopilotOpened, moveAutopilotStack, runAutopilot, shownStackEntry, useAutopilotStore, useRenderedItems } from '../../stores/autopilotStore';
@@ -379,7 +380,7 @@ export function AutopilotView() {
 function StackWithApproval() {
   const open = useApprovalColumnStore((state) => state.open.autopilot);
   const items = useNotifyStore((state) => state.snapshot?.items);
-  const order = useMemo(() => (items ?? []).filter(countsAsWaiting).sort((a, b) => a.createdAt - b.createdAt).map((item) => item.id), [items]);
+  const order = useMemo(() => (items ?? []).filter(countsAsWaiting).sort(newestFirst).map((item) => item.id), [items]);
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1">
       <AutopilotStack />

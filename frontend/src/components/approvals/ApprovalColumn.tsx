@@ -4,6 +4,7 @@ import type { NotifyAnswer, NotifyItem, NotifyLink } from '../../../../shared/ty
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { cn } from '../../utils/cn';
 import { runNotify, sendNotify, useNotifyStore } from '../../stores/notifyStore';
+import { canAdvanceTo } from './approvalAdvance';
 import { approvalLinkScope, resolveApprovalLink } from './approvalLink';
 import { leadingQn } from '../../../../shared/autopilotDecision';
 import { useAllMachinesStore } from '../../stores/allMachinesStore';
@@ -29,9 +30,10 @@ import { FindBar } from '../find/FindBar';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { approvalFindId, useSurfaceFind } from '../find/surfaceFind';
 import { isTypingTarget } from '../../utils/typingTarget';
+import { enterHeld, holdEnterUntilReleased } from './heldEnter';
 import { ReminderSnoozeLink } from '../todos/ReminderSnoozeLink';
 import {
-  askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, replyLine,
+  askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, recommendedAnswer, replyLine,
   type CardChip, type CardQuestion, type CardTab, type ReplyLine,
 } from './approvalCard';
 import { APPROVAL_COLUMN, APPROVAL_COLUMN_ID, APPROVAL_REPLY_BOX_ID, approvalStepProps } from './approvalDom';
@@ -114,13 +116,35 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
   const tab = tabs.find((candidate) => candidate.key === (open?.itemId === itemId ? open.tab : 'qa')) ?? tabs[0];
   const pager = order.includes(itemId) ? order : [...order, itemId];
   const index = pager.indexOf(itemId);
+  const noteAdvanced = useApprovalColumnStore((state) => state.noteAdvanced);
+  // The person paging or picking on their own ends the "Sent" line the column moved on with (T-88).
+  const select = (id: string) => {
+    noteAdvanced(surface, null);
+    onSelect(id);
+  };
   const step = (direction: 1 | -1) => {
     if (pager.length < 2) return;
-    onSelect(pager[(index + direction + pager.length) % pager.length]);
+    select(pager[(index + direction + pager.length) % pager.length]);
   };
+  const advancedFrom = useApprovalColumnStore((state) => state.advanced[surface]);
+  const sentBefore = advancedFrom && advancedFrom !== itemId ? byId.get(advancedFrom) : undefined;
+  // "3 left": what still waits on the person in this column, the card shown included (T-88).
+  const left = pager.filter((id) => { const other = byId.get(id); return other !== undefined && canAdvanceTo(other); }).length;
   const [rootRef, narrow] = useNarrow();
+  // ⇧↩ from the card itself, its pager or its tabs goes to its Decide tab (T-88); a nested card
+  // (an approval it links to) takes its own keys inside itself.
+  const sendRecommendedFromCard = useRef<((event: React.KeyboardEvent) => void) | null>(null);
+  const cardKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    pagerKey(event, step);
+    if (event.target instanceof Element && event.target.closest(DECIDE_ROOT)) return;
+    sendRecommendedFromCard.current?.(event);
+  };
   // ⌘F searches what the column shows; on the Approvals screen, the screen searches it with its list.
   useSurfaceFind(approvalFindId(surface), rootRef, surface !== 'approvals');
+
+  if (item && open?.itemId === itemId && open.caughtUp) {
+    return <CaughtUp surface={surface} sent={item} groupLabel={groupLabel} closeLabel={closeLabel} onClose={onClose} onUndo={() => { runNotify({ type: 'undo', id: item.id }); select(item.id); }} />;
+  }
 
   if (!item) {
     return (
@@ -134,7 +158,7 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
 
   return (
     // Focusable, so its ← → keys belong to it alone; clicking anywhere in it gives it focus.
-    <div ref={rootRef} role="region" aria-label={`Approval: ${item.title}`} tabIndex={-1} data-focus-entry={focused !== undefined || undefined} onKeyDown={(event) => pagerKey(event, step)} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary outline-none" data-testid={APPROVAL_COLUMN_ID} data-item-id={item.id} data-narrow={narrow || undefined}>
+    <div ref={rootRef} role="region" aria-label={`Approval: ${item.title}`} tabIndex={-1} data-focus-entry={focused !== undefined || undefined} onKeyDown={cardKey} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary outline-none" data-testid={APPROVAL_COLUMN_ID} data-surface={surface} data-item-id={item.id} data-narrow={narrow || undefined}>
       <ColumnHeader
         narrow={narrow}
         index={index}
@@ -147,13 +171,14 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
         chip={cardChip(item)}
       />
       <TabBar tabs={tabs} active={tab?.key ?? 'qa'} focused={focused} onPick={(key) => setTab(surface, itemId, key)} />
+      {sentBefore && <SentBefore item={sentBefore} left={left} onUndo={() => { runNotify({ type: 'undo', id: sentBefore.id }); select(sentBefore.id); }} />}
       <div className="relative min-h-0 flex-1">
         {surface !== 'approvals' && <FindBar panelId={approvalFindId(surface)} />}
         {(tab?.kind ?? 'qa') === 'qa' && (
           nested
             ? <NestedApproval item={nested} onBack={() => openNested(surface, itemId, undefined)} />
             // A new version starts afresh: its options may have changed under the picks.
-            : <QuestionsTab key={`${item.id}:${item.version ?? 1}`} item={item} onSent={onSent} tabs={tabs} onOpenTab={(key) => setTab(surface, itemId, key)} />
+            : <QuestionsTab key={`${item.id}:${item.version ?? 1}`} item={item} onSent={onSent} tabs={tabs} onOpenTab={(key) => setTab(surface, itemId, key)} fromCard={sendRecommendedFromCard} />
         )}
         {tab?.kind === 'summary' && <SummaryTab key={item.id} item={item} />}
         {tab?.kind === 'link' && <LinkTab item={item} link={tab.link} target={'approval' in tab.link ? resolveApprovalLink(items ?? [], item, tab.link.approval) : undefined} onOpenApproval={(id) => openNested(surface, itemId, id)} />}
@@ -176,6 +201,57 @@ function pagerKey(event: React.KeyboardEvent, step: (direction: 1 | -1) => void)
   step(event.key === 'ArrowLeft' ? -1 : 1);
 }
 
+/**
+ * The line on the card the column moved on to after a Send (T-88): what was sent and to whom, Undo
+ * while its hold lasts, and how many approvals are left here.
+ */
+function SentBefore({ item, left, onUndo }: { item: NotifyItem; left: number; onUndo: () => void }) {
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-b border-border-primary bg-surface-tertiary px-5 py-1.5 text-[12.5px] text-text-secondary" role="status" data-testid="approval-sent-before">
+      <Check className="h-3.5 w-3.5 shrink-0 text-status-success" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate">Sent{item.answerSummary ? ` “${item.answerSummary}”` : ''} to {item.source.name}</span>
+      {item.state === 'sent' && <button type="button" className="shrink-0 font-medium text-interactive hover:underline" onClick={onUndo} data-testid="approval-sent-undo">Undo</button>}
+      <span className="shrink-0 tabular-nums text-text-tertiary" data-testid="approval-left">{left} left</span>
+    </div>
+  );
+}
+
+/**
+ * Nothing else waits here (T-88): the column says so instead of closing or staying on the card just
+ * answered. Its button (✕'s action) takes the keyboard focus, so Enter or Esc carries on.
+ */
+function CaughtUp({ surface, sent, groupLabel, closeLabel, onClose, onUndo }: {
+  surface: ApprovalSurface; sent?: NotifyItem; groupLabel: string; closeLabel?: string; onClose?: () => void; onUndo: () => void;
+}) {
+  const button = useRef<HTMLButtonElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Only when focus was in the column (or nowhere): a column that opened beside the chat leaves it be.
+    const active = document.activeElement;
+    if (active && active !== document.body && !root.current?.contains(active) && !active.closest(APPROVAL_COLUMN)) return;
+    (button.current ?? root.current)?.focus({ preventScroll: true });
+  }, []);
+  const answered = sent?.state === 'sent' || sent?.state === 'answered';
+  return (
+    <div ref={root} tabIndex={-1} className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-bg-primary px-6 text-center outline-none" data-testid="approval-caught-up" data-surface={surface} data-item-id={sent?.id}>
+      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-status-success/10" aria-hidden="true"><Check className="h-4 w-4 text-status-success" /></span>
+      <p className="text-[15px] font-semibold text-text-primary">All caught up</p>
+      <p className="text-[13px] text-text-secondary">Nothing else in {groupLabel} is waiting on you.</p>
+      {sent && answered && (
+        <p className="text-[12.5px] text-text-tertiary">
+          Sent{sent.answerSummary ? ` “${sent.answerSummary}”` : ''} to {sent.source.name}
+          {sent.state === 'sent' && <> · <button type="button" className="font-medium text-interactive hover:underline" onClick={onUndo} data-testid="approval-sent-undo">Undo</button></>}
+        </p>
+      )}
+      {onClose && closeLabel && (
+        <button ref={button} type="button" onClick={onClose} className="mt-2 rounded-md border border-border-secondary px-3 py-1.5 text-[13px] font-medium text-text-primary hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive" data-testid="approval-caught-up-close">
+          {closeLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Chip({ chip, testId }: { chip: NonNullable<CardChip>; testId?: string }) {
   const tone = chip.tone === 'info' ? 'bg-status-info/10 text-status-info-on-tint' : chip.tone === 'warning' ? 'bg-status-warning/10 text-status-warning-on-tint' : chip.tone === 'success' ? 'bg-status-success/10 text-status-success-on-tint' : 'bg-surface-tertiary text-text-secondary';
   const Icon = chip.tone === 'info' ? Sparkles : chip.tone === 'warning' ? Loader2 : chip.tone === 'success' ? Check : Loader2;
@@ -187,7 +263,7 @@ function Chip({ chip, testId }: { chip: NonNullable<CardChip>; testId?: string }
   );
 }
 
-export { Chip as ApprovalChip, KeyTip as ApprovalKeyTip };
+export { Chip as ApprovalChip, KeyTip as ApprovalKeyTip, CaughtUp as ApprovalCaughtUp, SentBefore as ApprovalSentBefore };
 
 function ColumnHeader({ index, total, groupLabel, closeLabel, onClose, onStep, dots, chip, narrow = false }: {
   index: number; total: number; groupLabel: string; closeLabel?: string; onClose?: () => void; onStep: (direction: 1 | -1) => void;
@@ -267,7 +343,14 @@ function TabBar({ tabs, active, focused, onPick }: { tabs: CardTab[]; active: st
 }
 
 /** Decide: who asks, the question, how it changed, its options and the one reply box. */
-function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onSent?: () => void; tabs: CardTab[]; onOpenTab: (key: string) => void }) {
+/** The Decide tab's root: ⇧↩ inside it is its own; the card routes the rest to it. */
+const DECIDE_ROOT = '[data-approval-decide]';
+
+function QuestionsTab({ item, onSent, tabs, onOpenTab, fromCard }: {
+  item: NotifyItem; onSent?: () => void; tabs: CardTab[]; onOpenTab: (key: string) => void;
+  /** Set to this tab's ⇧↩ handler, for keys pressed elsewhere on its card (not given to a nested card). */
+  fromCard?: React.MutableRefObject<((event: React.KeyboardEvent) => void) | null>;
+}) {
   const now = useNow();
   const questions = useMemo(() => markedQuestions(item), [item]);
   // The draft lives in the store, so it survives paging away and a refused Send (F-4).
@@ -294,11 +377,12 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
   const ended = item.state === 'answered' || item.state === 'expired';
   const [closing, setClosing] = useState(false);
   const line = replyLine(item);
-  const send = async () => {
+  // `chosen`: what goes, when it isn't the person's picks (⇧↩ sends the recommended options).
+  const send = async (chosen: readonly string[] = picks) => {
     const typed = text.trim();
-    if (sending || !canSend(item, picks, typed)) return;
-    const padded = questionsOf(item).map((_, at) => picks[at] ?? '');
-    const answer: NotifyAnswer = item.agentPrompt && picks[0] ? { choice: picks[0] } : typed ? { picks: padded, text: typed } : { picks };
+    if (sending || !canSend(item, chosen, typed)) return;
+    const padded = questionsOf(item).map((_, at) => chosen[at] ?? '');
+    const answer: NotifyAnswer = item.agentPrompt && chosen[0] ? { choice: chosen[0] } : typed ? { picks: padded, text: typed } : { picks: [...chosen] };
     setSending(true);
     let accepted = false;
     try {
@@ -337,8 +421,60 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
     return true;
   };
 
+  // 1 to 9 pick that option of the question with focus, else of the first (T-88). Never while typing.
+  const pickByNumber = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!sendable || item.relay || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (!/^[1-9]$/.test(event.key) || isTypingTarget(event.target)) return;
+    const groups = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="radiogroup"]'));
+    const group = groups.find((candidate) => candidate.contains(document.activeElement)) ?? groups[0];
+    const option = group?.querySelectorAll<HTMLButtonElement>('[role="radio"]:not(:disabled)')[Number(event.key) - 1];
+    const label = option?.dataset.choice;
+    if (!option || label === undefined) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const at = groups.indexOf(group);
+    setPicks((current) => { const next = [...current]; next[at] = label; return next; });
+    option.focus();
+  };
+
+  // ⇧↩ sends each question's recommended option while nothing is picked or typed (T-88, D-385
+  // holds: nothing is preselected). With a pick of the person's own it does nothing special, and
+  // with a question that has no recommendation it says so instead. Never while typing or
+  // composing, nor while the Close form is open (its reason isn't an answer).
+  const recommended = sendable && !item.relay && !item.unreachable && !closing ? recommendedAnswer(item, picks, text) : null;
+  const [noRecommended, setNoRecommended] = useState<number[] | null>(null);
+  useEffect(() => { setNoRecommended(null); }, [picks, text]);
+  const sendRecommended = (event: React.KeyboardEvent) => {
+    if (event.key !== 'Enter' || !event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented) return;
+    if (enterHeld()) {
+      // Still the press that answered the card before: its repeats never answer this one.
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (event.nativeEvent.isComposing || !sendable || item.relay || closing || isTypingTarget(event.target)) return;
+    // Taken even when it sends nothing, so a focused option or button isn't clicked by it.
+    event.preventDefault();
+    event.stopPropagation();
+    if (!recommended || event.repeat) return;
+    if ('missing' in recommended) {
+      setNoRecommended(recommended.missing);
+      return;
+    }
+    holdEnterUntilReleased();
+    void send(recommended.send);
+  };
+  const latestSendRecommended = useCommittedRef(sendRecommended);
+  useEffect(() => {
+    if (!fromCard) return;
+    const route = (event: React.KeyboardEvent) => latestSendRecommended.current(event);
+    fromCard.current = route;
+    return () => { if (fromCard.current === route) fromCard.current = null; };
+  }, [fromCard, latestSendRecommended]);
+  const recommendedKey = recommended && 'send' in recommended ? formatKeyDisplay('shift+Enter') : undefined;
+
   return (
-    <div ref={rootRef} className="flex h-full min-h-0 flex-col">
+    <div ref={rootRef} className="flex h-full min-h-0 flex-col" data-approval-decide="" onKeyDown={(event) => { pickByNumber(event); sendRecommended(event); }}>
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5" data-testid="approval-qa">
         <p className="text-[13px] text-text-tertiary">{[...askedBy(item), relativeAge(item.createdAt, now)].join(' · ')}</p>
         <h2 className="mt-1.5 text-[19px] font-semibold leading-snug text-text-primary" data-testid="approval-title">{item.title}</h2>
@@ -398,6 +534,7 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
                 onPick={(label) => setPicks((current) => { const next = [...current]; next[at] = current[at] === label ? '' : label; return next; })}
                 onChoose={(label) => setPicks((current) => { const next = [...current]; next[at] = label; return next; })}
                 onTabOut={at === questions.length - 1 ? toReplyBox : undefined}
+                recommendedKey={recommendedKey}
                 showTitle={questions.length > 1 || question.title !== item.title}
               />
             ))}
@@ -486,8 +623,9 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
           {waiting && closing && <ItemCloseForm item={item} onCommand={(command) => { runNotify(command); setClosing(false); }} onCancel={() => setClosing(false)} className="mt-2" />}
           {waiting && !closing && (
             <div className="mt-2 flex items-center gap-3">
-              <p className="min-w-0 flex-1 text-[12.5px] text-text-tertiary">
-                {item.agentPrompt ? 'A permission prompt takes one of its options.' : item.optionsOnly ? 'This question takes one of its options.'
+              <p className="min-w-0 flex-1 text-[12.5px] text-text-tertiary" role="status" data-testid="approval-reply-hint">
+                {noRecommended ? noRecommendedLine(noRecommended, questions.length, sendKeys ? formatKeyDisplay(sendKeys) : 'Send')
+                  : item.agentPrompt ? 'A permission prompt takes one of its options.' : item.optionsOnly ? 'This question takes one of its options.'
                   : replyBeingRead(item) ? `${sentenceStart(item.reply?.reader?.name ?? item.source.name)} is reading your last reply. You can send another once it says how it took it, or pick an option now.`
                     : 'Pick an option, or reply in your own words: an answer, or a question about it.'}
               </p>
@@ -525,6 +663,14 @@ function ReplyNotice({ item }: { item: NotifyItem }) {
       )}
     </div>
   );
+}
+
+/** Why ⇧↩ sent nothing: the questions with no recommended option, by number when there are several. */
+function noRecommendedLine(missing: number[], count: number, sendKey: string): string {
+  if (count === 1) return `Nothing here is recommended: pick an option, then ${sendKey} sends it.`;
+  const names = missing.map((at) => String(at + 1));
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+  return `Question ${list} ${names.length === 1 ? 'has' : 'have'} no recommended option: pick an option for each question, then ${sendKey} sends.`;
 }
 
 /** A tooltip's words and the key that does the same ("Send ⌘↩"). */
@@ -568,9 +714,11 @@ function radioGroupKey(event: React.KeyboardEvent<HTMLDivElement>, onChoose: (la
   }
 }
 
-function QuestionBlock({ question, label, picked, disabled, onPick, onChoose, onTabOut, showTitle }: {
+function QuestionBlock({ question, label, picked, disabled, onPick, onChoose, onTabOut, showTitle, recommendedKey }: {
   question: CardQuestion; label: string; picked?: string; disabled: boolean; onPick: (label: string) => void;
   onChoose: (label: string) => void; onTabOut?: () => boolean; showTitle: boolean;
+  /** ⇧↩ would send the recommended options now: the chip names the key (T-88). */
+  recommendedKey?: string;
 }) {
   // Roving focus: the picked option is the group's one Tab stop, else the first.
   const stop = question.choices.some((choice) => choice.label === picked) ? picked : question.choices[0]?.label;
@@ -580,8 +728,10 @@ function QuestionBlock({ question, label, picked, disabled, onPick, onChoose, on
       {showTitle && <p className="mt-1 text-[15px] font-semibold text-text-primary">{question.title}</p>}
       {question.why && <p className="mt-0.5 text-[13px] leading-relaxed text-text-secondary" data-testid="approval-question-why">{question.why}</p>}
       <div className="mt-2 flex flex-col gap-2" role="radiogroup" aria-label={question.title} onKeyDown={(event) => radioGroupKey(event, onChoose, onTabOut)}>
-        {question.choices.map((choice) => {
+        {question.choices.map((choice, at) => {
           const selected = picked === choice.label;
+          // 1 to 9 pick an option of the question with focus (T-88); the number shows on the option.
+          const digit = at < 9 ? String(at + 1) : undefined;
           return (
             <button
               key={choice.label}
@@ -602,6 +752,7 @@ function QuestionBlock({ question, label, picked, disabled, onPick, onChoose, on
               )}
               data-testid="approval-choice"
               data-mark={choice.mark}
+              aria-keyshortcuts={digit}
             >
               {/* Fixed box: the radio swaps its fill, never its size. */}
               <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 border-border-hover" aria-hidden="true">
@@ -610,7 +761,11 @@ function QuestionBlock({ question, label, picked, disabled, onPick, onChoose, on
               <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-center gap-2">
                   <span className="text-[14.5px] font-semibold text-text-primary">{choice.label}</span>
-                  {choice.recommended && <span className="rounded bg-status-success/10 px-1.5 py-px text-[11.5px] font-medium text-status-success-on-tint">Recommended</span>}
+                  {choice.recommended && (
+                    <span className="rounded bg-status-success/10 px-1.5 py-px text-[11.5px] font-medium text-status-success-on-tint" data-testid="approval-recommended">
+                      Recommended{recommendedKey ? ` · ${recommendedKey} sends` : ''}
+                    </span>
+                  )}
                   {choice.mark === 'new' && <span className="rounded bg-status-success/10 px-1.5 py-px text-[11px] font-semibold uppercase tracking-wide text-status-success-on-tint" data-testid="approval-mark">New</span>}
                   {choice.mark === 'reworded' && <span className="rounded bg-status-info/10 px-1.5 py-px text-[11px] font-semibold uppercase tracking-wide text-status-info-on-tint" data-testid="approval-mark">Reworded</span>}
                 </span>
@@ -621,6 +776,7 @@ function QuestionBlock({ question, label, picked, disabled, onPick, onChoose, on
                   </span>
                 )}
               </span>
+              {digit && !disabled && <Kbd size="xs" className="mt-0.5 shrink-0 text-text-tertiary">{digit}</Kbd>}
             </button>
           );
         })}

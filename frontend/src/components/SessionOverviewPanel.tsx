@@ -1,3 +1,4 @@
+import { useReadOnlyHost } from '../stores/readOnlyHostStore';
 import { cachedOverview, rememberOverview, sessionViewGeneration } from '../stores/sessionViewCache';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { List, PanelRight, Pencil, RefreshCw, X } from 'lucide-react';
@@ -6,6 +7,7 @@ import type {
   OrchestrationActivityKind,
   OrchestrationSessionOverview,
   OrchestrationSessionRecord,
+  OrchestrationSessionSummary,
   OrchestrationSessionUpdateInput,
 } from '../../../shared/types/orchestrationSession';
 import type { ToolPanelType } from '../../../shared/types/panels';
@@ -189,7 +191,8 @@ const AGENT_STATE_ACTIVITY_KINDS = new Set<OrchestrationActivityKind>(['working'
 const OVERVIEW_HEADING = 'mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary';
 
 export interface SessionOverviewPanelProps {
-  record: OrchestrationSessionRecord;
+  /** A list summary has no activity log (T-127); the overview's is shown once it loads. */
+  record: OrchestrationSessionSummary & Partial<Pick<OrchestrationSessionRecord, 'activity'>>;
   /** The Pane session whose worktree is the Session folder, where the status page lives. */
   folderSessionId: string;
   overview: OrchestrationSessionOverview | null;
@@ -250,7 +253,7 @@ export function SessionOverviewPanel({ record, folderSessionId, overview, error,
         </div>
         <div className="flex flex-shrink-0 items-center gap-1">
           <button type="button" aria-label="Refresh Session overview" title="Refresh" onClick={() => void onRefresh()} className={OVERVIEW_ACTION}><RefreshCw className="h-3.5 w-3.5" /></button>
-          <button type="button" aria-label={editing ? 'Cancel renaming Session' : 'Rename Session'} title={editing ? 'Cancel renaming' : 'Rename Session'} onClick={() => setEditing(value => !value)} className={OVERVIEW_ACTION}>{editing ? <X className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}</button>
+          <button type="button" aria-label={editing ? 'Cancel renaming Session' : 'Rename Session'} title={editing ? 'Cancel renaming' : 'Rename Session'} onClick={() => setEditing(value => !value)} className={cn('needs-full-access', OVERVIEW_ACTION)}>{editing ? <X className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}</button>
           {statusPage && <>
             <button type="button" aria-label="Open as a browser tab" title="Open as a browser tab" className={OVERVIEW_ACTION}
               onClick={() => void openBesideChat(folderSessionId, statusPage).catch((cause: unknown) => console.error('[SessionOverview] Did not open the status page beside chat:', cause))}>
@@ -314,7 +317,9 @@ export function SessionOverviewPanel({ record, folderSessionId, overview, error,
         <div className="border-t border-border-primary pt-3">
           <h3 className={OVERVIEW_HEADING}>Activity</h3>
           <div className="select-text space-y-2">
-            {(overview?.activity ?? record.activity).filter(activity => !AGENT_STATE_ACTIVITY_KINDS.has(activity.kind)).slice(0, 12).map(activity => (
+            {/* A list summary has no activity log (T-127): say where it comes from instead of showing nothing. */}
+            {!overview && !record.activity && <p className="text-text-muted" data-testid="overview-activity-pending">Activity shows once the overview loads.</p>}
+            {(overview?.activity ?? record.activity ?? []).filter(activity => !AGENT_STATE_ACTIVITY_KINDS.has(activity.kind)).slice(0, 12).map(activity => (
               <div key={activity.id} className="border-l-2 border-border-primary pl-2">
                 <p className="text-text-secondary">{activity.message}</p>
                 <p className="mt-0.5 text-[10px] text-text-muted">{formatActivityTime(activity.at)} · {activity.source}</p>
@@ -418,6 +423,8 @@ function PaneOverviewCard({ pane }: { pane: OrchestrationSessionOverview['panes'
   // A Pane on another saved machine is read-only here; it opens from All machines.
   const remote = pane.machine;
   const readOnly = pane.missing || remote !== undefined;
+  // A read-only viewer gets no state for members on the owner's other computers.
+  const hostReadOnly = useReadOnlyHost();
   const openPane = () => {
     if (readOnly) return;
     setActiveSession(pane.paneId);
@@ -426,7 +433,7 @@ function PaneOverviewCard({ pane }: { pane: OrchestrationSessionOverview['panes'
   return (
     <div className="mt-2 rounded border border-border-primary bg-surface-secondary p-2">
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0"><p className="truncate font-medium text-text-primary">{pane.name}</p><p className="truncate text-[10px] text-text-muted">{remote ? `On ${remote.label}${pane.branch ? ` · ${pane.branch}` : ''}` : pane.branch || 'Branch unknown'}{pane.archived ? ' · archived' : pane.missing ? ' · missing' : ''}{remote && REMOTE_STATE_NOTES[remote.state]}</p></div>
+        <div className="min-w-0"><p className="truncate font-medium text-text-primary">{pane.name}</p><p className="truncate text-[10px] text-text-muted">{remote ? `On ${remote.label}${pane.branch ? ` · ${pane.branch}` : ''}` : pane.branch || 'Branch unknown'}{pane.archived ? ' · archived' : pane.missing ? ' · missing' : ''}{remote && (hostReadOnly ? ' · not shared with you' : REMOTE_STATE_NOTES[remote.state])}</p></div>
         {!readOnly && <button type="button" onClick={openPane} className="flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] text-interactive hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive">Open Pane</button>}
       </div>
       {pane.panels.length > 0 && <div className="-mx-1 mt-1">{pane.panels.map(panel => {

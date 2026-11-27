@@ -153,6 +153,26 @@ describe('chat tab manager', () => {
     await manager.cancel('p1');
   });
 
+  it('starts a new conversation when the one it would reopen never had a message, so the agent never saved it', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', { ...newTab(directory), acpSessionId: 'never-saved' });
+    await manager.ensure('p1');
+    await expect.poll(() => manager.view('p1').status, { timeout: 10_000 }).toBe('idle');
+    expect(manager.view('p1').problem).toBeUndefined();
+    expect(store.state('p1')?.acpSessionId).not.toBe('never-saved');
+    manager.send('p1', { operationId: 'op-1', text: 'hello' });
+    await expect.poll(() => manager.receipt('p1', 'op-1')?.state, { timeout: 10_000 }).toBe('completed');
+  });
+
+  it('keeps saying the conversation is missing when it had turns, rather than starting another', async () => {
+    const { manager, store, directory } = harness();
+    const turn = { after: 'op-0', stopReason: 'end_turn', startedAt: '2026-11-25T00:00:00.000Z', endedAt: '2026-11-25T00:00:01.000Z' };
+    store.add('p1', { ...newTab(directory), acpSessionId: 'deleted', turnTimes: { sessionId: 'deleted', turns: [turn] } });
+    await expect(manager.ensure('p1')).rejects.toThrow(/Resource not found/);
+    expect(manager.view('p1')).toMatchObject({ status: 'stopped', problem: { action: 'restart' } });
+    expect(store.state('p1')?.acpSessionId).toBe('deleted');
+  });
+
   it('forgets the tool calls of an agent that exited mid-call in a turn of its own, so the next agent\'s silent turn of its own still stalls', { timeout: 30_000 }, async () => {
     const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_OWN_TURN_AFTER_LOAD: '1' });
     store.add('p1', newTab(directory));
@@ -587,6 +607,31 @@ describe('chat tab manager', () => {
     expect(JSON.stringify(manager.view('p1').transcript)).toContain('Heard: urgent');
     expect(manager.view('p1').transcript!.messages.filter(message => message.role === 'user').map(message => message.id)).toEqual(['user:op-1', 'steer:op-3', 'user:op-2']);
     expect(turnEnds(manager.view('p1'))).toEqual(['end_turn', 'end_turn']);
+  });
+
+  it('sends a skill as its own part, and shows the message as typed, also after a restart', { timeout: 60_000 }, async () => {
+    const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_SKILLS: '1' });
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    await expect.poll(() => manager.view('p1').commands).toContainEqual({ name: 'simplify', description: 'The simplify skill', skill: true });
+    expect(manager.view('p1').mentions).toEqual({ files: true, skills: true });
+    const texts = ['/simplify two', 'First this, then $simplify two', 'Then that: $simplify\ntwo'];
+    for (const [index, text] of texts.entries()) {
+      manager.send('p1', { operationId: `op-${index}`, text });
+      await expect.poll(() => manager.receipt('p1', `op-${index}`)?.state, { timeout: 10_000 }).toBe('completed');
+    }
+    expect(replyText(manager.view('p1'))).toBe([
+      'Parts: ["/simplify two"]', 'Parts: ["First this, then /simplify two","/simplify two"]', 'Parts: ["Then that: /simplify\\ntwo","/simplify two"]',
+    ].join('|'));
+    expect(userTexts(manager.view('p1'))).toEqual(texts);
+    await manager.restart('p1');
+    expect(userTexts(manager.view('p1'))).toEqual(texts);
+    // Another tab that opens the same conversation shows it as typed too.
+    const sessionId = store.state('p1')!.acpSessionId!;
+    await manager.close('p1');
+    store.add('p2', { ...newTab(directory), acpSessionId: sessionId });
+    await manager.ensure('p2');
+    expect(userTexts(manager.view('p2'))).toEqual(texts);
   });
 
   it('Send now keeps the message queued, with a notice, when the agent refuses the steer', { timeout: 30_000 }, async () => {

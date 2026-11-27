@@ -31,6 +31,12 @@ describe('pairing QR links', () => {
     expect(parseRelayPairingLink('pane://pair#s=x&c=6cphy4hwgmwpp4nl&n=Box&d=relay.test')?.domain).toBe('relay.test');
   });
 
+  it('reads a pasted link without its scheme, or with line breaks, spaces and zero-width characters in it', () => {
+    const expected = { secret: 'Zm9vYmFy-secret_1', computerId: '6cphy4hwgmwpp4nl', name: 'Studio Mac', domain: 'runpane.net' };
+    expect(parseRelayPairingLink('runpane.net/pair#s=Zm9vYmFy-secret_1&c=6cphy4hwgmwpp4nl&n=Studio%20Mac')).toEqual(expected);
+    expect(parseRelayPairingLink('  https://runpane.net/pair#s=Zm9vYmFy-\nsecret_1&c=6cphy4hwg mwpp4nl&n=Studio%20Mac\u200B\n')).toEqual(expected);
+  });
+
   it('refuses links that are not a complete pairing', () => {
     expect(parseRelayPairingLink('https://runpane.net/pair')).toBeNull();
     expect(parseRelayPairingLink('https://runpane.net/pair#c=6cphy4hwgmwpp4nl')).toBeNull();

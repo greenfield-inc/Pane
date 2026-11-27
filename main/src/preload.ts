@@ -10,6 +10,7 @@ import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult }
 import { contextBridge, ipcRenderer } from 'electron';
 import { createPreferencesApi } from '../../shared/types/preferences';
 import { isDaemonOwnedChannel } from '../../shared/types/daemon';
+import { SESSION_LIST_SUMMARY } from '../../shared/types/orchestrationSession';
 import { BROWSER_TAB_NOTICE_CHANNEL, BROWSER_VIEW_LIVE_CHANNEL, type BrowserTabNotice } from '../../shared/types/browser';
 import {
   WINDOW_CONTROLS_OVERLAY_ARG,
@@ -434,9 +435,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** Settings → Secrets: this computer's Pane secret store. Values go in only; nothing returns one. */
   paneSecrets: {
     list: (): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:list'),
-    set: (project: string, name: string, value: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set', project, name, value),
+    set: (project: string, name: string, value: string, sites?: string[]): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set', project, name, value, sites),
+    setSites: (project: string, name: string, sites: string[]): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set-sites', project, name, sites),
     delete: (project: string, name: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:delete', project, name),
-    setReference: (project: string, name: string, reference: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set-reference', project, name, reference),
+    setReference: (project: string, name: string, reference: string, sites?: string[]): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set-reference', project, name, reference, sites),
     startLease: (request: SecretLeaseStartRequest): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:start-lease', request),
     endLease: (leaseId: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:end-lease', leaseId),
     endAllLeases: (): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:end-all-leases'),
@@ -590,6 +592,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     conversations: (panelId: string) => invokeIpc('chat-tab:conversations', panelId),
     resume: (panelId: string, sessionId: string) => invokeIpc('chat-tab:resume', panelId, sessionId),
     dismissBanner: (panelId: string) => invokeIpc('chat-tab:dismiss-banner', panelId),
+    files: (panelId: string, query: string) => invokeIpc('chat-tab:files', panelId, query),
     signIn: (panelId: string) => invokeIpc('chat-tab:sign-in', panelId),
     keys: () => invokeIpc('chat-tab:keys'),
     setKey: (agent: string, key: string | null) => invokeIpc('chat-tab:set-key', agent, key),
@@ -626,14 +629,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   orchestrationSessions: {
     runtimes: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:runtimes'),
-    list: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:list'),
-    select: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:select', selector),
+    // The renderer's list reads summaries (T-127); a Session's activity log and profile come with `get`.
+    list: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:list', SESSION_LIST_SUMMARY),
+    select: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:select', selector, SESSION_LIST_SUMMARY),
     create: (input: OrchestrationSessionCreateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:create', input, { chatTabs: true, chatAgents: true }),
     get: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:get', selector, { chatTabs: true, chatAgents: true }),
     peek: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:peek', selector, { chatTabs: true, chatAgents: true }),
     open: (selector: OrchestrationSessionSelector, options?: { select?: boolean }): Promise<IPCResponse> => invokeIpc('orchestration-sessions:open', selector, { chatTabs: true, chatAgents: true }, options ?? {}),
     update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:update', selector, input),
-    reorder: (sessionIds: string[]): Promise<IPCResponse> => invokeIpc('orchestration-sessions:reorder', { sessionIds }),
+    reorder: (sessionIds: string[]): Promise<IPCResponse> => invokeIpc('orchestration-sessions:reorder', { sessionIds }, SESSION_LIST_SUMMARY),
     setAgent: (selector: OrchestrationSessionSelector, agent: PaneChatAgent): Promise<IPCResponse> => invokeIpc('orchestration-sessions:set-agent', selector, agent),
     associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:associate', selector, association),
     detach: (selector: OrchestrationSessionSelector, paneId?: string): Promise<IPCResponse> => invokeIpc('orchestration-sessions:detach', selector, paneId),

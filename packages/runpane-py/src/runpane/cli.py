@@ -177,6 +177,7 @@ NOTIFY_VALUE_FLAGS = {
     "--update": "notify_update",
     "--asked": "notify_asked",
     "--what-changed": "notify_what_changed",
+    "--close": "notify_close",
 }
 # Autopilot's commands that take a waiting item's id as their first word.
 AUTOPILOT_ITEM_COMMANDS = {"autopilot answer", "autopilot close", "autopilot rewrite"}
@@ -188,6 +189,7 @@ FLAG_OWNERS = {
     "--questions": ("notify", "report"),
     "--took": ("notify",),
     "--took-as": ("notify",),
+    "--close": ("notify",),
     "--status": ("notify", "update", "todos list"),
     "--update": ("notify",),
     "--asked": ("notify",),
@@ -202,7 +204,7 @@ FLAG_OWNERS = {
     "--kind": ("machine cleanup", "todos attach"),
     "--done-when": ("todos create", "todos update"),
     "--parent": ("todos create",),
-    "--check": ("todos update",),
+    "--check": ("todos update", "notify"),
     "--uncheck": ("todos update",),
     "--label": ("todos attach",),
     "--no-start": ("todos create",),
@@ -386,6 +388,8 @@ class ParsedArgs:
     notify_suggestions: Optional[str] = None
     notify_action: Optional[str] = None
     notify_links: Optional[str] = None
+    # `notify --check`: check the card and print it as Pane would post it, posting nothing.
+    notify_check: Optional[bool] = None
     notify_relays: Optional[str] = None
     notify_about_session: Optional[str] = None
     notify_questions: Optional[str] = None
@@ -397,6 +401,8 @@ class ParsedArgs:
     notify_update: Optional[str] = None
     notify_asked: Optional[str] = None
     notify_what_changed: Optional[str] = None
+    # `notify --close <id|Q-n>`: the asker withdraws its own waiting card.
+    notify_close: Optional[str] = None
     # `runpane todos <verb>`: the words after the verb (the to-do, then a title, target, id or text).
     todo_args: List[str] = field(default_factory=list)
     # todos create|update --done-when, repeatable; a JSON array of lines also works (the MCP tool's input).
@@ -1050,6 +1056,9 @@ def parse_flags(raw_args: List[str], parsed: ParsedArgs) -> None:
             parsed.wait_for_result = True
         elif is_local_command and arg in FLAG_OWNERS and parsed.command not in FLAG_OWNERS[arg]:
             raise ValueError(f"{arg} is only valid with runpane {' or runpane '.join(FLAG_OWNERS[arg])}.")
+        elif parsed.command == "notify" and arg == "--check":
+            # `todos update --check <n,...>` takes a value; on notify `--check` is a switch.
+            parsed.notify_check = True
         elif parsed.command == "notify" and arg == "--took":
             # `notify --took <id|Q-n> answer|question`: the word after the id says how the reply was taken.
             index += 1
@@ -1998,6 +2007,7 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "browser screenshot": lambda parsed, context: run_unsupported_contract(parsed, context),
     "browser click": lambda parsed, context: run_unsupported_contract(parsed, context),
     "browser type": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser fill": lambda parsed, context: run_unsupported_contract(parsed, context),
     "browser press": lambda parsed, context: run_unsupported_contract(parsed, context),
     "browser select": lambda parsed, context: run_unsupported_contract(parsed, context),
     "browser scroll": lambda parsed, context: run_unsupported_contract(parsed, context),

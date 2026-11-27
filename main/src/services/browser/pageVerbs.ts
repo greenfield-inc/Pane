@@ -1,5 +1,5 @@
 import { type JsonValue } from '../../../../shared/validation/boundaryDecoder';
-import type { BrowserPageContents, FileChooser, PageDriver, PendingDialog } from './pageDriver';
+import type { BrowserPageContents, FileChooser, LoginToFill, PageDriver, PendingDialog } from './pageDriver';
 
 /** One browser tool's work on a tab's page, after the caller, tab and arguments are checked. */
 export type VerbRequest =
@@ -7,6 +7,7 @@ export type VerbRequest =
   | { verb: 'screenshot'; fullPage: boolean }
   | { verb: 'click'; ref?: string; x?: number; y?: number; button: 'left' | 'right' | 'middle'; double: boolean }
   | { verb: 'type'; ref: string; text: string; clear: boolean; submit: boolean }
+  | { verb: 'fill'; ref: string; login: LoginToFill }
   | { verb: 'press'; key: string; ref?: string }
   | { verb: 'select'; ref: string; values: string[] }
   | { verb: 'scroll'; ref?: string; dx: number; dy: number }
@@ -29,6 +30,8 @@ export interface VerbOutcome {
   snapshot?: string;
   truncated?: boolean;
   value?: JsonValue;
+  /** The site a saved login was filled on. */
+  filledSite?: string;
   /** Where a click landed, for the agent's cursor on the tab. */
   cursor?: { x: number; y: number };
   image?: { png: Buffer; width: number; height: number };
@@ -43,6 +46,8 @@ export async function runVerb(page: PageDriver, contents: BrowserPageContents, r
     const outcome: VerbOutcome = { url: contents.getURL(), title: contents.getTitle(), ...extra };
     if (extra.dialog) outcome.note = DIALOG_NOTE;
     if (extra.fileChooser) outcome.note = CHOOSER_NOTE;
+    const notice = page.takeNotice();
+    if (notice) outcome.note = [notice, outcome.note].filter(Boolean).join(' ');
     return outcome;
   };
   switch (request.verb) {
@@ -68,6 +73,14 @@ export async function runVerb(page: PageDriver, contents: BrowserPageContents, r
     }
     case 'type':
       return after(await page.type(request.ref, request.text, request.clear, request.submit));
+    case 'fill': {
+      const { site, sure, ...filled } = await page.fill(request.ref, request.login);
+      const outcome = after(filled);
+      outcome.filledSite = site;
+      const what = sure ? `Filled ${request.login.key}.` : `The page changed while Pane filled ${request.login.key}, so it may hold it, part of it or nothing: a page that submits by itself does this. Call browser_snapshot to see where it is.`;
+      outcome.note = [`${what} Its value shows as dots. Until the tab loads a new page, scripts don't run on it and snapshots show every field's value as dots.`, outcome.note].filter(Boolean).join(' ');
+      return outcome;
+    }
     case 'press':
       return after(await page.press(request.key, request.ref));
     case 'select': {

@@ -15,6 +15,7 @@ import { buildRoutesReport } from '../computerCommands';
 import { disconnectActiveRemoteHostClients } from '../remoteTransportController';
 import { remoteHostRuntimeStateStore } from '../remoteHostRuntimeState';
 import { readFileSync } from 'fs';
+import { confirmedSharers } from './confirmedSharers';
 import { setRelayPushChannel } from '../mobilePushSender';
 import { isDevelopmentBuild } from '../../utils/appDirectory';
 
@@ -79,6 +80,7 @@ export async function createRelayHost(deps: {
       disconnectActiveRemoteHostClients(ids);
       for (const id of ids) previews.revokeClient(id);
     },
+    sharerConfirmed: (id) => confirmedSharers.confirm(id),
     connectedClientIds: () => new Set(remoteHostRuntimeStateStore.getState().connectedClients.map((client) => client.clientId).filter((id): id is string => id !== null)),
     log: deps.log,
   });
@@ -120,6 +122,22 @@ export async function createRelayHost(deps: {
   proxy = await servePreviews(previews.route, deps.files);
   registerRelayCommands(deps.commandRegistry, relay, previews, links, linking, configManager);
   relay.onStatus((status) => getPaneEventSink().send('relay:status-changed', status));
+  // Linked computers keep read-only tokens only for devices still paired here. They hear of every
+  // change, whichever way a device was removed, and both sides compare whenever one comes back.
+  let shared = JSON.stringify(links.readDevices());
+  const tellIfChanged = () => {
+    const now = JSON.stringify(links.readDevices());
+    if (now === shared) return;
+    shared = now;
+    void links.tellReadDevices();
+  };
+  configManager.on('config-updated', tellIfChanged);
+  let ready = false;
+  relay.onStatus((status) => {
+    const back = status.phase === 'ready' && !ready;
+    ready = status.phase === 'ready';
+    if (back) void Promise.all([links.tellReadDevices(), links.followReadDevices()]);
+  });
   relay.start();
   // A computer without the Pane app's push keys sends its phones' alerts through its relay.
   setRelayPushChannel({
@@ -139,10 +157,15 @@ export async function createRelayHost(deps: {
       routesReport: buildRoutesReport,
       onPaired: (event) => getPaneEventSink().send('relay:paired', event),
     }),
-    suspend: () => relay.suspend(),
+    suspend: () => {
+      confirmedSharers.clear();
+      relay.suspend();
+    },
     resume: () => relay.resume(),
     stop: async () => {
       setRelayPushChannel(null);
+      configManager.off('config-updated', tellIfChanged);
+      links.stop();
       await relay.stop();
       await proxy?.close();
     },

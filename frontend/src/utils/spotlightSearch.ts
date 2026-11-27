@@ -4,7 +4,7 @@
  * filtered list). Ranking is match tier first, then recency within the tier.
  */
 import { matchSorterWithRankInfo, rankings, type KeyOption, type RankedItem } from 'match-sorter';
-import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 import { todoRef } from '../../../shared/types/todos';
 import type { EffectiveHotkeyDefinition } from '../stores/hotkeyStore';
 import type { Project } from '../types/project';
@@ -35,13 +35,13 @@ interface SearchItemBase {
 
 export type SearchItem =
   | SearchItemBase & { kind: 'pane'; pane: Session; current: boolean; viewedAt: number; prUrl?: string }
-  | SearchItemBase & { kind: 'session'; session: OrchestrationSessionRecord; todoNumber?: number }
+  | SearchItemBase & { kind: 'session'; session: OrchestrationSessionSummary; todoNumber?: number }
   | SearchItemBase & { kind: 'project'; project: Project }
   | SearchItemBase & { kind: 'command'; command: EffectiveHotkeyDefinition; disabledReason: string | null };
 
 export interface SearchSources {
   panes: Session[];
-  sessions: OrchestrationSessionRecord[];
+  sessions: OrchestrationSessionSummary[];
   projects: Project[];
   /** Commands that show in the palette (`getAll({ paletteOnly: true })`). */
   commands: EffectiveHotkeyDefinition[];

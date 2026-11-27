@@ -20,6 +20,8 @@ export interface AgentChatConfig {
   riskyModes?: readonly string[];
   terminalConversationsLoad: boolean;
   paneMcpHttp?: boolean;
+  /** How the agent marks skills and takes them in a message; absent when it does not mark them (schema.json). */
+  skills?: 'meta' | 'dollar';
   legacyClients?: boolean;
   registryIds?: readonly string[];
 }

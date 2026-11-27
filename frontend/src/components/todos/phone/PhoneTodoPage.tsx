@@ -1,3 +1,4 @@
+import { isReadOnlyHost, useReadOnlyHost } from '../../../stores/readOnlyHostStore';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, FileText, MoreHorizontal } from 'lucide-react';
 import type { TodoAction, TodoDetail } from '../../../../../shared/types/todos';
@@ -43,7 +44,7 @@ export function PhoneTodoPage(props: PhoneTodoPageProps) {
   useEffect(() => {
     if (!snoozeRequestedFor(request, props.number) || !detail) return;
     useTodosStore.getState().requestSnooze(null);
-    if (canSnoozeTodo(detail.todo)) setSnoozing(true);
+    if (canSnoozeTodo(detail.todo) && !isReadOnlyHost()) setSnoozing(true);
   }, [request, props.number, detail]);
   const wake = () => {
     setSnoozing(false);
@@ -156,19 +157,23 @@ function MoreMenu({ detail, onOpenSession, onSnooze }: { detail: TodoDetail; onO
   const closed = detail.status.status === 'done' || detail.status.status === 'dropped';
   const primary = stateAction(detail);
   const sessionId = detail.todo.sessionId ?? detail.parent?.todo.sessionId;
+  const readOnly = useReadOnlyHost();
   const items: DropdownItem[] = [];
   const snoozed = detail.todo.snooze !== undefined;
-  if (canSnoozeTodo(detail.todo)) items.push({ id: 'snooze', label: snoozed ? 'Change snooze…' : 'Snooze…', onClick: onSnooze });
-  if (snoozed) items.push({ id: 'wake', label: 'Wake now', onClick: () => run({ kind: 'wake', number }) });
-  else if (primary) items.push({ id: 'state', label: primary.label, onClick: () => run(primary.action) });
-  if (closed) {
+  if (!readOnly && canSnoozeTodo(detail.todo)) items.push({ id: 'snooze', label: snoozed ? 'Change snooze…' : 'Snooze…', onClick: onSnooze });
+  if (!readOnly && snoozed) items.push({ id: 'wake', label: 'Wake now', onClick: () => run({ kind: 'wake', number }) });
+  else if (!readOnly && primary) items.push({ id: 'state', label: primary.label, onClick: () => run(primary.action) });
+  if (readOnly) {
+    // Nothing that changes it.
+  } else if (closed) {
     items.push({ id: 'archive', label: 'Archive', description: 'Archives its Session’s Panes that are safe to archive', onClick: () => run({ kind: 'archive', number }) });
     items.push({ id: 'reopen', label: 'Reopen', onClick: () => run({ kind: 'reopen', number }) });
   } else {
     items.push({ id: 'done', label: 'Mark done', onClick: () => run({ kind: 'done', number }) });
     items.push({ id: 'drop', label: 'Drop', variant: 'danger', onClick: () => run({ kind: 'drop', number }) });
   }
-  if (onOpenSession) items.push({ id: 'session', label: 'Open its Session', separatorBefore: true, disabled: !sessionId, onClick: () => { if (sessionId) onOpenSession(sessionId); } });
+  if (onOpenSession) items.push({ id: 'session', label: 'Open its Session', separatorBefore: !readOnly, disabled: !sessionId, onClick: () => { if (sessionId) onOpenSession(sessionId); } });
+  if (items.length === 0) return null;
   return (
     <>
       <Dropdown

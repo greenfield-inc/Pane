@@ -350,7 +350,7 @@ def describe_lease_result(result: Dict[str, Any]) -> str:
     if result.get("status") == "leased":
         return (
             f"Leased {result['project']}/{', '.join(result['names'])} until {result['expiresAt']} on {', '.join(result['machines'])}. "
-            f"Lease {result['leaseId']}. Use them with `runpane secrets exec --project {result['project']} -- <command>`."
+            f"Lease {result['leaseId']}. Use them with `runpane secrets exec --project {result['project']} -- <command>`, and logins with `runpane browser fill`."
         )
     if result.get("status") == "declined" or result.get("approved") is False:
         return "The person declined the lease."

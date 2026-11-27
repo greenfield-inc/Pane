@@ -2,20 +2,66 @@ import { expect, it } from 'vitest';
 
 import { DraftStore } from './draftStore';
 
-it('confirms the original draft after navigation without clearing another tab or a newer revision', () => {
-  const saved = new Map([['host/pane/A', 'send A'], ['host/pane/B', 'keep B']]);
+function storeWith(drafts: Record<string, string>) {
+  const saved = new Map(Object.entries(drafts));
   const store = new DraftStore({ read: key => saved.get(key) ?? '', write: (key, text) => { saved.set(key, text); } });
-  const sent = store.read('host/pane/A');
-  store.update('host/pane/B', 'edited B');
-  store.confirm(sent);
+  return { store, saved };
+}
+
+/** A host write that stays in flight until the test answers it. */
+function pendingWrite() {
+  const sent: string[] = [];
+  let answer: { resolve: () => void; reject: (error: Error) => void } = { resolve: () => undefined, reject: () => undefined };
+  const deliver = (text: string) => {
+    sent.push(text);
+    return new Promise<void>((resolve, reject) => { answer = { resolve, reject }; });
+  };
+  return { sent, deliver, confirm: () => answer.resolve(), fail: (error: Error) => answer.reject(error) };
+}
+
+it('keeps the text until the host confirms it, and a second tap meanwhile sends nothing', async () => {
+  const { store, saved } = storeWith({ 'host/pane/A': 'fix the build' });
+  const write = pendingWrite();
+
+  const first = store.send('host/pane/A', write.deliver);
+  const second = store.send('host/pane/A', write.deliver);
+  await second;
+  expect(store.read('host/pane/A')).toMatchObject({ text: 'fix the build', sending: true });
+
+  write.confirm();
+  await first;
+  expect(write.sent).toEqual(['fix the build']);
+  expect(store.read('host/pane/A')).toMatchObject({ text: '', sending: false });
   expect(saved.get('host/pane/A')).toBe('');
-  expect(saved.get('host/pane/B')).toBe('edited B');
-  store.update('host/pane/A', 'next A');
-  const next = store.read('host/pane/A');
-  store.update('host/pane/A', 'new text');
-  store.update('host/pane/A', 'next A'); // Same text, newer user edit.
-  store.confirm(next);
-  expect(saved.get('host/pane/A')).toBe('next A');
+});
+
+it('keeps the text when the send fails, and sends it on the next tap', async () => {
+  const { store } = storeWith({ 'host/pane/A': 'fix the build' });
+  const write = pendingWrite();
+
+  const failed = store.send('host/pane/A', write.deliver);
+  write.fail(new Error('offline'));
+  await expect(failed).rejects.toThrow('offline');
+  expect(store.read('host/pane/A')).toMatchObject({ text: 'fix the build', sending: false });
+
+  const retried = store.send('host/pane/A', write.deliver);
+  write.confirm();
+  await retried;
+  expect(write.sent).toEqual(['fix the build', 'fix the build']);
+  expect(store.read('host/pane/A').text).toBe('');
+});
+
+it('clears only the sent draft: an edit made while sending and other tabs stay', async () => {
+  const { store, saved } = storeWith({ 'host/pane/A': 'send A', 'host/pane/B': 'keep B' });
+  const write = pendingWrite();
+
+  const sending = store.send('host/pane/A', write.deliver);
+  store.update('host/pane/A', 'send A, then this');
+  write.confirm();
+  await sending;
+
+  expect(saved.get('host/pane/A')).toBe('send A, then this');
+  expect(saved.get('host/pane/B')).toBe('keep B');
 });
 
 it('publishes only to subscribers of the changed draft and keeps host keys separate', () => {

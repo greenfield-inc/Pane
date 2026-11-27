@@ -1,3 +1,8 @@
+/**
+ * Dictation through the host's voice engine (Deepgram live, or a recorded clip
+ * sent to fal), with the cleanup pass. The web client and the desktop app
+ * both use it; each passes the host's voice:* commands as callbacks.
+ */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   VoiceDeepgramStreamingMetadata,
@@ -6,13 +11,13 @@ import type {
   VoiceTranscriptionMode,
   VoiceTranscriptionRequest,
   VoiceTranscriptionResult,
-} from '../../../../shared/types/voiceTranscription';
+} from '../../../shared/types/voiceTranscription';
 import {
   buildDeepgramListenUrl,
   parseDeepgramLiveMessage,
   readResultsMetadata,
-} from '../../../../shared/voice/deepgramLive';
-import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+} from '../../../shared/voice/deepgramLive';
+import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 
 const MAX_RECORDING_MS = 15 * 60_000;
 /** Keeps a 15-minute recorded clip near 7 MB, under MAX_AUDIO_BYTES; browsers default to about 128 kbps. */
@@ -32,7 +37,7 @@ const PREFERRED_RECORDING_MIME_TYPES = [
   'audio/mp4',
 ] as const;
 
-interface UseRemoteVoiceDictationOptions {
+interface UseVoiceDictationOptions {
   mode: VoiceTranscriptionMode;
   onTranscript: (text: string) => void;
   onTranscribeAudio?: (request: VoiceTranscriptionRequest) => Promise<VoiceTranscriptionResult>;
@@ -41,7 +46,7 @@ interface UseRemoteVoiceDictationOptions {
   onFinalizeStreamingAudio?: (request: VoiceStreamingFinalizeRequest) => Promise<VoiceTranscriptionResult>;
 }
 
-interface UseRemoteVoiceDictationResult {
+interface UseVoiceDictationResult {
   isRecording: boolean;
   isTranscribing: boolean;
   activeMode: VoiceTranscriptionMode | null;
@@ -54,14 +59,14 @@ interface UseRemoteVoiceDictationResult {
   toggle: () => Promise<void>;
 }
 
-export function useRemoteVoiceDictation({
+export function useVoiceDictation({
   mode,
   onTranscript,
   onTranscribeAudio,
   onCreateStreamingSocket,
   onGetDeepgramToken,
   onFinalizeStreamingAudio,
-}: UseRemoteVoiceDictationOptions): UseRemoteVoiceDictationResult {
+}: UseVoiceDictationOptions): UseVoiceDictationResult {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [activeMode, setActiveMode] = useState<VoiceTranscriptionMode | null>(null);

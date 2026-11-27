@@ -29,6 +29,7 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
   panelManager.onPanelDeleted(panelId => {
     const popup = popupPages.get(panelId);
     popupPages.delete(panelId);
+    popupOpeners.delete(panelId);
     if (popup && !popup.isDestroyed()) popup.destroy();
   });
   return {
@@ -105,6 +106,11 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
     onSignInRefused: (listener) => {
       signInListeners.add(listener);
     },
+    showLogin: (panelId, login) => {
+      const notice: BrowserTabNotice = { kind: 'login', ...login };
+      getMainWindow()?.webContents.send(BROWSER_TAB_NOTICE_CHANNEL, { panelId, notice });
+    },
+    openerTab: (panelId) => popupOpeners.get(panelId),
     showDownload: (panelId, file, agent) => {
       const notice: BrowserTabNotice = { kind: 'downloaded', name: path.basename(file), file };
       if (agent) notice.agent = agent;
@@ -136,6 +142,9 @@ const headlessPages = new Map<string, BrowserWindow>();
 
 /** Sign-in popups that became tabs, by tab: each one's hidden window, still linked to its opener. */
 const popupPages = new Map<string, BrowserWindow>();
+
+/** The tab each sign-in popup's tab came from, for as long as both are linked. */
+const popupOpeners = new Map<string, string>();
 
 /** Tabs another device watches now (setHeld's `painting`): their sign-in popups become tabs. */
 let remotelyWatched = new Set<string>();
@@ -222,6 +231,7 @@ function openPopupTab({ url, options, opener, openerUrl }: PopupTabRequest): Web
       return;
     }
     popupPages.set(panel.id, window);
+    popupOpeners.set(panel.id, opener.panelId);
     getPaneWebviewContextMap().set(page.id, { panelId: panel.id, sessionId: opener.sessionId });
     rememberUrl(page, panel.id);
   }).catch(error => {

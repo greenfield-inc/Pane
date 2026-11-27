@@ -55,6 +55,8 @@ const DAEMON_EVENT_EXACT_CHANNELS = new Set<string>([
   'session-logs-cleared',
   'script-closing',
   'script-session-changed',
+  // A chat Session's host snapshot changed (T-116): the owner's other machines read it again.
+  'session-snapshot:changed',
 ]);
 
 export function isPaneDaemonEventChannel(channel: string): boolean {

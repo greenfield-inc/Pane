@@ -9,6 +9,7 @@ import type { RunpaneWorkspaceStateResult } from '@shared/types/runpaneOrchestra
 import { queryClient } from '@/daemon';
 import { readChannel } from '@/daemon/invoke';
 import { withMachineClient } from '@/daemon/machines';
+import { readUnlessRefused } from '@/daemon/readOnlyReads';
 import { agentStatusFromWorkspace } from '@/features/panes/agentStatus';
 import type { ProjectWithPanes } from '@/features/panes/paneList';
 import { sessionsUnavailable } from '@/features/sessions/hooks';
@@ -69,8 +70,8 @@ async function readMachine(profile: RemotePaneConnectionProfile): Promise<Machin
       // Against the last read, so a Pane that finished between reads shows as Ready.
       optional(readChannel<RunpaneWorkspaceStateResult>(client, 'runpane:workspace:state', [{}])
         .then(workspace => agentStatusFromWorkspace(workspace, previous?.statuses)), previous?.statuses),
-      optional(readChannel<PanePermissionRequest[]>(client, 'permission:getPending'), previous?.permissions),
-      optional(readChannel<NotifySharedState>(client, 'notify:remote-snapshot'), previous?.notify),
+      optional(readUnlessRefused(profile, 'permission:getPending', () => readChannel<PanePermissionRequest[]>(client, 'permission:getPending')), previous?.permissions),
+      optional(readUnlessRefused(profile, 'notify:remote-snapshot', () => readChannel<NotifySharedState>(client, 'notify:remote-snapshot')), previous?.notify),
       optional(readChannel<OrchestrationSessionListResult>(client, 'orchestration-sessions:list').then(list => list.sessions), previous?.sessions),
     ]);
     return { projects, statuses, permissions, notify, sessions };

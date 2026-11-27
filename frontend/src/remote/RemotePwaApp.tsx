@@ -1,6 +1,8 @@
+import { tokenAccess } from '../../../shared/types/accessLevel';
+import { setHostAccess, useReadOnlyHost } from '../stores/readOnlyHostStore';
 import { Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import type { OrchestrationSessionRecord, OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionSummary, OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
 import { pausedMarkOf, type PanelActivationRequest, type ToolPanel, type ToolPanelType } from '../../../shared/types/panels';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus, RemotePwaAffordances } from '../../../shared/types/remoteDaemon';
 import type { Session } from '../types/session';
@@ -127,6 +129,7 @@ function connectionReducer(state: ConnectionState, update: Partial<ConnectionSta
 export function RemotePwaApp() {
   const [savedProfiles, setSavedProfiles] = useState<RemotePaneConnectionProfile[]>([]);
   const [profilesLoading, setProfilesLoading] = useState(true);
+  const readOnly = useReadOnlyHost();
   const [pendingPushRoute, setPendingPushRoute] = useState<NativePushRoute | null>(null);
   const [pushStatus, setPushStatus] = useState<{ registration: 'registered' | 'not-registered' | 'revoked'; provider: string; message: string; needsInputEnabled?: boolean; completedEnabled?: boolean } | null>(null);
   const [pushControls, setPushControls] = useState(DEFAULT_PUSH_CONTROLS);
@@ -146,7 +149,7 @@ export function RemotePwaApp() {
   const [mountedTerminalPanelIds, setMountedTerminalPanelIds] = useState<string[]>([]);
   /** The sidebar row the open Pane was tapped in, so only that copy is highlighted. */
   const [selectedPaneScope, setSelectedPaneScope] = useState<{ paneId: string; scope: string } | null>(null);
-  const [archivedSessionToast, setArchivedSessionToast] = useState<OrchestrationSessionRecord | null>(null);
+  const [archivedSessionToast, setArchivedSessionToast] = useState<OrchestrationSessionSummary | null>(null);
   /** The saved profile being reconnected to on open, until that attempt ends. */
   const [reconnectingProfile, setReconnectingProfile] = useState<RemotePaneConnectionProfile | null>(null);
   /** A pairing link that would join this browser's computers with another group, until the person answers. */
@@ -614,6 +617,7 @@ export function RemotePwaApp() {
     const runtime = new RemoteRuntimeAdapter(profile);
     activeRuntimeRef.current?.disconnect();
     activeRuntimeRef.current = runtime;
+    setHostAccess(runtime.access);
     updateConnection({ ...INITIAL_CONNECTION, connectionStatus: 'connecting' });
     resetHostState(profile.id);
     updateConnection({ adapter: runtime, activeProfile: profile });
@@ -694,23 +698,27 @@ export function RemotePwaApp() {
     void connectProfile(profile).then(applyRoute).catch(() => {});
   }, [activeProfile?.id, adapter, closeTodos, connectProfile, loadPanels, pendingPushRoute, profilesLoading, requestView, savedProfiles, selectSession, setLastError]);
 
-  const pairFromLink = useCallback(async (secret: string) => {
+  const pairFromLink = useCallback(async (secret: string, watching = false) => {
     setLastError(null);
     try {
       const [computer, ...linked] = await pairThisBrowser(window, secret, {
         fetch: (url, init) => fetch(url, init),
         label: getClientLabel(),
         phoneId: getRuntimeId(),
+        saved: savedProfiles,
+        watching,
       });
       if (!computer) return;
       // Computers the Pane app already linked with this one come along. The browser links none itself:
       // each computer's browser app has its own storage, so it never sees the others.
       setSavedProfiles(previous => withNewProfiles(previous, linked));
-      await connectProfile(computer);
+      // A read-only link never takes the place of full access this browser already has.
+      const saved = tokenAccess(computer.token) === 'read' ? savedProfiles.find(profile => profile.id === computer.id && tokenAccess(profile.token) !== 'read') : undefined;
+      await connectProfile(saved ?? computer);
     } catch (error) {
       setLastError(error instanceof Error ? pairingErrorText(error) : 'Pairing failed.');
     }
-  }, [connectProfile, setLastError]);
+  }, [connectProfile, savedProfiles, setLastError]);
 
   // Reconnects to the last used host once on open; a notification tap picks its own host instead.
   useEffect(() => {
@@ -752,6 +760,7 @@ export function RemotePwaApp() {
   const disconnect = useCallback(() => {
     activeRuntimeRef.current?.disconnect();
     activeRuntimeRef.current = null;
+    setHostAccess(undefined);
     setAutoConnectPaused(true);
     updateConnection(INITIAL_CONNECTION);
     resetHostState();
@@ -761,6 +770,7 @@ export function RemotePwaApp() {
   const cancelReconnect = useCallback(() => {
     activeRuntimeRef.current?.disconnect();
     activeRuntimeRef.current = null;
+    setHostAccess(undefined);
     setReconnectingProfile(null);
     updateConnection(INITIAL_CONNECTION);
   }, []);
@@ -1072,7 +1082,8 @@ export function RemotePwaApp() {
   }, [adapter]);
 
   useEffect(() => {
-    if (!adapter || !activeProfile || !isNativeMobile()) return;
+    // A computer this device only watches sends it no alerts.
+    if (!adapter || !activeProfile || !isNativeMobile() || readOnly) return;
     let cancelled = false;
     void (async () => {
       const pushError = await setupNativePush(activeProfile, adapter);
@@ -1085,7 +1096,7 @@ export function RemotePwaApp() {
       if (!cancelled) setLastError(error instanceof Error ? error.message : 'Could not set up notifications.');
     });
     return () => { cancelled = true; };
-  }, [adapter, activeProfile, setLastError]);
+  }, [adapter, activeProfile, readOnly, setLastError]);
 
   const changePushControl = useCallback((key: 'needsInputEnabled' | 'completedEnabled', value: boolean) => {
     if (!adapter) return;
@@ -1196,7 +1207,7 @@ export function RemotePwaApp() {
         join={pendingJoin.join}
         onLink={() => {
           setPendingJoin(null);
-          void pairFromLink(pendingJoin.secret);
+          void pairFromLink(pendingJoin.secret, pendingJoin.join.access === 'read');
         }}
         onCancel={() => setPendingJoin(null)}
       />
@@ -1315,7 +1326,7 @@ export function RemotePwaApp() {
           />
           {connectionBar}
 
-          {isNativeMobile() && (
+          {isNativeMobile() && !readOnly && (
             <details className="border-b border-border-primary bg-surface-secondary px-3 py-2 text-sm">
               <summary className="cursor-pointer font-medium text-text-secondary">Notifications {pushStatus?.registration === 'registered' ? 'enabled' : 'setup'}</summary>
               <p className="mt-2 text-text-tertiary">{pushStatus?.message ?? 'Allow notifications to receive host attention alerts.'}</p>
@@ -1402,7 +1413,7 @@ export function RemotePwaApp() {
               )}
               {selectedPanel.type === 'chat' && adapter && (
                 <Suspense fallback={null}>
-                  <RemoteChatTab key={selectedPanel.id} adapter={adapter} panel={selectedPanel} panels={selectedPanels} connected={connectionStatus === 'connected'}
+                  <RemoteChatTab key={selectedPanel.id} adapter={adapter} panel={selectedPanel} panels={selectedPanels} worktreePath={selectedSession.worktreePath} connected={connectionStatus === 'connected'}
                     onOpenWorker={openWorkerPane} onSelectPanel={selectPanel} />
                 </Suspense>
               )}

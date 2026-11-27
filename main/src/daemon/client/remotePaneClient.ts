@@ -1,9 +1,11 @@
+import { tokenAccess } from '../../../../shared/types/accessLevel';
+import { READ_ONLY_HOST_ANSWERS } from '../../../../shared/remoteClient/readOnlyHost';
 import { decodeUpdateIntent } from '../../../../shared/remoteClient/updateIntent';
 import { pinnedServerIdentity } from '../relay/keyPinning';
 import { DirectPath } from '../relay/directPath';
 import { findPaneDirect } from '../relay/paneDirect';
 import { RELAY_CLIENT_COMMANDS } from '../../../../shared/types/relay';
-import { COMPUTER_ROUTE_LABELS, applyRoutesReport, decodeComputerRoutesReport, primaryProfile, routeProfile, routesReachableHere, type ComputerRoute, type ComputerRouteKind, type ComputerRoutesReport } from '../../../../shared/types/remoteComputers';
+import { COMPUTER_ROUTE_LABELS, applyRoutesReport, decodeComputerRoutesReport, verifiedTailnetName, primaryProfile, routeProfile, routesReachableHere, type ComputerRoute, type ComputerRouteKind, type ComputerRoutesReport } from '../../../../shared/types/remoteComputers';
 import { EventEmitter } from 'events';
 import { lookup as defaultLookup, Resolver } from 'dns';
 import http, { type IncomingMessage, type RequestOptions } from 'http';
@@ -12,6 +14,7 @@ import { isIP, type LookupFunction } from 'net';
 import { hostname as getOsHostname, networkInterfaces } from 'os';
 import WebSocket, { type ClientOptions } from 'ws';
 import { Readable } from 'stream';
+import { createGunzip } from 'zlib';
 import { noopPaneEventSink, type PaneEventSink } from '../../core/eventSink';
 import type { ConfigManager } from '../../services/configManager';
 import type { AnalyticsManager } from '../../services/analyticsManager';
@@ -1302,6 +1305,8 @@ interface RemotePaneClientControllerOptions {
   analyticsManager?: Pick<AnalyticsManager, 'track'>;
   /** Looks up a codeless profile's machine on its tailnet; see `tailnetMachine`. */
   resolveTailnetMachineUrl?: (machine: TailnetMachineRef) => Promise<string>;
+  /** The relay key the machine at a Tailscale name holds, read over Tailscale (review S-9); undefined when it can't be reached. */
+  tailnetRelayKey?: (machine: { name: string; domain: string }, secret: string) => Promise<{ computerId: string; fingerprint: string } | null | undefined>;
   /** This app's Pane version, compared with the host's on the checklist's version row. */
   appVersion?: string;
   checkDependencies?: Partial<ConnectionCheckDependencies>;
@@ -1336,6 +1341,9 @@ export class RemotePaneClientController extends EventEmitter {
   private rendererEventSink: PaneEventSink = noopPaneEventSink;
   private analyticsManager: Pick<AnalyticsManager, 'track'> | undefined;
   private resolveTailnetMachineUrl: ((machine: TailnetMachineRef) => Promise<string>) | undefined;
+  private tailnetRelayKey: RemotePaneClientControllerOptions['tailnetRelayKey'];
+  /** Failed Tailscale name checks, by name and key, until they may run again (review S-11). */
+  private readonly tailnetNameFailures = new Map<string, number>();
   private prepareSshRoute: ((route: ComputerRoute) => Promise<string>) | undefined;
   private activeClient: RemotePaneClient | null = null;
   private rendererIds: () => number[] = () => [];
@@ -1391,6 +1399,7 @@ export class RemotePaneClientController extends EventEmitter {
     this.rendererEventSink = options.rendererEventSink;
     this.analyticsManager = options.analyticsManager;
     this.resolveTailnetMachineUrl = options.resolveTailnetMachineUrl;
+    this.tailnetRelayKey = options.tailnetRelayKey;
     this.prepareSshRoute = options.prepareSshRoute;
     this.appVersion = options.appVersion;
     this.checkDependencies = { ...defaultCheckDependencies, ...options.checkDependencies };
@@ -1460,6 +1469,10 @@ export class RemotePaneClientController extends EventEmitter {
     }
 
     const client = this.activeClient;
+    if (this.state.access === 'read') {
+      const answer = READ_ONLY_HOST_ANSWERS.get(channel);
+      if (answer !== undefined) return answer;
+    }
     // A host that de-duplicates writes lets one issued while reconnecting wait for the connection.
     const waits = this.state.status === 'reconnecting' && client.resendsWrites;
     if (this.state.status !== 'connected' && !waits && !REMOTE_READ_CHANNELS.has(channel)
@@ -1738,12 +1751,17 @@ export class RemotePaneClientController extends EventEmitter {
   async saveRoutesReport(computerId: string, routeId: string | undefined, report: ComputerRoutesReport): Promise<void> {
     if (!this.configManager) return;
     try {
+      // A Tailscale name another record holds is checked over Tailscale before this report may take it back (review S-9).
+      const before = normalizeRemoteDaemonConfig(this.configManager.getConfig().remoteDaemon).client.computers;
+      const savedVia = before.find((candidate) => candidate.id === computerId)?.routes.find((route) => route.id === routeId);
+      const tailnetRelayKey = this.tailnetRelayKey;
+      const verifiedTailnet = savedVia && tailnetRelayKey ? await verifiedTailnetName(before, computerId, savedVia, report, tailnetRelayKey, { failures: this.tailnetNameFailures, now: Date.now() }) : false;
       await this.configManager.updateConfigWith((current) => {
         const remote = normalizeRemoteDaemonConfig(current.remoteDaemon);
         const computer = remote.client.computers.find((candidate) => candidate.id === computerId);
         const via = computer?.routes.find((route) => route.id === routeId) ?? computer?.routes[0];
         if (!computer || !via) return {};
-        const { computers, id } = applyRoutesReport(remote.client.computers, computerId, via, report);
+        const { computers, id } = applyRoutesReport(remote.client.computers, computerId, via, report, { verifiedTailnet: verifiedTailnet && via.id === savedVia?.id });
         if (JSON.stringify(computers) === JSON.stringify(remote.client.computers)) return {};
         // A record that moved or folded away hands "active" to where its route went.
         const active = remote.client.activeProfileId;
@@ -1753,6 +1771,24 @@ export class RemotePaneClientController extends EventEmitter {
     } catch (error) {
       console.warn(`[Pane remote daemon] could not save the routes ${report.name} reported: ${getErrorMessage(error, 'unknown error')}`);
     }
+  }
+
+  /** Saves whether a saved computer's Tailscale owner is this computer's login (its `mine` mark, D-500). */
+  async saveOwnership(computerId: string, mine: boolean, relay?: { computerId: string; fingerprint: string } | null): Promise<void> {
+    if (!this.configManager) return;
+    await this.configManager.updateConfigWith((current) => {
+      const remote = normalizeRemoteDaemonConfig(current.remoteDaemon);
+      const computer = remote.client.computers.find((candidate) => candidate.id === computerId);
+      if (!computer) return {};
+      const updated = { ...computer };
+      delete updated.mine;
+      delete updated.mineRelay;
+      if (mine) updated.mine = 'tailscale';
+      if (mine && relay) updated.mineRelay = relay;
+      if (JSON.stringify(updated) === JSON.stringify(computer)) return {};
+      const computers = remote.client.computers.map((candidate) => (candidate.id === computerId ? updated : candidate));
+      return { remoteDaemon: { ...remote, client: { ...remote.client, computers } } };
+    });
   }
 
   private async connectProfile(
@@ -1800,6 +1836,8 @@ export class RemotePaneClientController extends EventEmitter {
     });
 
     let hostChanged = options.resolveOnReady === true;
+    // The credential's own level: nothing the host says changes it.
+    const access = [savedProfile, ...routes.map((route) => route.profile)].some((route) => tokenAccess(route.token) === 'read') ? 'read' as const : undefined;
     const client = new RemotePaneClient(profile, {
       dnsLookup: this.dnsLookup,
       routes: routes.length === 1 ? [{ ...routes[0], profile }] : routes,
@@ -1851,6 +1889,7 @@ export class RemotePaneClientController extends EventEmitter {
           activeBaseUrl: client.profile.baseUrl,
           activeRouteId: metadata?.routeId ?? null,
           updateIntent: status === 'connected' ? null : this.state.updateIntent,
+          access,
           lastError: errorMessage ?? null,
           lastSeenAt: metadata?.lastSeenAt ?? this.getLastSeenAtForProfile(profile.id, status),
         });
@@ -1889,6 +1928,7 @@ export class RemotePaneClientController extends EventEmitter {
           activeProfileId: profile.id,
           activeProfileLabel: profile.label,
           activeBaseUrl: profile.baseUrl,
+          access,
           lastError: getErrorMessage(error, `Failed to connect to "${profile.label}"`),
           lastSeenAt: null,
         });
@@ -1916,6 +1956,7 @@ export class RemotePaneClientController extends EventEmitter {
         activeProfileId: profile.id,
         activeProfileLabel: profile.label,
         activeBaseUrl: profile.baseUrl,
+        access,
         lastError: getErrorMessage(error, `Failed to connect to "${profile.label}"`),
         lastSeenAt: null,
       });
@@ -1957,6 +1998,8 @@ export class RemotePaneClientController extends EventEmitter {
    * ports, tabs keep the last list, or an empty one until a retry succeeds; the tunnel is untouched.
    */
   private async listTunnelledPorts(client: RemotePaneClient): Promise<JsonValue | ListeningPortsSnapshot | undefined> {
+    // A read-only host lists no ports and forwards none.
+    if (this.state.access === 'read') return { host: client.profile.label, ports: [] };
     let listed: JsonValue | undefined;
     try {
       listed = await client.invoke(PORTS_LIST_CHANNEL, []);
@@ -2371,6 +2414,8 @@ async function requestJson(
       ...options,
       headers: {
         ...options.headers,
+        // The host gzips answers of 1 KB or more when asked (T-127): a long Session list crosses a slow link in a tenth of the bytes.
+        'Accept-Encoding': 'gzip',
         'Content-Length': Buffer.byteLength(body),
       },
     }, (response) => {
@@ -2389,9 +2434,13 @@ async function requestJson(
   });
 }
 
+/** The answer's text, unzipped when the host compressed it. */
 async function readResponseBody(response: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of response) {
+  const encoding = String(response.headers['content-encoding'] ?? '').trim().toLowerCase();
+  const body = encoding === 'gzip' ? response.pipe(createGunzip()) : response;
+  if (body !== response) response.on('error', error => body.destroy(error));
+  for await (const chunk of body) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
   }
 

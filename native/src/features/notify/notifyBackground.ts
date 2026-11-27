@@ -2,12 +2,13 @@ import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
 import { AppState, Platform } from 'react-native';
 
+import { isReadOnlyProfile } from '@/auth/access';
 import { loadHosts } from '@/auth/hosts';
 import { secureStore } from '@/auth/secureStore';
 import { CLIENT_LABEL, createDaemonClient, DEVICE_LABEL, getRuntimeId, streamingFetch } from '@/daemon/createClient';
 import { invokeChannel } from '@/daemon/invoke';
 import { parseGrantPush, parseNotifyPush, type NotifyPush } from '@/features/links/links';
-import { clearPaneNotifications, devicePush, dismissNotifyAlerts, getInstallationId } from '@/features/notifications/device';
+import { clearPaneNotifications, devicePush, dismissNotifyAlerts, getInstallationId, LOUD_NOTICE } from '@/features/notifications/device';
 import { requestPushRegistration } from '@/features/notifications/usePushSetup';
 
 import { commandForAction, IOS_BUTTONS_OPEN_APP, NOTIFY_CATEGORY, notifyCategories, optionsCategory, sendNotifyCommand, type NotifySendResult } from './notifyActions';
@@ -30,7 +31,7 @@ const setup = (async () => {
   // One at a time: each call rewrites the whole category set, so parallel calls drop each other's.
   for (const category of notifyCategories(opensApp)) await Notifications.setNotificationCategoryAsync(category.identifier, category.actions);
   if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL, { name: 'Questions from agents', importance: Notifications.AndroidImportance.HIGH, sound: 'default' });
+    await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL, { name: 'Questions from agents', importance: Notifications.AndroidImportance.HIGH });
   }
 })().catch(() => undefined);
 
@@ -84,7 +85,7 @@ async function answerFromAlert(response: Notifications.NotificationResponse): Pr
 /** A short local alert, only when a button's answer didn't surely reach the agent. */
 async function postNotice(push: NotifyPush, title: string | null, result: Exclude<NotifySendResult, { status: 'sent' }>): Promise<void> {
   // Tapping it opens the question while it may still be waiting or its answer needs checking, otherwise the Pane.
-  const data: Record<string, string> = { hostProfileId: push.host };
+  const data: Record<string, string> = { hostProfileId: push.host, [LOUD_NOTICE]: '1' };
   if (result.status !== 'refused') data.notifyId = push.notifyId;
   if (push.paneId) data.paneId = push.paneId;
   await Notifications.scheduleNotificationAsync({
@@ -115,7 +116,7 @@ async function handBackGrant(payload: unknown): Promise<boolean> {
   const push = parseGrantPush(payload);
   if (!push) return false;
   const profile = (await loadHosts(secureStore).catch(() => null))?.profiles.find(candidate => candidate.id === push.host);
-  if (!profile) return true;
+  if (!profile || isReadOnlyProfile(profile)) return true;
   const request = { platform: devicePush.platform, installationId: await getInstallationId(), grant: push.grant };
   // Best effort: a grant that doesn't arrive is asked for again the next time the phone connects.
   const kept = await invokeChannel<{ ok: boolean }>(createDaemonClient(profile), 'mobile:push-grant', [request]).catch(() => null);

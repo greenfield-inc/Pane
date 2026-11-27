@@ -1,32 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { CHAT_IMAGE_MAX_BYTES, chatImageProblem, chatSendRequest, matchingCommands } from './chatComposer';
-
-const commands = [
-  { name: 'review', description: 'Review the diff' },
-  { name: 'compact' },
-  { name: 'init', description: 'Write AGENTS.md' },
-  { name: 'preview' },
-];
-
-describe('matchingCommands', () => {
-  it('lists every command for a bare slash, by name', () => {
-    expect(matchingCommands('/', commands).map(command => command.name)).toEqual(['compact', 'init', 'preview', 'review']);
-  });
-  it('filters as you type, prefix matches first', () => {
-    expect(matchingCommands('/rev', commands).map(command => command.name)).toEqual(['review', 'preview']);
-    expect(matchingCommands('/REV', commands).map(command => command.name)).toEqual(['review', 'preview']);
-  });
-  it('closes once the draft is more than a command name', () => {
-    expect(matchingCommands('/review ', commands)).toEqual([]);
-    expect(matchingCommands('hello /rev', commands)).toEqual([]);
-    expect(matchingCommands('', commands)).toEqual([]);
-  });
-  it('shows at most 12', () => {
-    const many = Array.from({ length: 20 }, (_, index) => ({ name: `c${String(index).padStart(2, '0')}` }));
-    expect(matchingCommands('/', many)).toHaveLength(12);
-  });
-});
+import { CHAT_IMAGE_MAX_BYTES, chatImageProblem, chatSendRequest } from './chatComposer';
 
 describe('chatImageProblem', () => {
   it('accepts the image types desktop accepts, up to 5 MiB', () => {

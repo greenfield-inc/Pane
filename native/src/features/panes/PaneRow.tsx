@@ -4,11 +4,13 @@ import { Pressable, StyleSheet } from 'react-native';
 import { AGENT_LAUNCH_PRESETS } from '@shared/constants/agentLaunchPresets';
 
 import { useTheme } from '@/theme';
+import { NewBadge } from '@/features/approvals/NewBadge';
 import { Text } from '@/ui';
 
 import type { PaneListEntry } from './paneList';
 import { PausedBadge, StatusBadge, statusPresentation } from './StatusBadge';
-import { SwipeRow, swipeRowAccessibility } from './SwipeRow';
+import { SwipeRow, useSwipeRowAccessibility } from './SwipeRow';
+import { Focusable } from '@/features/controller/Focusable';
 
 export interface PaneRowProps {
   pane: PaneListEntry;
@@ -22,27 +24,31 @@ export interface PaneRowProps {
   detail?: string;
   /** What the row sits on, so its swipe actions stay hidden: the page, or a card. */
   background?: string;
+  /** What waits on you in this Pane that the phone hasn't shown you yet: "+N" at the row's end. */
+  fresh?: number;
 }
 
 /**
  * A one-line pane row, 44 pt tall, with the live agent status as a dot; a paused Pane is grayed out with
  * a pause glyph in the dot's place. Swipe right pins; swipe left pauses or resumes, and archives.
  */
-export function PaneRow({ pane, label, onOpen, onTogglePinned, onArchive, onTogglePaused, detail, background }: PaneRowProps) {
+export function PaneRow({ pane, label, onOpen, onTogglePinned, onArchive, onTogglePaused, detail, background, fresh = 0 }: PaneRowProps) {
   const theme = useTheme();
   const [pressed, setPressed] = useState(false);
   const paused = Boolean(pane.paused);
   const agent = AGENT_LAUNCH_PRESETS.find(preset => preset.id === pane.agent)?.title;
   const status = [paused ? 'Paused' : statusPresentation[pane.status].label, agent].filter(Boolean).join(' · ');
   const actions = { pinned: pane.isFavorite, onTogglePinned, onArchive, pause: { paused, onToggle: onTogglePaused } };
+  const accessibility = useSwipeRowAccessibility(actions);
 
   return (
+    <Focusable onActivate={onOpen}>
     <SwipeRow testIDPrefix="pane" id={pane.id} {...actions}>
       <Pressable
         testID={`pane-row-${pane.id}`}
         accessibilityRole="button"
-        accessibilityLabel={[label, status, detail].filter(Boolean).join(', ')}
-        {...swipeRowAccessibility(actions)}
+        accessibilityLabel={[label, status, detail, fresh > 0 ? `${fresh} new` : undefined].filter(Boolean).join(', ')}
+        {...accessibility}
         onPress={onOpen}
         onPressIn={() => setPressed(true)}
         onPressOut={() => setPressed(false)}
@@ -53,8 +59,10 @@ export function PaneRow({ pane, label, onOpen, onTogglePinned, onArchive, onTogg
           {label}
         </Text>
         {detail ? <Text variant="rowDetail" tone="muted" numberOfLines={1} style={styles.detail}>{detail}</Text> : null}
+        <NewBadge count={fresh} testID={`pane-new-${pane.id}`} />
       </Pressable>
     </SwipeRow>
+    </Focusable>
   );
 }
 

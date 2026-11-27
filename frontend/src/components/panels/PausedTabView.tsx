@@ -38,7 +38,7 @@ function PausedBanner({ panelId, mark, detail }: { panelId: string; mark: Termin
         type="button"
         size="sm"
         variant="primary"
-        className="ml-auto h-6 flex-shrink-0 px-2.5 text-xs"
+        className="needs-full-access ml-auto h-6 flex-shrink-0 px-2.5 text-xs"
         loading={resuming}
         loadingText="Resuming"
         icon={<Play aria-hidden="true" className="h-3 w-3 fill-current" />}

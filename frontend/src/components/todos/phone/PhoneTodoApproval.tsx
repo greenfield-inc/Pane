@@ -5,6 +5,7 @@ import { todoApprovalSurface, useApprovalColumnStore } from '../../../stores/app
 import { snoozeRequestedFor, useTodoDetail, useTodosStore } from '../../../stores/todosStore';
 import { ApprovalColumn } from '../../approvals/ApprovalColumn';
 import { PhoneHeader, PhoneScreen } from './phoneParts';
+import { newestFirst } from '../../../../../shared/approvalOrder';
 
 export interface PhoneTodoApprovalProps {
   number: number;
@@ -28,7 +29,7 @@ export function PhoneTodoApproval({ number, id, onSelect, onBack }: PhoneTodoApp
   const linked = detail?.approvalIds;
   const order = useMemo(() => {
     const ids = new Set(linked ?? []);
-    return items.filter((candidate) => ids.has(candidate.id) && countsAsWaiting(candidate)).sort((a, b) => a.createdAt - b.createdAt).map((candidate) => candidate.id);
+    return items.filter((candidate) => ids.has(candidate.id) && countsAsWaiting(candidate)).sort(newestFirst).map((candidate) => candidate.id);
   }, [items, linked]);
   // Each approval opens on its Q&A tab; the column keeps its own tab after that.
   useEffect(() => {

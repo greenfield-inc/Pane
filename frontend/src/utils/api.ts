@@ -13,6 +13,7 @@ import type {
   OrchestrationSessionListResult,
   OrchestrationSessionOpenOptions,
   OrchestrationSessionOpenResult,
+  OrchestrationSessionSummary,
   OrchestrationSessionArchivePreview,
   OrchestrationSessionArchiveResult,
   OrchestrationSessionArchiveSelection,
@@ -81,7 +82,7 @@ const isElectron = () => {
 /** `orchestration-sessions:open` made of the calls it replaced, for a preload that lacks it (a test double, an older build). */
 async function openOneByOne(selector: OrchestrationSessionSelector, select: boolean): Promise<IPCResponse<OrchestrationSessionOpenResult<Session>>> {
   const api = window.electronAPI.orchestrationSessions;
-  let list: OrchestrationSessionListResult | undefined;
+  let list: OrchestrationSessionListResult<OrchestrationSessionSummary> | undefined;
   if (select) {
     const selected = await api.select(selector);
     if (!selected.success) return { success: false, error: selected.error };
@@ -130,11 +131,11 @@ export class API {
   };
 
   static orchestrationSessions = {
-    async list(): Promise<IPCResponse<OrchestrationSessionListResult>> {
+    async list(): Promise<IPCResponse<OrchestrationSessionListResult<OrchestrationSessionSummary>>> {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.orchestrationSessions.list();
     },
-    async select(selector: OrchestrationSessionSelector): Promise<IPCResponse<OrchestrationSessionListResult>> {
+    async select(selector: OrchestrationSessionSelector): Promise<IPCResponse<OrchestrationSessionListResult<OrchestrationSessionSummary>>> {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.orchestrationSessions.select(selector);
     },
@@ -162,7 +163,7 @@ export class API {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.orchestrationSessions.update(selector, input);
     },
-    async reorder(sessionIds: string[]): Promise<IPCResponse<OrchestrationSessionListResult>> {
+    async reorder(sessionIds: string[]): Promise<IPCResponse<OrchestrationSessionListResult<OrchestrationSessionSummary>>> {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.orchestrationSessions.reorder(sessionIds);
     },

@@ -1,3 +1,4 @@
+import { isReadOnlyHost } from '../stores/readOnlyHostStore';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useCommittedRef } from './useCommittedRef';
 import { Terminal, type IDisposable } from '@xterm/xterm';
@@ -501,7 +502,7 @@ export function useMissionControlTerminal({
         void window.electronAPI.invoke('terminal:reply', panelId, data, VIEWER_ID).catch(() => {});
         return;
       }
-      if (!interactiveRef.current) return;
+      if (!interactiveRef.current || isReadOnlyHost()) return;
       void window.electronAPI.invoke('terminal:input', panelId, data).catch(() => {});
     });
 

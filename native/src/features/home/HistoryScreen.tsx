@@ -8,7 +8,7 @@ import { buildAllMachinesList, sinceLabel } from '@/features/allMachines/allMach
 import { openWaitingRow, waitingRowText } from '@/features/allMachines/AllMachinesRows';
 import { ConnectionBar } from '@/features/hosts/ConnectionStatus';
 import { MachineMark } from '@/features/machines/MachineMark';
-import { useTheme } from '@/theme';
+import { scaleBox, useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
 import { Card, EmptyCard, RowDivider, STALE_OPACITY } from './BoardRows';
@@ -92,7 +92,7 @@ export function HistoryScreen() {
                   style={({ pressed }) => [styles.row, { opacity: row.stale ? STALE_OPACITY : 1 }, pressed && { backgroundColor: theme.colors.surfacePressed }]}
                 >
                   {index > 0 ? <RowDivider inset={40} /> : null}
-                  <View style={styles.icon}>
+                  <View style={scaleBox(styles.icon, theme.uiScale)}>
                     {tab === 'done'
                       ? <Icon ios="checkmark.circle" android="check_circle" size={15} color={theme.colors.neutral} />
                       : <Icon ios="hourglass" android="hourglass_empty" size={15} color={theme.colors.warning} />}

@@ -2,7 +2,7 @@ import { rollupAgentState, toAgentDisplayStatus } from './agentStatus';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import type { AgentDisplayStatus, AgentState, PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { NotifySharedState } from '../../../shared/types/notify';
-import type { OrchestrationSessionRecord, SessionActivity } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionSummary, SessionActivity } from '../../../shared/types/orchestrationSession';
 import type { PanePermissionRequest } from '../../../shared/types/permissions';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
@@ -15,6 +15,8 @@ export interface MachineRef {
   os: MachineOs | null;
   slot: number;
   letters: string;
+  /** This computer only watches it, so its rows have no actions. */
+  readOnly?: boolean;
 }
 
 /** One machine's lists, as its `machines:read` answers gave them. */
@@ -22,7 +24,7 @@ export interface MachineSnapshot {
   /** `sessions:get-all-with-projects`: every project with its Panes. */
   projects: Array<Project & { sessions: Session[] }>;
   /** `orchestration-sessions:list`. */
-  sessions: OrchestrationSessionRecord[];
+  sessions: OrchestrationSessionSummary[];
   /** `panels:agent-statuses`. */
   statuses: PanelAgentStatusEvent[];
   /** `orchestration-sessions:activity-list`: empty from a host too old to have it. */
@@ -58,7 +60,7 @@ export interface AllMachinesSession {
   key: string;
   machine: MachineRef;
   offline: boolean;
-  session: OrchestrationSessionRecord;
+  session: OrchestrationSessionSummary;
   /** The Session's activity as its own machine decides it; idle while the machine is offline. */
   activity: SessionActivity['state'];
   /** Panes with a tab working, by the same machine's rule. */

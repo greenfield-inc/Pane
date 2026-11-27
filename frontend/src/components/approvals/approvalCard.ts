@@ -1,4 +1,5 @@
 import type { NotifyChoice, NotifyItem, NotifyLink, NotifySubQuestion, NotifyVersion } from '../../../../shared/types/notify';
+import { newestFirst } from '../../../../shared/approvalOrder';
 import { EMPTY_TODO_SCOPE, inTodoScope, type TodoApprovalScope } from '../todos/sessionTodos';
 import { machineOfItem } from '../../../../shared/todoKey';
 import { todoRefOfItem } from '../../stores/todosStore';
@@ -123,7 +124,7 @@ export function replyBeingRead(item: NotifyItem): boolean {
 }
 
 /** Being read or asked about: Send moves past it (J14). */
-function isBeingRead(item: NotifyItem): boolean {
+export function isBeingRead(item: NotifyItem): boolean {
   return item.state === 'waiting' && (item.reply?.state === 'reading' || item.reply?.state === 'question');
 }
 
@@ -153,6 +154,21 @@ export function canSend(item: NotifyItem, picks: readonly string[], text: string
  */
 export function canReplyAlone(item: NotifyItem): boolean {
   return item.state === 'waiting' && !item.agentPrompt && !item.optionsOnly && !replyBeingRead(item);
+}
+
+/**
+ * What ⇧↩ does on a waiting card (T-88): with nothing picked or typed, it answers with each
+ * question's recommended option. Nothing starts picked (D-385), so this is the person's own key
+ * press. `missing`: the questions (by index) with no recommendation, so nothing goes. Null: the
+ * person has started an answer of their own, which ⌘↩ sends.
+ */
+export function recommendedAnswer(item: NotifyItem, picks: readonly string[], text: string): { send: string[] } | { missing: number[] } | null {
+  if (item.state !== 'waiting' || text.trim() || picks.some(Boolean)) return null;
+  const questions = questionsOf(item);
+  if (questions.length === 0) return null;
+  const send = questions.map((question) => question.choices.find((choice) => choice.recommended)?.label ?? '');
+  const missing = send.flatMap((label, at) => (label ? [] : [at]));
+  return missing.length ? { missing } : { send };
 }
 
 function picksAnswer(item: NotifyItem, picks: readonly string[]): boolean {
@@ -209,7 +225,7 @@ export function askedBy(item: NotifyItem): string[] {
 }
 
 /**
- * Items open for a Session (its own, its workers', Autopilot's about it; not dismissed), oldest first: from
+ * Items open for a Session (its own, its workers', Autopilot's about it; not dismissed), newest first (T-88): from
  * the machine it is on (`todos.machineId`, T-51), and not from a machine gone offline, whose cards wait in
  * Approvals until it is back.
  */
@@ -217,7 +233,7 @@ export function sessionApprovals(items: readonly NotifyItem[], sessionId: string
   return items
     .filter(item => isOpenForSession(item) && !item.relay && item.staleSince === undefined && !item.unreachable && machineOfItem(item) === todos.machineId
       && (item.source.session?.id === sessionId || (item.connected?.kind === 'session' && item.connected.id === sessionId) || inTodoScope(item, todos)))
-    .sort((a, b) => a.createdAt - b.createdAt);
+    .sort(newestFirst);
 }
 
 /**

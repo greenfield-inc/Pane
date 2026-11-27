@@ -1,10 +1,14 @@
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { Pencil, X, Zap } from 'lucide-react';
 import type { ChatTabQueuedPrompt } from '../../../../shared/types/chatTab';
+import { messageReferences } from '../../../../shared/composerMentions';
+import { ComposerHighlight } from './ComposerHighlight';
 import { sendNowEffect } from './chatKeys';
 
 /** The host keeps this many characters of a queued message as its preview; a longer one shows an ellipsis and cannot be edited from it. */
 const PREVIEW_LIMIT = 500;
+
+const NO_SKILLS: ReadonlySet<string> = new Set();
 
 export interface ChatQueueProps {
   queue: readonly ChatTabQueuedPrompt[];
@@ -13,6 +17,8 @@ export interface ChatQueueProps {
   /** Send now delivers into the running turn instead of stopping it. */
   steers?: boolean;
   disabled: boolean;
+  /** The tab's skills, marked in the edit box as in a sent message. */
+  skills?: ReadonlySet<string>;
   /** Shown instead of the text, such as Autopilot's own lines; such a line is not editable. */
   label?: (text: string) => ReactNode | undefined;
   onRemove: (operationId: string) => void;
@@ -24,8 +30,9 @@ export interface ChatQueueProps {
  * Messages waiting for the agent, in the order they will be sent (D-211): each can be
  * edited, removed, or sent now (see sendNowEffect).
  */
-export function ChatQueue({ queue, working, steers, disabled, label, onRemove, onSendNow, onEdit }: ChatQueueProps) {
+export function ChatQueue({ queue, working, steers, disabled, skills = NO_SKILLS, label, onRemove, onSendNow, onEdit }: ChatQueueProps) {
   const [editing, setEditing] = useState<{ operationId: string; text: string }>();
+  const input = useRef<HTMLTextAreaElement>(null);
   if (!queue.length) return null;
   const save = async () => {
     if (!editing) return;
@@ -39,13 +46,16 @@ export function ChatQueue({ queue, working, steers, disabled, label, onRemove, o
       const order = index === 0 ? 'Sends next' : 'Queued';
       if (editing?.operationId === item.operationId) {
         return <li key={item.operationId} className="chat-queue-editing">
-          <textarea className="chat-queue-input" aria-label="Edit queued message" autoFocus rows={2} value={editing.text}
+          <div className="chat-input-box">
+          <ComposerHighlight input={input} text={editing.text} marks={messageReferences(editing.text, skills)} className="chat-queue-input" />
+          <textarea ref={input} className="chat-queue-input" aria-label="Edit queued message" autoFocus rows={2} value={editing.text}
             onChange={event => setEditing({ ...editing, text: event.target.value })}
             onKeyDown={event => {
               if (event.nativeEvent.isComposing) return;
               if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditing(undefined); }
               else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void save(); }
             }} />
+          </div>
           <div className="chat-queue-actions">
             <button type="button" className="chat-button chat-button-outline" onClick={() => setEditing(undefined)}>Cancel</button>
             <button type="button" className="chat-button chat-button-primary" disabled={disabled || (!editing.text.trim() && !item.imageCount)} onClick={() => void save()}>Save</button>

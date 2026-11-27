@@ -432,9 +432,12 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
       expect(variant).toContain('never post a second approval for it');
       expect(variant).toContain('about 80 to 100 characters on one line');
       expect(variant).toContain('`runpane inbox ack <item> --decision <D-n>`');
-      expect(variant).toContain('stop its background command (TaskStop in Claude Code)');
-      expect(variant).toContain('When you start, resume or wake, reconcile your open background calls');
-      expect(variant).toContain('Approvals survive a restart.');
+      expect(variant).toContain('`runpane notify --close <id|Q-n>`: stopping its background command no longer closes the card.');
+      expect(variant).not.toContain('TaskStop');
+      expect(variant).toContain('When you start, resume or wake, reconcile your posted items');
+      expect(variant).toContain('Approvals survive a restart and their commands ending.');
+      // A card outlives the command waiting on it, so nothing tells an orchestrator to keep one alive.
+      expect(variant).toContain('never keep it alive with `nohup`');
       expect(variant).not.toContain('Pane keeps no approvals');
       expect(variant).toContain('If notify returns `unavailable` because Approvals is off ("Approvals are off in Pane."), ask in this tab as before.');
     }

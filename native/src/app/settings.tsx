@@ -2,17 +2,23 @@ import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, Switch, View } from 'react-native';
 
-import { useDaemon } from '@/daemon';
+import { DEVICE_ACCESS_LABELS } from '@shared/types/accessLevel';
+
+import { useDaemon, useReadOnlyHost } from '@/daemon';
 import { PRIVACY_POLICY_URL } from '@/features/app/privacyPolicy';
 import { useAffordances } from '@/features/hosts/hostSettings';
+import { ReadOnlyChip } from '@/features/hosts/ReadOnlyChip';
 import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import type { Machine } from '@/features/machines/machines';
 import { MachineMark } from '@/features/machines/MachineMark';
 import { useAutocorrect } from '@/features/composer/autocorrectPreference';
+import { LETTER_LABELS } from '@/features/controller/CheatSheet';
+import { useControllerState } from '@/features/controller/controllerState';
 import { useMachines, useSelectMachine } from '@/features/machines/useMachines';
 import { usePushStore } from '@/features/notifications/usePushSetup';
 import { AppUpdateRow } from '@/features/updates/AppUpdateRow';
-import { useTheme } from '@/theme';
+import { useDisplayPreferences, useTheme } from '@/theme';
+import { stepTerminalFont, stepUiScale, TERMINAL_FONT, UI_SCALE } from '@/theme/display';
 import { Icon, ListRow, ListSection, Screen, Text } from '@/ui';
 
 /**
@@ -22,6 +28,7 @@ import { Icon, ListRow, ListSection, Screen, Text } from '@/ui';
 export default function SettingsScreen() {
   const theme = useTheme();
   const { profile } = useDaemon();
+  const readOnly = useReadOnlyHost();
   const machines = useMachines();
   const { select, connecting } = useSelectMachine();
   const affordances = useAffordances();
@@ -29,6 +36,7 @@ export default function SettingsScreen() {
   const others = machines.filter(machine => !machine.current);
   const shortcuts = affordances.data?.terminalShortcuts?.length;
   const on = `on ${profile.label}`;
+  const letters = useControllerState(state => state.letters);
 
   return (
     <Screen scroll grouped testID="settings-screen">
@@ -46,7 +54,7 @@ export default function SettingsScreen() {
             onLongPress={() => openDetails(machine)}
             accessibilityActions={[{ name: 'details', label: 'Machine details' }]}
             onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'details') openDetails(machine); }}
-            trailing={<DetailsButton machine={machine} />}
+            trailing={machine.readOnly ? <View style={styles.rowEnd}><ReadOnlyChip /><DetailsButton machine={machine} /></View> : <DetailsButton machine={machine} />}
           />
         ))}
         <ListRow
@@ -63,9 +71,16 @@ export default function SettingsScreen() {
         <NotificationsRow />
         <ListRow testID="settings-glasses" title="Glasses" value="Even G2" leading={<RowIcon ios="eyeglasses" android="eyeglasses" />} trailing="chevron" onPress={() => router.push('/settings/glasses')} />
         <AutocorrectRow />
+        <ListRow testID="settings-controller" title="Controller" value={LETTER_LABELS[letters]} leading={<RowIcon ios="gamecontroller" android="sports_esports" />} trailing="chevron" onPress={() => router.push('/settings/controller')} />
       </ListSection>
 
-      <ListSection title="Composer" titleSuffix={on} footer="Saved on the machine, so desktop sees the same settings.">
+      {/* Sizes that suit this screen: each phone keeps its own, and the desktop keeps its own. */}
+      <ListSection title="Display" footer="Kept on this phone only. UI scale sizes text and icons across the app.">
+        <DisplayRows />
+      </ListSection>
+
+      {/* A machine this phone only watches keeps its settings to itself. */}
+      {readOnly ? null : <ListSection title="Composer" titleSuffix={on} footer="Saved on the machine, so desktop sees the same settings.">
         <ListRow
           testID="settings-shortcuts"
           title="Shortcuts"
@@ -75,7 +90,7 @@ export default function SettingsScreen() {
           onPress={() => router.push('/settings/shortcuts')}
         />
         <ListRow testID="settings-voice" title="Voice" leading={<RowIcon ios="mic" android="mic" />} trailing="chevron" onPress={() => router.push('/settings/voice')} />
-      </ListSection>
+      </ListSection>}
 
       <ListSection title="About">
         <AppUpdateRow />
@@ -94,7 +109,7 @@ function HeroCard({ machine }: { machine: Machine }) {
       <Pressable
         testID="settings-current-host"
         accessibilityRole="button"
-        accessibilityLabel={`${machine.name}, ${machine.os ?? 'Computer'}, ${machine.status}`}
+        accessibilityLabel={[machine.name, machine.os ?? 'Computer', machine.status, machine.readOnly ? DEVICE_ACCESS_LABELS.read : undefined].filter(Boolean).join(', ')}
         accessibilityHint="Opens machine details"
         onPress={() => openDetails(machine)}
         style={({ pressed }) => [styles.hero, {
@@ -110,6 +125,7 @@ function HeroCard({ machine }: { machine: Machine }) {
             {`${machine.os ?? 'Computer'} · ${machine.status}`}
           </Text>
         </View>
+        {machine.readOnly ? <ReadOnlyChip /> : null}
         <Icon ios="info.circle" android="info" size={22} color={theme.colors.accentText} />
       </Pressable>
       {/* Past the grace window: the same message and Retry as the bar on home and in a Pane. */}
@@ -183,6 +199,92 @@ function AutocorrectRow() {
   );
 }
 
+/** UI scale and terminal font size, with the desktop's ranges and steps. */
+function DisplayRows() {
+  const uiScale = useDisplayPreferences(state => state.uiScale);
+  const setUiScale = useDisplayPreferences(state => state.setUiScale);
+  const fontSize = useDisplayPreferences(state => state.terminalFontSize);
+  const setFontSize = useDisplayPreferences(state => state.setTerminalFontSize);
+  return (
+    <>
+      <ListRow
+        title="UI scale"
+        // Wraps instead of truncating beside the stepper on a narrow phone at a large UI scale.
+        titleLines={2}
+        leading={<RowIcon ios="textformat.size" android="format_size" />}
+        trailing={(
+          <Stepper
+            testID="settings-ui-scale"
+            label="UI scale"
+            value={`${uiScale.toFixed(1)}x`}
+            canDecrease={uiScale > UI_SCALE.min}
+            canIncrease={uiScale < UI_SCALE.max}
+            onStep={steps => setUiScale(stepUiScale(uiScale, steps))}
+          />
+        )}
+      />
+      <ListRow
+        title="Terminal font"
+        titleLines={2}
+        leading={<RowIcon ios="terminal" android="terminal" />}
+        trailing={(
+          <Stepper
+            testID="settings-terminal-font"
+            label="Terminal font size"
+            value={`${fontSize}px`}
+            canDecrease={fontSize > TERMINAL_FONT.min}
+            canIncrease={fontSize < TERMINAL_FONT.max}
+            onStep={steps => setFontSize(stepTerminalFont(fontSize, steps))}
+          />
+        )}
+      />
+    </>
+  );
+}
+
+/** − value +, as the desktop's settings draw a stepped size. */
+function Stepper({ testID, label, value, canDecrease, canIncrease, onStep }: {
+  testID: string;
+  label: string;
+  value: string;
+  canDecrease: boolean;
+  canIncrease: boolean;
+  onStep: (steps: number) => void;
+}) {
+  return (
+    <View style={styles.stepper}>
+      <StepButton testID={`${testID}-decrease`} label={`Decrease ${label.toLowerCase()}`} ios="minus" android="remove" enabled={canDecrease} onPress={() => onStep(-1)} />
+      <Text testID={`${testID}-value`} variant="rowValue" tone="secondary" style={styles.stepValue}>{value}</Text>
+      <StepButton testID={`${testID}-increase`} label={`Increase ${label.toLowerCase()}`} ios="plus" android="add" enabled={canIncrease} onPress={() => onStep(1)} />
+    </View>
+  );
+}
+
+function StepButton({ testID, label, ios, android, enabled, onPress }: {
+  testID: string;
+  label: string;
+  ios: Parameters<typeof Icon>[0]['ios'];
+  android: Parameters<typeof Icon>[0]['android'];
+  enabled: boolean;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !enabled }}
+      disabled={!enabled}
+      hitSlop={6}
+      onPress={onPress}
+      style={({ pressed }) => [styles.stepButton, { backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised, opacity: enabled ? 1 : 0.4 }]}
+    >
+      <Icon ios={ios} android={android} size={14} color={theme.colors.text} />
+    </Pressable>
+  );
+}
+
 function RowIcon({ ios, android }: { ios: Parameters<typeof Icon>[0]['ios']; android: Parameters<typeof Icon>[0]['android'] }) {
   const theme = useTheme();
   return <Icon ios={ios} android={android} size={20} color={theme.colors.textSecondary} />;
@@ -194,5 +296,10 @@ const styles = StyleSheet.create({
   heroName: { fontSize: 22, fontWeight: '700' },
   heroFooter: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 12, paddingHorizontal: 4, paddingTop: 6 },
   retry: { fontWeight: '600' },
+  rowEnd: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  // Wide enough for "1.5x" and "24px" at any scale, so stepping never moves the buttons.
+  stepper: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  stepValue: { minWidth: 48, textAlign: 'center', fontVariant: ['tabular-nums'] },
+  stepButton: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   addTile: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
 });

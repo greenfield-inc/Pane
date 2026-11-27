@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { todoKey } from '../../../../shared/todoKey';
-import { bridgedFrom, canReplyAlone, canSend, cardChip, cardTabs, dockApprovals, dockKey, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, replyLine, sessionApprovals, sessionColumnNext } from './approvalCard';
+import { bridgedFrom, canReplyAlone, canSend, cardChip, cardTabs, dockApprovals, dockKey, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, recommendedAnswer, replyLine, sessionApprovals, sessionColumnNext } from './approvalCard';
 
 const q20: NotifyItem = {
   id: 'q20',
@@ -110,6 +110,20 @@ describe('the approval card', () => {
     expect(canSend({ ...q20, agentPrompt: { yes: 'Yes', no: 'No' } }, [], 'why?')).toBe(false);
   });
 
+  it('T-88: ⇧↩ answers with the recommended option of each question, only when nothing is picked or typed (D-385)', () => {
+    const single: NotifyItem = { ...q20, questions: undefined, choices: [{ label: 'Merge it', recommended: true }, { label: 'Wait' }] };
+    expect(recommendedAnswer(single, [], '')).toEqual({ send: ['Merge it'] });
+    const both: NotifyItem = { ...q20, questions: [q20.questions![1], { title: 'Tag it?', choices: [{ label: 'No' }, { label: 'Yes', recommended: true }] }] };
+    expect(recommendedAnswer(both, ['', ''], '')).toEqual({ send: ['One train', 'Yes'] });
+    // The person's own pick or words: ⇧↩ does nothing special, ⌘↩ sends theirs.
+    expect(recommendedAnswer(both, ['', 'No'], '')).toBeNull();
+    expect(recommendedAnswer(single, [], 'only after QA')).toBeNull();
+    // A question with no recommendation: nothing goes, and it says which.
+    expect(recommendedAnswer(q20, [], '')).toEqual({ missing: [0] });
+    expect(recommendedAnswer({ ...q20, ui: 'approve', questions: undefined }, [], '')).toEqual({ missing: [0] });
+    expect(recommendedAnswer({ ...single, state: 'sent' }, [], '')).toBeNull();
+  });
+
   it('J13: tabs are Q&A, Summary, each reference, then the origin unless you are in it', () => {
     expect(cardTabs(q20).map(tab => tab.label)).toEqual(['Decide', 'Summary', 'doozy-overhaul status', 'PR #2480', "doozy-overhaul's tab"]);
     expect(cardTabs(q20, 'w1').map(tab => tab.kind)).toEqual(['qa', 'summary', 'link', 'link']);
@@ -119,10 +133,20 @@ describe('the approval card', () => {
     const older = { ...q20, id: 'older', createdAt: 1 };
     const ready = { ...v2, id: 'ready', createdAt: 5 };
     const list = sessionApprovals([ready, older, { ...q20, id: 'other', source: { ...q20.source, session: { id: 's2', name: 'X', paneId: 'x' } } }], 's1');
-    expect(list.map(item => item.id)).toEqual(['older', 'ready']);
+    expect(list.map(item => item.id)).toEqual(['ready', 'older']);
     expect(firstToOpen(list)?.id).toBe('ready');
     expect(readyCount(list)).toBe(1);
     expect(firstToOpen([older])?.id).toBe('older');
+  });
+
+  it('T-88: a Session lists its approvals newest first, an updated one by its latest version', () => {
+    const first = { ...q20, id: 'first', createdAt: 1_000 };
+    const second = { ...q20, id: 'second', createdAt: 2_000 };
+    const third = { ...q20, id: 'third', createdAt: 3_000 };
+    expect(sessionApprovals([first, third, second], 's1').map(item => item.id)).toEqual(['third', 'second', 'first']);
+    const updated = { ...first, version: 2, revision: { asked: 'why?', whatChanged: ['reworded'], by: 'agent', at: 4_000 } };
+    expect(sessionApprovals([updated, third, second], 's1').map(item => item.id)).toEqual(['first', 'third', 'second']);
+    expect(firstToOpen(sessionApprovals([first, third, second], 's1'))?.id).toBe('third');
   });
 
   it('T-22: a Session\'s column also lists the approvals of the to-dos it requested, from their hidden Sessions too, once each', () => {
@@ -139,7 +163,7 @@ describe('the approval card', () => {
     const macbook28 = { ...local28, id: 'macbook:q-84', machineId: 'macbook', machine: 'Tylers-MacBook-Pro', title: 'Q-84: Phone-number accounts' };
     const offline = { ...q20, id: 'offline', machineId: 'local', unreachable: true };
     const scope = { machineId: 'local', sessionIds: new Set<string>(), todoKeys: new Set([todoKey('local', 27), todoKey('local', 28)]) };
-    expect(sessionApprovals([q20, local28, macbook28, offline], 's1', scope).map(item => item.id)).toEqual(['q20', 'local-28']);
+    expect(sessionApprovals([q20, local28, macbook28, offline], 's1', scope).map(item => item.id)).toEqual(['local-28', 'q20']);
     // The MacBook's own Session, opened from All machines, docks the MacBook's card and not this computer's.
     const onMacbook = { machineId: 'macbook', sessionIds: new Set<string>(), todoKeys: new Set([todoKey('macbook', 28)]) };
     expect(sessionApprovals([local28, macbook28], 's1', onMacbook).map(item => item.id)).toEqual(['macbook:q-84']);

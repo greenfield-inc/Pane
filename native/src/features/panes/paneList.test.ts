@@ -70,7 +70,7 @@ function input(overrides: Partial<SidebarInput> = {}): SidebarInput {
     sessions,
     archivedProjects: undefined,
     expanded: DEFAULT_EXPANSION,
-    collapsedSessions: new Set(),
+    openSessions: ['o1'],
     query: '',
     lookup: { status: () => 'unknown', agent: () => undefined },
     ...overrides,
@@ -83,7 +83,7 @@ function shape(items: SidebarItem[]): string[] {
     switch (item.type) {
       case 'section': return `# ${item.title}${item.expanded ? '' : ' (collapsed)'}${item.count ? ` ${item.count}` : ''}`;
       case 'repo': return `## ${item.title}`;
-      case 'session': return `session ${item.label}${item.paneCount ? ` (${item.paneCount})` : ''}${item.nestedExpanded ? '' : ' >'}`;
+      case 'session': return `session ${item.label}${item.paneCount ? ` (${item.paneCount})` : ''}${item.nestedExpanded || item.paneCount === 0 ? '' : ' >'}`;
       case 'pane': return `${item.nested ? '  ' : ''}${item.label}`;
       case 'archived': return `restore ${item.label}${item.detail ? ` · ${item.detail}` : ''}`;
       case 'note': return `note: ${item.text}`;
@@ -148,18 +148,15 @@ describe('buildSidebar', () => {
     ]);
   });
 
-  it('hides one Session’s nested panes without touching its other placement', () => {
-    const items = buildSidebar(input({ collapsedSessions: new Set(['sessions:o1']), expanded: { ...DEFAULT_EXPANSION, repositories: false } }));
-    expect(shape(items).slice(0, 9)).toEqual([
+  it('collapses a Session nobody opened under Pinned and under Sessions, keeping its pane count', () => {
+    const items = buildSidebar(input({ openSessions: [], expanded: { ...DEFAULT_EXPANSION, repositories: false } }));
+    expect(shape(items).slice(0, 6)).toEqual([
       '# Pinned',
-      'session Ship sidebar (2)',
-      '  fix-login',
-      '  login-copy',
+      'session Ship sidebar (2) >',
       'pane/terminal-speed',
       'doozy/push-alerts',
       '# Sessions',
       'session Ship sidebar (2) >',
-      'session Triage',
     ]);
   });
 

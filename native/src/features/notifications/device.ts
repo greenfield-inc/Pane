@@ -9,13 +9,19 @@ import type { PermissionState, PushDeps } from './registration';
 const INSTALLATION_KEY = 'pane.mobile.installationId';
 const TOKEN_TIMEOUT_MS = 15_000;
 
-// Show a host's alert even while Pane is open: the pane that needs input is
-// usually not the one on screen. Android Notify messages carry data only (the
-// app draws their alert itself), so anything without text stays hidden.
+/** Marks a local alert that still slides in while Pane is open: a button's answer that didn't surely send. */
+export const LOUD_NOTICE = 'paneNotice';
+
+// While Pane is open, a host's alert goes to Notification Center or the shade without a banner or a
+// sound: Home's "+N" shows what is new. The OS calls this only in the foreground; in the background
+// alerts show as usual. Android Notify messages carry data only (the app draws their alert itself),
+// so anything without text stays hidden.
 Notifications.setNotificationHandler({
   handleNotification: async notification => {
-    const show = Boolean(notification.request.content.title || notification.request.content.body);
-    return { shouldShowBanner: show, shouldShowList: show, shouldPlaySound: show, shouldSetBadge: false };
+    const { title, body, data } = notification.request.content;
+    const show = Boolean(title || body);
+    const loud = show && data?.[LOUD_NOTICE] === '1';
+    return { shouldShowBanner: loud, shouldShowList: show, shouldPlaySound: loud, shouldSetBadge: false };
   },
 });
 

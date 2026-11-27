@@ -214,6 +214,8 @@ export interface ParsedArgs {
   notifySuggestions?: string;
   notifyAction?: string;
   notifyLinks?: string;
+  /** `notify --check`: check the card and print it as Pane would post it, posting nothing. */
+  notifyCheck?: boolean;
   notifyRelays?: string;
   notifyAboutSession?: string;
   notifyQuestions?: string;
@@ -221,6 +223,8 @@ export interface ParsedArgs {
   notifyTook?: string;
   notifyTookAs?: string;
   notifyStatus?: string;
+  /** `notify --close <id|Q-n>`: the asker withdraws its own waiting card. */
+  notifyClose?: string;
   /** `notify --update <id|Q-n> --asked <text> --what-changed <text>` */
   notifyUpdate?: string;
   notifyAsked?: string;
@@ -324,6 +328,7 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--questions', ['notify', 'report']],
   ['--took', ['notify']],
   ['--took-as', ['notify']],
+  ['--close', ['notify']],
   ['--status', ['notify', 'update', 'todos list']],
   ['--update', ['notify']],
   ['--asked', ['notify']],
@@ -346,7 +351,7 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--kind', ['machine cleanup', 'todos attach']],
   ['--done-when', ['todos create', 'todos update']],
   ['--parent', ['todos create']],
-  ['--check', ['todos update']],
+  ['--check', ['todos update', 'notify']],
   ['--uncheck', ['todos update']],
   ['--label', ['todos attach']],
   ['--no-start', ['todos create']],
@@ -839,6 +844,11 @@ function parseFlags(rawArgs: string[], parsed: ParsedArgs): void {
     const owners = FLAG_OWNERS.get(arg);
     if (isLocalCommand && owners && !owners.includes(parsed.command)) {
       throw new Error(`${arg} is only valid with runpane ${owners.join(' or runpane ')}.`);
+    }
+    // `todos update --check <n,...>` takes a value; on notify `--check` is a switch.
+    if (parsed.command === 'notify' && arg === '--check') {
+      parsed.notifyCheck = true;
+      continue;
     }
     // `notify --took <id|Q-n> answer|question`: the word after the id says how the reply was taken.
     if (parsed.command === 'notify' && arg === '--took') {
@@ -1661,6 +1671,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--took-as') {
     setNotifyTookAs(parsed, value);
+    return;
+  }
+  if (flag === '--close') {
+    parsed.notifyClose = value;
     return;
   }
   if (flag === '--status') {

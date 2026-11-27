@@ -9,6 +9,8 @@ interface InputBatch<Result> {
 
 interface PanelInputQueue<Result> {
   pending: InputBatch<Result>[];
+  /** The last write sent: when, and how long it was. */
+  last?: { at: number; length: number };
   active?: {
     batch: InputBatch<Result>;
     controller: AbortController;
@@ -22,6 +24,13 @@ const INPUT_TIMEOUT_MS = 10_000;
 // A bare ESC must end its write. Terminal apps that parse by read boundary, such
 // as Codex and Claude Code, treat ESC followed by a key in one read as Alt+key.
 const ESCAPE = '\x1b';
+// A bare Enter is a write of its own. Agents read a long write as a paste and
+// keep an Enter inside it as a newline, so the message is never submitted.
+const ENTER = '\r';
+// Codex gathers text that arrives fast as a paste and keeps an Enter that comes before it is done as
+// a newline. It takes about 15 ms plus 0.35 ms per character (measured on 0.172), so a bare Enter
+// goes no sooner than this after the text before it, with room to spare.
+const enterAfterTextMs = (length: number) => Math.min(30 + length / 2, 2_000);
 const inputSchema = boundary.object({ panelId: boundary.nonEmptyString, data: boundary.string });
 
 /** Serializes remote input per terminal, batching only while a request is in flight. */
@@ -53,6 +62,8 @@ export class RemoteInputQueue<Result> {
         last
         && last.channel === channel
         && !last.data.endsWith(ESCAPE)
+        && last.data !== ENTER
+        && data !== ENTER
         && last.data.length + data.length <= MAX_BATCH_CHARACTERS
       ) {
         last.data += data;
@@ -78,6 +89,13 @@ export class RemoteInputQueue<Result> {
       return;
     }
     const controller = new AbortController();
+    const hold = batch.data === ENTER && queue.last ? queue.last.at + enterAfterTextMs(queue.last.length) - Date.now() : 0;
+    if (hold > 0) {
+      queue.active = { batch, controller, timeout: undefined };
+      await new Promise(resolve => setTimeout(resolve, hold));
+      if (this.panels.get(panelId) !== queue) return;
+    }
+    queue.last = { at: Date.now(), length: batch.data === ENTER ? 0 : batch.data.length };
     const timeout = this.resends() ? undefined : setTimeout(() => {
       this.fail(panelId, queue, new PaneError('ERR_REMOTE_DELIVERY_UNKNOWN', 'Delivery unknown: terminal input timed out. Check the original panel before resubmitting; pending input was discarded.'));
       this.onTimeout?.();

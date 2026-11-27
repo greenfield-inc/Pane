@@ -211,6 +211,8 @@ export type ElectronApiMockOptions = {
     /** Turning it on meets the CA's certificate limit until this time (ISO), as `RelayStatus.certificateLimit`. */
     certificateLimitUntil?: string;
     /** How long each pairing code lasts. */
+    /** How long making a code takes. */
+    codeDelayMs?: number;
     codeTtlMs?: number;
     /** What the "everywhere" commands report. */
     everywhere?: { removed: string[]; notReached: string[] };
@@ -927,10 +929,11 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (relayStatus.phase !== 'ready') return Promise.reject(new Error("Error invoking remote method 'relay:pairing-code': Error [ERR_RELAY_NOT_READY]: This computer isn't ready to pair yet."));
         relayCodes += 1;
         const code: RelayPairingInfo = {
-          url: `https://pane.example/pair#s=secret-${relayCodes}&c=k7q2m9&n=devbox`,
+          // The level is in the address, so a spec can tell which code is on screen.
+          url: `https://pane.example/pair#s=${JSON.stringify(args[0] ?? null).includes('"read"') ? 'read-' : ''}secret-${relayCodes}&c=k7q2m9&n=devbox`,
           expiresAt: new Date(Date.now() + (relayOptions.codeTtlMs ?? 10 * 60_000)).toISOString(),
         };
-        return Promise.resolve(code);
+        return new Promise((resolve) => { window.setTimeout(() => resolve(code), relayOptions.codeDelayMs ?? 0); });
       }
       if (channel === 'relay:set-address') {
         const address = args[0] == null ? '' : String(args[0]).trim();
@@ -954,6 +957,16 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         const report: ComputerRoutesReport = { machineId: 'install-devbox', name: 'devbox' };
         if (url) report.publicUrl = url;
         return Promise.resolve(report);
+      }
+      if (channel === 'computers:set-mine') {
+        // SAFETY: the renderer sends { computerId, mine } to this command.
+        const { computerId, mine } = args[0] as { computerId: string; mine: boolean | null };
+        const computer = seededComputers.find((candidate) => candidate.id === computerId);
+        if (!computer) return Promise.reject(new Error(`Error invoking remote method 'computers:set-mine': Error: No saved computer ${computerId}.`));
+        if (mine === null) delete computer.mineOverride;
+        else computer.mineOverride = mine;
+        syncRemoteDaemonConfig();
+        return Promise.resolve(clone(computer));
       }
       if (channel === 'computers:reorder-routes') {
         // SAFETY: the renderer sends { computerId, routeIds } to this command.
@@ -1137,12 +1150,14 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       machines: [{ id: 'local', name: 'This computer', online: true, refusal: null, memoryOnly: false }],
       leaseLengths: {},
       moveVault: null,
+      loginUses: [],
       ...mockOptions.paneSecrets,
     });
     /** What Settings asked of paneSecrets; values are never recorded. */
     type PaneSecretCall =
-      | { action: 'set' | 'delete' | 'moveToOnePassword'; project: string; name: string }
+      | { action: 'set' | 'delete' | 'moveToOnePassword'; project: string; name: string; sites?: string[] }
       | { action: 'setReference'; project: string; name: string; reference: string }
+      | { action: 'setSites'; project: string; name: string; sites: string[] }
       | { action: 'startLease'; request: SecretLeaseStartRequest }
       | { action: 'endLease'; leaseId: string }
       | { action: 'endAllLeases' | 'listVaults' }
@@ -1160,14 +1175,21 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let leaseCount = 0;
     const paneSecretsApi = {
       list: () => Promise.resolve({ success: true, data: clone(paneSecrets) }),
-      set: (project: string, name: string, _value: string) => {
-        paneSecretCalls.push({ action: 'set', project, name });
+      set: (project: string, name: string, _value: string, sites?: string[]) => {
+        paneSecretCalls.push(sites ? { action: 'set', project, name, sites } : { action: 'set', project, name });
         const replaced = paneSecrets.secrets.some(sameSecret(project, name));
         paneSecrets.secrets = [
           ...paneSecrets.secrets.filter((secret) => !sameSecret(project, name)(secret)),
-          { project, name, updatedAt: new Date().toISOString(), machine: 'this-mac' },
+          { project, name, sites, updatedAt: new Date().toISOString(), machine: 'this-mac' },
         ];
         return Promise.resolve({ success: true, data: replaced });
+      },
+      setSites: (project: string, name: string, sites: string[]) => {
+        paneSecretCalls.push({ action: 'setSites', project, name, sites });
+        const withSites = <T extends { project: string; name: string }>(secret: T) => (sameSecret(project, name)(secret) ? { ...secret, sites } : secret);
+        paneSecrets.secrets = paneSecrets.secrets.map(withSites);
+        paneSecrets.references = paneSecrets.references.map(withSites);
+        return Promise.resolve({ success: true, data: true });
       },
       delete: (project: string, name: string) => {
         paneSecretCalls.push({ action: 'delete', project, name });
@@ -1378,6 +1400,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         unqueue: done, sendNow: done, editQueued: done, clear: done, stopTask: done, configure: done, cancel: done,
         permission: done, answer: done, restart: done, resume: done, dismissBanner: done,
         conversations: () => Promise.resolve([]),
+        files: () => Promise.resolve([]),
         signIn: (panelId: string) => Promise.resolve({ panelId }),
         onEvent: () => () => undefined,
         onState: () => () => undefined,
@@ -2433,6 +2456,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           emit('pane:focus-requested', { paneId });
         },
         // Names the host that host-keyed ui state reads and writes, as main's active profile does.
+        /** The connected computer, as main reports it. */
+        setConnectionState(updates: Partial<RemotePaneConnectionState>) {
+          setRemoteConnectionState(updates);
+        },
         setActiveRemoteProfileId(profileId: string | null) {
           remoteConnectionState.activeProfileId = profileId;
         },

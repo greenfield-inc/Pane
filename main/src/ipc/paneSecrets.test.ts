@@ -64,6 +64,30 @@ describe('runpane secrets channels', () => {
     await expect(registry.invoke('runpane:secrets:list', [{}])).resolves.toMatchObject({ secrets: [] });
   });
 
+  it('gives a login to no command, and lets no program on this machine make, change or remove one', async () => {
+    const { registry, secrets } = setup();
+    await secrets.set('bank', 'TOKEN', 'plain');
+    await secrets.setLogin('bank', 'PIN', CANARY, ['https://bank.example']);
+
+    // The whole project's environment leaves it out; naming it runs nothing.
+    await expect(registry.invoke('runpane:secrets:resolve', [{ project: 'bank' }])).resolves.toEqual({ ok: true, values: { TOKEN: 'plain' } });
+    for (const [channel, request] of [
+      ['runpane:secrets:resolve', { project: 'bank', names: ['TOKEN', 'PIN'] }],
+      ['runpane:secrets:set', { project: 'bank', name: 'PIN', value: 'x', sites: ['https://evil.test'] }],
+      ['runpane:secrets:delete', { project: 'bank', name: 'PIN' }],
+    ] as const) {
+      await expect(registry.invoke(channel, [request])).rejects.toMatchObject({ code: 'SECRET_IS_LOGIN', message: expect.not.stringContaining(CANARY) });
+    }
+    await registry.invoke('runpane:secrets:set', [{ project: 'bank', name: 'MINE', value: 'x', sites: ['https://evil.test'] }]);
+    expect(secrets.sitesOf('bank', 'MINE')).toBeNull();
+    // No daemon channel sets sites: only Settings' own renderer channel does.
+    await expect(registry.invoke('pane-secrets:set-sites', ['bank', 'TOKEN', ['https://evil.test']])).rejects.toThrow();
+    expect(await secrets.readLogin('bank', 'PIN')).toEqual({ value: CANARY, sites: ['https://bank.example'] });
+    const listed = await registry.invoke('runpane:secrets:list', [{ project: 'bank' }]);
+    expect(listed).toMatchObject({ secrets: expect.arrayContaining([expect.objectContaining({ name: 'PIN', sites: ['https://bank.example'] })]) });
+    expect(JSON.stringify(listed)).not.toContain(CANARY);
+  });
+
   it('refuses every remote caller, so no value crosses the network through these channels', async () => {
     const { registry, secrets } = setup();
     await secrets.set('qa', 'STRIPE_KEY', CANARY);
@@ -100,6 +124,17 @@ describe('runpane secrets channels', () => {
 
     await leases.grant({ project: 'stripe', secrets: [{ name: 'STRIPE_KEY', reference: 'op://Dev/Stripe/credential', value: CANARY }], expiresInMs: 60_000, requestedBy: 'test', grantedOn: 'this-mac' });
     await expect(registry.invoke('runpane:secrets:resolve', [{ project: 'stripe' }])).resolves.toEqual({ ok: true, values: { TYPED: 'typed-value', STRIPE_KEY: CANARY } });
+    leases.dispose();
+  });
+
+  it('stores a pushed login as one, and refuses the whole push when a login in it is malformed', async () => {
+    const { registry, leases } = setup();
+    const login = { name: 'PIN', reference: 'op://Private/Bank/pin', login: JSON.stringify({ sites: ['https://bank.example'], value: CANARY }) };
+    await expect(registry.invokeRemote('secrets:lease:push', [{ ...push(), logins: [{ ...login, login: CANARY }] }, { clientId: 'desktop-1' }])).rejects.toMatchObject({ code: 'SECRET_INVALID', message: expect.not.stringContaining(CANARY) });
+    expect(leases.list()).toEqual([]);
+    await registry.invokeRemote('secrets:lease:push', [{ ...push(), secrets: [], logins: [login] }, { clientId: 'desktop-1' }]);
+    expect(await leases.readLogin('stripe', 'PIN')).toEqual({ value: CANARY, sites: ['https://bank.example'] });
+    await expect(leases.read('stripe', 'PIN')).rejects.toMatchObject({ code: 'SECRET_IS_LOGIN' });
     leases.dispose();
   });
 

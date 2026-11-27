@@ -1,18 +1,25 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider, useIsFocused } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useActiveHost, useHostsStore } from '@/auth/hostsStore';
 import { DaemonProvider, queryClient } from '@/daemon';
+import { ReopenLastScreen } from '@/features/app/ReopenLastScreen';
+import { CheatSheet } from '@/features/controller/CheatSheet';
+import { ControllerInput } from '@/features/controller/ControllerInput';
+import { FocusRing, hideRingOnTouch } from '@/features/controller/FocusRing';
+import { WideFrame } from '@/features/layout/WideFrame';
+import { useShowsBack } from '@/features/layout/wideLayout';
 import { RelayComputerSync } from '@/features/hosts/RelayComputerSync';
 import { SharedCredentialSync } from '@/features/hosts/SharedCredentialSync';
 import { NotificationTapRouter, NotifyAlertCleanup } from '@/features/notifications/NotificationRouting';
 import { PushRegistrationSync } from '@/features/notifications/usePushSetup';
 import { TerminalPrewarm } from '@/features/terminal/TerminalPrewarm';
 import { useTheme } from '@/theme';
+import { ColumnActive } from '@/features/controller/focusContext';
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -44,24 +51,30 @@ export default function RootLayout() {
   };
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1 }} onStartShouldSetResponderCapture={hideRingOnTouch}>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider value={navigationTheme}>
           <StatusBar style="auto" />
           {activeHost ? (
             <>
               <DaemonProvider key={activeHost.id} profile={activeHost}>
-                <RootStack signedIn />
+                <WideFrame>
+                  <RootStack signedIn />
+                </WideFrame>
                 <TerminalPrewarm />
                 <NotifyAlertCleanup />
                 <RelayComputerSync />
               </DaemonProvider>
+              <ReopenLastScreen hostId={activeHost.id} />
               <SharedCredentialSync />
               <PushRegistrationSync />
             </>
           ) : (
             <RootStack signedIn={false} />
           )}
+          <FocusRing scope="" />
+          <ControllerInput />
+          <CheatSheet />
           <NotificationTapRouter />
         </ThemeProvider>
       </QueryClientProvider>
@@ -71,11 +84,13 @@ export default function RootLayout() {
 
 function RootStack({ signedIn }: { signedIn: boolean }) {
   const theme = useTheme();
+  // Beside the docked Home, a screen opened over "Nothing open" has nothing to go back to.
+  const headerBackVisible = useShowsBack() || !signedIn;
   // Settings screens sit on the grouped page color, header included.
   const grouped = { headerStyle: { backgroundColor: theme.colors.grouped }, headerShadowVisible: false, contentStyle: { backgroundColor: theme.colors.grouped } };
   return (
     // Swipe back from anywhere on the screen, not only the left edge.
-    <Stack screenOptions={{ fullScreenGestureEnabled: true, headerBackButtonDisplayMode: 'minimal' }}>
+    <Stack screenOptions={{ fullScreenGestureEnabled: true, headerBackButtonDisplayMode: 'minimal', headerBackVisible }} screenLayout={({ children }) => <OnScreen>{children}</OnScreen>}>
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="connect" options={{ headerShown: false }} />
       </Stack.Protected>
@@ -88,6 +103,7 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
         <Stack.Screen name="settings/shortcut" options={{ presentation: 'modal', title: 'Edit shortcut' }} />
         <Stack.Screen name="settings/voice" options={{ title: 'Voice', ...grouped }} />
         <Stack.Screen name="settings/glasses" options={{ title: 'Glasses', ...grouped }} />
+        <Stack.Screen name="settings/controller" options={{ title: 'Controller', ...grouped }} />
         <Stack.Screen name="machine/[key]" options={{ title: '', ...grouped }} />
         <Stack.Screen
           name="machine/connect"
@@ -126,6 +142,11 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
           name="sort-approvals"
           options={{ presentation: 'formSheet', sheetAllowedDetents: 'fitToContents', sheetGrabberVisible: true, headerShown: false }}
         />
+        {/* A controller's − : the Recent switcher. */}
+        <Stack.Screen
+          name="recent"
+          options={{ presentation: 'formSheet', sheetAllowedDetents: [0.6, 1], sheetGrabberVisible: true, headerShown: false }}
+        />
         {/* Home's Stale and Done today. */}
         <Stack.Screen name="history" options={{ title: 'History', headerLargeTitle: true, headerBackTitle: 'Home', headerBackButtonDisplayMode: 'default' }} />
         {/* Home's Sessions, Repositories and Archived, from the All panes tile. Rows leave the left edge to swipe-back. */}
@@ -140,4 +161,9 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
       <Stack.Screen name="open" options={{ presentation: 'transparentModal', animation: 'fade', headerShown: false }} />
     </Stack>
   );
+}
+
+/** A screen under the one in view (or under a sheet) keeps its controls out of the controller's reach. */
+function OnScreen({ children }: { children: ReactNode }) {
+  return <ColumnActive value={useIsFocused()}>{children}</ColumnActive>;
 }

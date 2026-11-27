@@ -27,6 +27,7 @@ import { terminalPanelManager } from './terminalPanelManager';
 import { databaseService } from './database';
 import type { ConfigManager } from './configManager';
 import type { SessionManager } from './sessionManager';
+import { parseSessionTimestampMs } from './paneInactivity';
 import type { Session } from '../types/session';
 import type { SkillCacheManager } from './skillCacheManager';
 import type { PaneChatManager } from './paneChatManager';
@@ -35,6 +36,7 @@ import type { TerminalAgentReport, ToolPanel, TerminalPanelState, TerminalPaused
 import type { AgentState } from '../../../shared/types/agentStatus';
 import {
   LEGACY_ORCHESTRATION_SESSION_ID,
+  ORCHESTRATION_SESSION_DETAIL_FIELDS,
   ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX,
   resolveSessionRetention,
   type OrchestrationActivity,
@@ -47,7 +49,9 @@ import {
   type OrchestrationPanelReport,
   type OrchestrationReport,
   type OrchestrationSessionCreateInput,
+  type OrchestrationSessionListOptions,
   type OrchestrationSessionListResult,
+  type OrchestrationSessionSummary,
   type OrchestrationSessionOverview,
   type OrchestrationSessionRecord,
   type OrchestrationSessionSelector,
@@ -72,6 +76,7 @@ import { SessionActivityService, type SessionActivityMembers } from './sessionAc
 import type { WorkspaceSessionMembership } from './workspaceJournal';
 import { agentReportData, readPanelAgentReport } from './agentReport';
 import { paneChatFirstPrompt } from './paneChatMigrateOffer';
+import { readOnlyPaneCaller } from '../daemon/commandRegistry';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import type { SessionMoveMark } from '../../../shared/types/sessionMove';
 import { releaseMoveHolds } from './sessionMove/restore';
@@ -139,15 +144,20 @@ export class OrchestrationSessionManager extends EventEmitter {
     });
   }
 
-  async list(): Promise<OrchestrationSessionListResult> {
+  /** Every Session in order; `{ summary: true }` leaves out what only a full record's readers need (T-127). */
+  async list(): Promise<OrchestrationSessionListResult>;
+  async list(options: OrchestrationSessionListOptions | undefined): Promise<OrchestrationSessionListResult<OrchestrationSessionSummary>>;
+  async list(options?: OrchestrationSessionListOptions): Promise<OrchestrationSessionListResult<OrchestrationSessionSummary>> {
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
-      const data = this.store.read();
-      return {
-        sessions: orderedSessions(data).map(record => this.withPaused(clone(record))),
-        selectedSessionId: data.selectedSessionId,
-      };
+      return this.listed(this.store.read(), options);
     });
+  }
+
+  /** The list a read answers with, from the store data it just read or wrote. */
+  private listed(data: OrchestrationSessionStoreData, options: OrchestrationSessionListOptions | undefined): OrchestrationSessionListResult<OrchestrationSessionSummary> {
+    const sessions = orderedSessions(data).map(record => this.withComputed(options?.summary ? summaryOf(record) : clone(record)));
+    return { sessions, selectedSessionId: data.selectedSessionId };
   }
 
   /**
@@ -156,7 +166,9 @@ export class OrchestrationSessionManager extends EventEmitter {
    * another list, ones created during a drag) keep theirs. Unknown ids are ignored. The Sessions
    * themselves are untouched: no revision, timestamp or activity changes.
    */
-  async reorder(sessionIds: string[]): Promise<OrchestrationSessionListResult> {
+  async reorder(sessionIds: string[]): Promise<OrchestrationSessionListResult>;
+  async reorder(sessionIds: string[], options: OrchestrationSessionListOptions | undefined): Promise<OrchestrationSessionListResult<OrchestrationSessionSummary>>;
+  async reorder(sessionIds: string[], options?: OrchestrationSessionListOptions): Promise<OrchestrationSessionListResult<OrchestrationSessionSummary>> {
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       const data = this.store.read();
@@ -164,25 +176,26 @@ export class OrchestrationSessionManager extends EventEmitter {
       const nextData: OrchestrationSessionStoreData = { ...data, order };
       this.store.write(nextData);
       this.emit('changed', { sessionId: sessionIds.find(id => order.includes(id)) ?? '', kind: 'reordered' });
-      return { sessions: orderedSessions(nextData).map(record => this.withPaused(clone(record))), selectedSessionId: nextData.selectedSessionId };
+      return this.listed(nextData, options);
     });
   }
 
-  async select(selector: OrchestrationSessionSelector): Promise<OrchestrationSessionListResult> {
+  async select(selector: OrchestrationSessionSelector): Promise<OrchestrationSessionListResult>;
+  async select(selector: OrchestrationSessionSelector, options: OrchestrationSessionListOptions | undefined): Promise<OrchestrationSessionListResult<OrchestrationSessionSummary>>;
+  async select(selector: OrchestrationSessionSelector, options?: OrchestrationSessionListOptions): Promise<OrchestrationSessionListResult<OrchestrationSessionSummary>> {
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       const session = this.findSession(this.store.read(), selector);
       if (session.archived === true) {
         throw new Error(`Session ${session.name} is archived; restore it before selecting it`);
       }
+      // Opening a Session views its chat Pane, which is when the Session counts as last opened.
+      this.sessionManager.markSessionAsViewed(session.internalSessionId);
       const data = this.store.read();
       const next: OrchestrationSessionStoreData = { ...data, selectedSessionId: session.id };
       this.store.write(next);
       this.emit('changed', { sessionId: session.id, kind: 'selected' });
-      return {
-        sessions: orderedSessions(next).map(record => this.withPaused(clone(record))),
-        selectedSessionId: next.selectedSessionId,
-      };
+      return this.listed(next, options);
     });
   }
 
@@ -210,7 +223,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         : data.selectedSessionId;
       this.store.write({ ...replaced, selectedSessionId });
       this.emitChanged(next, 'updated', selectedSessionId !== data.selectedSessionId);
-      return this.withPaused(clone(next));
+      return this.withComputed(clone(next));
     });
   }
 
@@ -307,7 +320,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   async get(selector: OrchestrationSessionSelector): Promise<OrchestrationSessionRecord> {
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
-      return this.withPaused(clone(this.findSession(this.store.read(), selector)));
+      return this.withComputed(clone(this.findSession(this.store.read(), selector)));
     });
   }
 
@@ -320,6 +333,12 @@ export class OrchestrationSessionManager extends EventEmitter {
       }
       if (record.move?.state === 'arriving') {
         throw new PaneError('ERR_SESSION_ARRIVING', `Session ${record.name} is still arriving from ${record.move.machine}, so it can't open yet.`, `Wait for the move to finish on ${record.move.machine}.`);
+      }
+      if (readOnlyPaneCaller()) {
+        // A read-only device's view creates no tab and moves no one's last-used tab.
+        const shown = panelManager.getPanel(record.panelIds[record.agent]);
+        if (!shown) throw new PaneError('ERR_SESSION_NOT_OPENED', `Session ${record.name} has no agent tab yet, and a read-only device can't open one.`, 'Ask the computer\'s owner to open the Session there, then try again.');
+        return await this.viewFromRecord(record, shown);
       }
       this.createInternalSession(record);
       const panel = await this.ensurePanelForAgent(record);
@@ -608,7 +627,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       this.emitChanged(nextRecord, input.report ? 'report' : 'updated', selectedSessionId !== data.selectedSessionId);
       // Every way of archiving (the app, a phone, the CLI, another machine) passes here.
       if (isArchiving) this.emit('archived', nextRecord.id);
-      return this.withPaused(clone(nextRecord));
+      return this.withComputed(clone(nextRecord));
     });
   }
 
@@ -733,7 +752,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         this.sessionManager.emit('session-updated', pane);
       }
       this.emitChanged(nextRecord, 'associated', false, joined ? [input.paneId] : []);
-      return this.withPaused(clone(nextRecord));
+      return this.withComputed(clone(nextRecord));
     });
   }
 
@@ -770,7 +789,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       this.trimActivity(nextRecord);
       this.store.write(replaceSession(data, nextRecord));
       this.emitChanged(nextRecord, 'associated', false, joined ? [member.paneId] : []);
-      return this.withPaused(clone(nextRecord));
+      return this.withComputed(clone(nextRecord));
     });
   }
 
@@ -822,7 +841,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       this.trimActivity(nextRecord);
       this.store.write(replaceSession(data, nextRecord));
       this.emitChanged(nextRecord, 'detached', false, removed.map(item => item.paneId));
-      return this.withPaused(clone(nextRecord));
+      return this.withComputed(clone(nextRecord));
     });
   }
 
@@ -958,7 +977,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     return record ? this.pausablePaneIdsOf(record) : [];
   }
 
-  private pausablePaneIdsOf(record: OrchestrationSessionRecord): string[] {
+  private pausablePaneIdsOf(record: Pick<OrchestrationSessionRecord, 'associations' | 'internalSessionId'>): string[] {
     const members = record.associations.map(association => association.paneId)
       .filter(paneId => this.sessionManager.getSession(paneId)?.archived === false);
     return [...new Set([record.internalSessionId, ...members])];
@@ -973,15 +992,21 @@ export class OrchestrationSessionManager extends EventEmitter {
     }
   }
 
-  /** A Session is paused when its chat and every Pane in it are paused; computed on read, never stored. */
-  private withPaused(record: OrchestrationSessionRecord): OrchestrationSessionRecord {
+  /**
+   * Adds what a read computes, never stored: `paused` when its chat and every Pane in it are paused,
+   * and `openedAt`, its chat Pane's last view.
+   */
+  private withComputed<Session extends OrchestrationSessionSummary>(record: Session): Session {
+    const viewedAt = this.sessionManager.getSession(record.internalSessionId)?.lastViewedAt;
+    const openedMs = viewedAt ? parseSessionTimestampMs(viewedAt) : NaN;
+    const openedAt = Number.isNaN(openedMs) ? undefined : new Date(openedMs).toISOString();
     let latest: TerminalPausedMark | undefined;
     for (const paneId of this.pausablePaneIdsOf(record)) {
       const mark = this.sessionManager.getSession(paneId)?.paused;
-      if (!mark) return { ...record, paused: undefined };
+      if (!mark) return { ...record, paused: undefined, openedAt };
       if (!latest || mark.at > latest.at) latest = mark;
     }
-    return { ...record, paused: latest };
+    return { ...record, paused: latest, openedAt };
   }
 
   /**
@@ -1585,7 +1610,8 @@ export class OrchestrationSessionManager extends EventEmitter {
       panel,
       agent: record.agent,
       cwd: sessionRuntimePath(sessionWorkspacePath(record.id), record),
-      guidePath: sessionRuntimePath(await this.ensureGuidePath(), record),
+      // Making sure the guide is there writes it; a read-only device runs no agent that reads it.
+      guidePath: readOnlyPaneCaller() ? '' : sessionRuntimePath(await this.ensureGuidePath(), record),
       started: this.agentStarted(panel.id),
     };
   }
@@ -1674,6 +1700,8 @@ export class OrchestrationSessionManager extends EventEmitter {
       panels: [],
       machine: { ...machine, state: 'unreachable' },
     };
+    // A read-only device reaches this computer, not the owner's other ones through it.
+    if (readOnlyPaneCaller()) return known;
     const read = await this.remoteMachines?.readPane(machine.id, association.paneId).catch(() => undefined);
     if (!read || read === 'unreachable') return known;
     if (read === 'older-pane') return { ...known, machine: { ...machine, state: 'older-pane' } };
@@ -1877,6 +1905,15 @@ function orderedSessions(data: OrchestrationSessionStoreData): OrchestrationSess
 
 function replaceSession(data: OrchestrationSessionStoreData, record: OrchestrationSessionRecord): OrchestrationSessionStoreData {
   return { ...data, sessions: data.sessions.map(session => session.id === record.id ? record : session) };
+}
+
+/** A copy of the record without the fields a summary list leaves out; the stored record is untouched. */
+function summaryOf(record: OrchestrationSessionRecord): OrchestrationSessionSummary {
+  // Drop them before cloning, so the long activity log is never copied.
+  const summary: Partial<OrchestrationSessionRecord> = { ...record };
+  for (const field of ORCHESTRATION_SESSION_DETAIL_FIELDS) delete summary[field];
+  // SAFETY: Every field but the detail fields came from a whole record, and those were just removed.
+  return clone(summary as OrchestrationSessionSummary);
 }
 
 function clone<Value>(value: Value): Value {

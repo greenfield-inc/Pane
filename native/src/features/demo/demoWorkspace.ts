@@ -2,7 +2,7 @@ import type { AgentState } from '@shared/types/agentStatus';
 import type { NotifyAnswer, NotifyItem, NotifyRemoteCommand, NotifyReply, NotifySharedState } from '@shared/types/notify';
 import type { OrchestrationSessionRecord, OrchestrationSessionView } from '@shared/types/orchestrationSession';
 import type { PaneChatAgent } from '@shared/types/paneChat';
-import type { TerminalPausedMark, ToolPanel } from '@shared/types/panels';
+import type { SessionPanelLayout, TerminalPausedMark, ToolPanel } from '@shared/types/panels';
 import type { RemotePwaAffordances, RemotePwaTerminalShortcut } from '@shared/types/remoteDaemon';
 import type { RunpanePaneCreateRequest, RunpanePaneCreateResult, RunpanePauseResult, RunpanePauseScope, RunpaneWorkspaceStateResult } from '@shared/types/runpaneOrchestration';
 import type { JsonValue } from '@shared/validation/boundaryDecoder';
@@ -24,6 +24,8 @@ interface DemoPane {
   archived: boolean;
   isHidden?: boolean;
   createdAt: string;
+  /** When it was last opened, as the host stores it: SQLite's UTC `YYYY-MM-DD HH:MM:SS`. */
+  lastViewedAt?: string;
   panels: DemoPanel[];
 }
 
@@ -57,6 +59,9 @@ const SHORTCUTS: RemotePwaTerminalShortcut[] = [
   { id: 'demo-s3', key: 'g', label: 'What changed?', text: 'git status --short', enabled: true },
 ];
 
+const sqliteTime = (ms: number) => new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
+const openedAt = (pane: DemoPane) => (pane.lastViewedAt ? new Date(`${pane.lastViewedAt.replace(' ', 'T')}Z`).toISOString() : undefined);
+
 /** The demo host's state: sample computers, Panes, a Session and questions, changed by what you do. */
 export class DemoWorkspace {
   private readonly listeners = new Set<Listener>();
@@ -77,6 +82,10 @@ export class DemoWorkspace {
     this.notify = demoNotifyItems(startedAt);
     this.sessions = [this.sessionRecord(DEMO_SESSION.id, DEMO_SESSION.name, DEMO_SESSION.agent, { goal: DEMO_SESSION.goal })];
     this.panes.push(this.sessionPane(this.sessions[0], DEMO_SESSION.screen));
+    // What you opened before: Home's Recent lists them.
+    for (const [paneId, minutesAgo] of [[this.sessions[0].internalSessionId, 3], ['demo-fix-checkout-race', 8], ['demo-rate-limit', 20], ['demo-dark-mode', 35], ['demo-copy-review', 60]] as const) {
+      this.pane(paneId).lastViewedAt = sqliteTime(startedAt - minutesAgo * MINUTE);
+    }
     // Autopilot walks the sample Session: its planner's two approvals and one of its own.
     const session = { id: DEMO_SESSION.id, name: DEMO_SESSION.name, paneId: this.sessions[0].internalSessionId };
     this.notify.push(...demoAutopilotItems(startedAt, session));
@@ -92,6 +101,10 @@ export class DemoWorkspace {
     switch (channel) {
       case 'sessions:get-all-with-projects': return this.projects(pane => !pane.archived);
       case 'sessions:get-archived-with-projects': return this.projects(pane => pane.archived).filter(project => project.sessions.length > 0);
+      case 'sessions:mark-viewed':
+        this.pane(first).lastViewedAt = sqliteTime(Date.now());
+        this.emit('session:updated', { id: this.pane(first).id });
+        return null;
       case 'sessions:get': return { id: this.pane(first).id, name: this.pane(first).name };
       case 'sessions:toggle-favorite': return this.toggleFavorite(this.pane(first));
       case 'sessions:delete': return this.setArchived(this.pane(first), true);
@@ -135,7 +148,7 @@ export class DemoWorkspace {
       case 'permission:respond': return null;
       case 'notify:remote-snapshot': return toJson(this.notifySnapshot());
       case 'notify:remote-command': return this.notifyCommand(first as NotifyRemoteCommand);
-      case 'orchestration-sessions:list': return toJson({ sessions: this.sessions.map(session => ({ ...session, paused: this.sessionMark(session) })) });
+      case 'orchestration-sessions:list': return toJson({ sessions: this.sessions.map(session => ({ ...session, paused: this.sessionMark(session), openedAt: openedAt(this.pane(session.internalSessionId)) })) });
       case 'orchestration-sessions:get': return toJson(this.sessionView(this.session(first)));
       case 'orchestration-sessions:create': return toJson(this.createSession(first as { name?: string; agent?: PaneChatAgent; isPinned?: boolean }));
       case 'orchestration-sessions:update': {
@@ -158,6 +171,7 @@ export class DemoWorkspace {
       case 'credentials:shared:apply': return null;
       case 'panels:list': return toJson(this.panelsOf(this.pane(first)));
       case 'panels:getActive': return toJson(this.panelsOf(this.pane(first))[0] ?? null);
+      case 'panels:get-layout': return toJson(this.layoutOf(this.pane(first)));
       case 'panels:set-active': return null;
       case 'panels:update': return this.updatePanel(first, second as Partial<ToolPanel>);
       case 'panels:read-browser-file': return { data: btoa(demoPageHtml(String(second))), contentType: 'text/html' };
@@ -254,6 +268,7 @@ export class DemoWorkspace {
       sessions: this.panes.filter(pane => pane.projectId === project.id && include(pane)).map(pane => ({
         id: pane.id, name: pane.name, baseBranch: pane.baseBranch, isFavorite: pane.isFavorite,
         archived: pane.archived, createdAt: pane.createdAt,
+        ...(pane.lastViewedAt ? { lastViewedAt: pane.lastViewedAt } : {}),
         ...(pane.favoritePinnedAt ? { favoritePinnedAt: pane.favoritePinnedAt } : {}),
         ...(paneMark(pane) ? { paused: toJson(paneMark(pane)) } : {}),
       })),
@@ -572,6 +587,24 @@ export class DemoWorkspace {
         { id: session.panelIds[session.agent], title, agentType: session.agent, state: 'idle', buffer: screen, pending: [], typed: '' },
         ...toolPanels(session.internalSessionId, session.id === DEMO_SESSION.id ? DEMO_SESSION_PAGES : undefined),
       ],
+    };
+  }
+
+  /** The sample Session as a desktop leaves it: its agent's chat on the left, its status page beside it. Other Panes show one tab. */
+  private layoutOf(pane: DemoPane): SessionPanelLayout | null {
+    if (pane.id !== this.sessions[0]?.internalSessionId) return null;
+    const [chat, page] = pane.panels;
+    if (!chat || !page) return null;
+    return {
+      version: 1,
+      focusedGroupId: 'demo-left',
+      root: {
+        type: 'split', id: 'demo-split', direction: 'row', sizes: [1, 1],
+        children: [
+          { type: 'group', id: 'demo-left', panelIds: [chat.id], activePanelId: chat.id },
+          { type: 'group', id: 'demo-right', panelIds: [page.id], activePanelId: page.id },
+        ],
+      },
     };
   }
 

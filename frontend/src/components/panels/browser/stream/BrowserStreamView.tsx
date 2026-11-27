@@ -7,6 +7,7 @@ import { browserInputQueue, clickCounter, fitFrame, keyboardField, modifiersOf, 
 import type { BrowserStream, StreamStop } from './useBrowserStream';
 import type { BrowserStreamClient } from './streamClient';
 import { SignInLine } from '../TabNotices';
+import { browserLoginLine } from '../../../../../../shared/types/browser';
 
 /** How long the agent's cursor stays at a click before it fades (as on the host's own tab). */
 const CURSOR_SHOWN_MS = 1_200;
@@ -45,7 +46,7 @@ export function stopLine(stop: StreamStop, host: string, phone = false): string 
 interface BrowserStreamViewProps {
   client: BrowserStreamClient;
   panelId: string;
-  stream: BrowserStream & { wake(): void };
+  stream: BrowserStream & { wake(): void; hurry(): void };
   /** The host's name until its state arrives. */
   hostName: string;
   /** A phone: the first tap only takes control (the page gets the phone's size), and a tap into a field opens the keyboard. */
@@ -75,7 +76,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
   }, [keyboardRef]);
   const [box, setBox] = useState({ width: 0, height: 0 });
   const [field, setField] = useState<'text' | 'password' | null>(null);
-  const { frame, view, stop } = stream;
+  const { frame, view, stop, hurry } = stream;
   const host = view?.host ?? hostName;
   const page = useMemo(() => (frame ? { width: frame.width, height: frame.height } : undefined), [frame]);
 
@@ -100,10 +101,11 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
   const send = useCallback((input: BrowserInput | null) => {
     if (stopRef.current && stopRef.current !== 'older') return;
     onPersonInputRef.current?.();
+    hurry();
     // After Enter, Tab or a navigation the page may focus a password field by itself: type securely until the host says.
     if (movesFocus(input)) setField('password');
     queue(input);
-  }, [queue]);
+  }, [queue, hurry]);
 
   // Hover goes on its own read channel, at most every HOVER_MS, one on its way at a time: the host
   // keeps no answer for it, so pointing around never uses up this screen's write allowance.
@@ -385,6 +387,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
   const [signInDismissed, setSignInDismissed] = useState<string | undefined>(undefined);
   // The host drops the sign-in when the page loads again, so the next refusal shows its line.
   if (!signIn && signInDismissed !== undefined) setSignInDismissed(undefined);
+  const login = view?.logins?.at(-1);
   const download = view?.downloads.at(-1);
   const [downloadSeenAt, setDownloadSeenAt] = useState(0);
   const firstDownload = useRef<number | undefined | null>(null);
@@ -471,6 +474,11 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
       {stream.reloadedAt !== undefined && Date.now() - stream.reloadedAt < RELOADED_SHOWN_MS && !stop && (
         <div role="status" className="absolute inset-x-0 bottom-0 flex justify-center p-3">
           <p className="rounded-md bg-surface-primary px-3 py-1.5 text-xs text-text-secondary shadow-md">The page reloaded on {host}.</p>
+        </div>
+      )}
+      {login && (
+        <div role="status" className="absolute bottom-3 left-3 max-w-[calc(100%-24px)] truncate rounded-md bg-surface-primary px-3 py-1.5 text-xs text-text-secondary shadow-md" data-testid="browser-stream-login">
+          {browserLoginLine(login)}
         </div>
       )}
       {download && downloadSeenAt > 0 && Date.now() - downloadSeenAt < 60_000 && (

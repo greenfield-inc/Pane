@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { useTheme } from '@/theme';
 
 import { Text } from './Text';
+import { Focusable } from '@/features/controller/Focusable';
 
 type ButtonVariant = 'primary' | 'secondary' | 'plain' | 'destructive';
 
@@ -31,6 +32,7 @@ export function Button({ title, onPress, variant = 'primary', loading, disabled,
   const tone = variant === 'primary' ? 'onAccent' : variant === 'destructive' ? 'danger' : variant === 'secondary' ? 'primary' : 'accent';
 
   return (
+    <Focusable enabled={!inactive} onActivate={onPress}>
     <Pressable
       testID={testID}
       accessibilityRole="button"
@@ -57,6 +59,7 @@ export function Button({ title, onPress, variant = 'primary', loading, disabled,
         <Text variant="callout" tone={tone} style={styles.label}>{title}</Text>
       </View>
     </Pressable>
+    </Focusable>
   );
 }
 

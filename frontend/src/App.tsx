@@ -10,6 +10,7 @@ import { useConnectionPresence } from './hooks/useConnectionPresence';
 import { RemoteWorkspace } from './components/RemoteWorkspace';
 import { TailnetHttpsBanner } from './components/TailnetHttpsBanner';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { followHostAccess } from './stores/readOnlyHostStore';
 import { useIPCEvents } from './hooks/useIPCEvents';
 import { useNotifications } from './hooks/useNotifications';
 import { useResizable } from './hooks/useResizable';
@@ -56,6 +57,7 @@ import { usePanelStore } from './stores/panelStore';
 import { forgetRevealedTerminal, forgetRevealedTerminalsInSession } from './utils/revealedTerminals';
 import { API } from './utils/api';
 import { onOpenSettingsRequest } from './utils/openSettings';
+import { ControllerLayer } from './controller/ControllerLayer';
 import { onOpenFirstRunRequest } from './utils/openFirstRun';
 import { dropLaunchOutline, revealApp } from './utils/launchOutline';
 import { prepareLaunchChat, restoreHostNavigation, restoreLaunchChat, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
@@ -195,6 +197,7 @@ function App() {
 
 
   useIPCEvents();
+  useEffect(() => followHostAccess(), []);
   useLoopsRefresh();
   const { showNotification } = useNotifications();
 
@@ -1155,6 +1158,7 @@ function App() {
           onNewPane={handleNewPaneInProject}
         />
         <SessionArchiveConfirmDialog />
+        <ControllerLayer />
         <ArchiveConfirmDialog />
         {showCreateSessionDialog && activeProject && (
           <CreateSessionDialog

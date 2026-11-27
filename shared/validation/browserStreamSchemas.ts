@@ -36,6 +36,7 @@ export const browserTabViewSchema: BoundarySchema<BrowserTabView> = boundary.obj
   dialog: boundary.optional(boundary.object({ type: boundary.enumeration('alert', 'confirm', 'prompt', 'beforeunload'), message: boundary.string, defaultPrompt: boundary.optional(boundary.string) })),
   fileChooser: boundary.optional(boundary.object({ multiple: boundary.boolean })),
   downloads: boundary.array(boundary.object({ name: boundary.string, at: boundary.number, agent: boundary.optional(boundary.string) })),
+  logins: boundary.optional(boundary.array(boundary.object({ login: boundary.string, site: boundary.string, agent: boundary.string, at: boundary.number }))),
   page: boundary.optional(boundary.string),
   host: boundary.string,
   signIn: boundary.optional(boundary.object({ site: boundary.string, url: boundary.string })),

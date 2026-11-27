@@ -1,3 +1,4 @@
+import { useReadOnlyHost } from '../stores/readOnlyHostStore';
 import { API } from '../utils/api';
 import { Modal, ModalBody, ModalHeader, ModalFooter } from './ui/Modal';
 import { Input } from './ui/Input';
@@ -10,7 +11,7 @@ import { Archive, Pin, ArrowUpRight, Pencil, FolderPlus, FolderMinus, ChevronLef
 import { runPauseAction } from '../utils/pause';
 import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import type { Session } from '../types/session';
-import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 import { useTodoSessionIds } from '../stores/todosStore';
 import { isTodoSession } from './orchestrationSessionVisibility';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
@@ -37,9 +38,10 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
   const orchestrationSessions = useOrchestrationSessionStore(state => state.sessions);
   const refreshOrchestrationSessions = useOrchestrationSessionStore(state => state.refresh);
   const todoSessionIds = useTodoSessionIds();
+  const readOnly = useReadOnlyHost();
   const paneId = menu?.session.id;
-  const memberOf: OrchestrationSessionRecord[] = [];
-  const addableTo: OrchestrationSessionRecord[] = [];
+  const memberOf: OrchestrationSessionSummary[] = [];
+  const addableTo: OrchestrationSessionSummary[] = [];
   for (const session of orchestrationSessions) {
     if (isArchivedOrchestrationSession(session)) continue;
     const member = session.associations.some(association => association.paneId === paneId);
@@ -73,7 +75,7 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
     <TerminalPopover
       // Remounting on the swap re-measures the menu, so a long Session list repositions to fit the viewport.
       key={picking ? 'picker' : 'actions'}
-      visible={menu !== null}
+      visible={menu !== null && !readOnly}
       x={menu?.x ?? 0}
       y={menu?.y ?? 0}
       onClose={close}

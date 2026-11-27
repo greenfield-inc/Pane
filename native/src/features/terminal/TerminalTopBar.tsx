@@ -8,10 +8,11 @@ import { useTheme } from '@/theme';
 import { Icon, ListRow, Text } from '@/ui';
 
 import { ComposerSheet, useAfterSheetCloses } from '../composer/ComposerSheet';
+import { ReadOnlyChip } from '../hosts/ReadOnlyChip';
+import { useShowsBack } from '../layout/wideLayout';
 import { ConnectionBar, presenceLabel } from '../hosts/ConnectionStatus';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
 import { MachineMark } from '../machines/MachineMark';
-import { shortMachineName } from '../machines/machines';
 import { useMachines } from '../machines/useMachines';
 
 /**
@@ -28,6 +29,7 @@ export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: stri
   const { presence, notice, retry } = useConnectionPresence();
   const current = useMachines().find(machine => machine.current);
   const [menuOpen, setMenuOpen] = useState(false);
+  const showsBack = useShowsBack();
   const { afterClose, onDismiss } = useAfterSheetCloses();
   const choose = (action: () => void) => {
     afterClose(action);
@@ -39,6 +41,7 @@ export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: stri
       <View style={{ paddingTop: insets.top, backgroundColor: colors.surface, borderBottomColor: colors.border, borderBottomWidth: 1 }}>
         <View style={styles.row}>
           <View style={styles.leading}>
+            {showsBack ? (
             <Pressable
               testID="terminal-back"
               accessibilityRole="button"
@@ -52,17 +55,18 @@ export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: stri
             >
               <Icon ios="chevron.left" android="arrow_back" size={20} color={colors.textSecondary} />
             </Pressable>
+            ) : null}
             {/* The machine's own mark, as on home and in Settings: it pulses and dims with the connection. */}
             <View style={styles.mark}>{current ? <MachineMark os={current.os} slot={current.slot} state={current.state} /> : null}</View>
             <View style={styles.text}>
               <View style={styles.titleRow}>
                 <Text
                   variant="subhead"
-                  style={[styles.semibold, styles.shrink]}
+                  style={[styles.semibold, styles.machine]}
                   numberOfLines={1}
                   accessibilityLabel={presenceLabel(presence, profile.label)}
                 >
-                  {shortMachineName(profile.label, 5)}
+                  {profile.label}
                 </Text>
                 {paneName ? (
                   <>
@@ -73,6 +77,7 @@ export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: stri
               </View>
             </View>
           </View>
+          {current?.readOnly ? <ReadOnlyChip /> : null}
           <Pressable
             testID="terminal-more"
             accessibilityRole="button"
@@ -132,7 +137,8 @@ const styles = StyleSheet.create({
   text: { flex: 1, minWidth: 0 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   semibold: { fontWeight: '600' },
-  shrink: { flexShrink: 1 },
-  pane: { flexShrink: 2 },
+  // The full name, cut short only past half the row, so the Pane's name stays readable.
+  machine: { flexShrink: 1, maxWidth: '50%' },
+  pane: { flexShrink: 1 },
   more: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
 });

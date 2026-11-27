@@ -24,7 +24,7 @@ import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { panePausedMark } from '../../../shared/types/panels';
 import type { AppConfig } from '../types/config';
-import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 
 /** How long the cursor rests on a row before its Session is selected and its agent starts. */
 const SETTLE_MS = 1000;
@@ -107,7 +107,7 @@ function listen(): void {
  * This machine's record of a Session: from the Sessions list, or from the All machines
  * view's read of this machine while the list is still loading at startup or failed to load.
  */
-function sessionRecord(sessionId: string): OrchestrationSessionRecord | undefined {
+function sessionRecord(sessionId: string): OrchestrationSessionSummary | undefined {
   return useOrchestrationSessionStore.getState().sessions.find(session => session.id === sessionId)
     ?? useAllMachinesStore.getState().snapshots[LOCAL_MACHINE_ID]?.sessions.find(session => session.id === sessionId);
 }

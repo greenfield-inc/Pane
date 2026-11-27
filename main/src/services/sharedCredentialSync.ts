@@ -89,11 +89,13 @@ export class SharedCredentialSync {
           ...readSharedCredentials(this.configManager.getConfig()),
           paneSecrets: await this.secrets().exportForSync(),
           paneSecretReferences: this.secrets().exportReferencesForSync(),
+          paneLogins: await this.secrets().exportLoginsForSync(),
         }),
         apply: async credentials => {
           await applySharedCredentials(this.configManager, credentials);
           if (credentials.paneSecrets) await this.secrets().applyFromSync(credentials.paneSecrets);
           if (credentials.paneSecretReferences) await this.secrets().applyReferencesFromSync(credentials.paneSecretReferences);
+          if (credentials.paneLogins) await this.secrets().applyLoginsFromSync(credentials.paneLogins);
         },
       };
       const peers = this.machines.remotes().map((peer): SharedCredentialHost => ({
@@ -125,7 +127,7 @@ export class SharedCredentialSync {
   /** Changes when any shared key or Pane secret here is set or cleared, or the switch changes; never contains a value. */
   private fingerprint(): string {
     const config = this.configManager.getConfig();
-    return JSON.stringify([config.sharedCredentials ?? {}, config.paneSecrets ?? {}, config.paneSecretReferences ?? {}, this.switchFingerprint()]);
+    return JSON.stringify([config.sharedCredentials ?? {}, config.paneSecrets ?? {}, config.paneSecretReferences ?? {}, config.paneLogins ?? {}, this.switchFingerprint()]);
   }
 
   private switchFingerprint(): string {

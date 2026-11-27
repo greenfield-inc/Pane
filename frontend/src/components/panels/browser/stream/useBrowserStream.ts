@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { BrowserFrame, BrowserTabView } from '../../../../../../shared/types/browserStream';
+import { framePace } from '../../../../../../shared/utils/browserFramePace';
 import { isOlderHost, type BrowserStreamClient } from './streamClient';
+import { usePageVisible } from './usePageVisible';
 
 /** Why the stream shows no live frames: the host can't be reached, has no stream, or the tab sleeps or went. */
 export type StreamStop = 'unreachable' | 'older' | 'asleep' | 'gone';
@@ -32,27 +34,37 @@ function within<Value>(work: Promise<Value>, ms: number): Promise<Value> {
 }
 
 /**
- * A browser tab streamed from its host while `on`: the newest frame (one read on its way at a
- * time, so frames come as fast as the link carries them and a still page costs nothing) and the
- * tab's state. A failed read keeps the last frame and reports why.
+ * A browser tab streamed from its host while `on` and the page is visible: the newest frame (one
+ * read on its way at a time, so frames come as fast as the link carries them, and slower while the
+ * page stays still: framePace) and the tab's state. Hidden, it sends nothing, and answers to reads
+ * still on their way are dropped. A failed read keeps the last frame and reports why. `hurry()`
+ * reads at once, for the person's input.
  */
-export function useBrowserStream(client: BrowserStreamClient, panelId: string, on: boolean): BrowserStream & { wake(): void } {
+export function useBrowserStream(client: BrowserStreamClient, panelId: string, on: boolean): BrowserStream & { wake(): void; hurry(): void } {
   const [stream, setStream] = useState<BrowserStream>({});
   const wakeRef = useRef<() => void>(() => undefined);
+  const hurryRef = useRef<() => void>(() => undefined);
+  // Stable, so callbacks can hold it.
+  const [hurry] = useState(() => () => hurryRef.current());
+  const visible = usePageVisible();
+  const live = on && visible;
   useEffect(() => {
-    if (!on) return;
+    if (!live) return;
     let cancelled = false;
     let seq = 0;
     let version = 0;
     let page: string | undefined;
     let frameRetry = RETRY_MIN_MS;
     let viewRetry = RETRY_MIN_MS;
-    let timer: number | undefined;
-    const sleep = (ms: number) => new Promise<void>(resolve => { timer = window.setTimeout(resolve, ms); });
+    const pace = framePace();
+    const timers = new Set<number>();
+    const sleep = (ms: number) => new Promise<void>(resolve => {
+      const timer = window.setTimeout(() => { timers.delete(timer); resolve(); }, ms);
+      timers.add(timer);
+    });
     const older = (error: Error | undefined) => error !== undefined && isOlderHost(error);
     const frames = async () => {
       while (!cancelled) {
-        if (document.visibilityState !== 'visible') { await sleep(500); continue; }
         try {
           const answer = await within(client.frame(panelId, seq), FRAME_DEADLINE_MS);
           if (cancelled) return;
@@ -60,11 +72,13 @@ export function useBrowserStream(client: BrowserStreamClient, panelId: string, o
           if ('frame' in answer) {
             seq = answer.frame.seq;
             setStream(current => ({ ...current, frame: answer.frame, stop: undefined }));
+            await pace.next(true);
           } else if ('stopped' in answer) {
             setStream(current => ({ ...current, stop: answer.stopped }));
             await sleep(2_000);
           } else {
             setStream(current => (current.stop === 'unreachable' ? { ...current, stop: undefined } : current));
+            await pace.next(false);
           }
         } catch (cause) {
           if (cancelled) return;
@@ -82,6 +96,8 @@ export function useBrowserStream(client: BrowserStreamClient, panelId: string, o
           const view = await client.view(panelId, version);
           if (cancelled) return;
           viewRetry = RETRY_MIN_MS;
+          // The tab changed (the agent clicked or navigated): its page likely repaints, so read frames at once.
+          if (view.version !== version) pace.hurry();
           version = view.version;
           // A different page than before means the host loaded it again from its URL.
           const reloaded = page !== undefined && view.page !== undefined && view.page !== page;
@@ -99,14 +115,17 @@ export function useBrowserStream(client: BrowserStreamClient, panelId: string, o
         }
       }
     };
-    wakeRef.current = () => { seq = 0; setStream(current => ({ ...current, stop: undefined })); };
+    wakeRef.current = () => { seq = 0; setStream(current => ({ ...current, stop: undefined })); pace.hurry(); };
+    hurryRef.current = pace.hurry;
     void frames();
     void views();
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      pace.stop();
+      for (const timer of timers) window.clearTimeout(timer);
       wakeRef.current = () => undefined;
+      hurryRef.current = () => undefined;
     };
-  }, [client, panelId, on]);
-  return { ...stream, wake: () => wakeRef.current() };
+  }, [client, panelId, live]);
+  return { ...stream, wake: () => wakeRef.current(), hurry };
 }

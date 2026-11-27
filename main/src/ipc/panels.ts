@@ -9,12 +9,13 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { pathToFileURL } from 'url';
 import { rejectWithPaneErrorText, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
-import { getPaneWebviewContextMap } from '../core/runtime';
+import { getPaneEventSink, getPaneWebviewContextMap } from '../core/runtime';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { databaseService } from '../services/database';
-import { BrowserPanelState, CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel, decodeSessionPanelLayout, pausedMarkOf } from '../../../shared/types/panels';
+import { parseStoredPanelLayout } from '../services/sessionSnapshotSources';
+import { BrowserPanelState, CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel, pausedMarkOf } from '../../../shared/types/panels';
 import type { AppServices } from './types';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
@@ -565,17 +566,7 @@ export function panelsForClient(sessionId: string, options: PaneCommandValue | u
 
 /** The host's last-used tab layout of a Pane, or null when it has none or it is unreadable. */
 export function storedPanelLayout(sessionId: string): SessionPanelLayout | null {
-  const raw = databaseService.getSessionPanelLayout(sessionId);
-  if (!raw) return null;
-  try {
-    // The same decoder reads each desktop's own layout memory.
-    const parsed = decodeSessionPanelLayout(JSON.parse(raw));
-    if (parsed) return parsed;
-  } catch {
-    // Malformed JSON should never brick a session
-  }
-  console.warn('[IPC] Corrupt panel_layout JSON for session', sessionId);
-  return null;
+  return parseStoredPanelLayout(sessionId, databaseService.getSessionPanelLayout(sessionId));
 }
 
 export function registerPanelHandlers(
@@ -726,10 +717,17 @@ export function registerPanelHandlers(
     }
   });
 
+  // A phone showing the Pane follows the desktop's split (`panel:layoutChanged`); it reads the layout itself.
+  const saveLayout = (sessionId: string, layoutJson: string | null) => {
+    if (databaseService.getSessionPanelLayout(sessionId) === layoutJson) return;
+    databaseService.setSessionPanelLayout(sessionId, layoutJson);
+    getPaneEventSink().send('panel:layoutChanged', { sessionId });
+  };
+
   commandRegistry.register('panels:set-layout', async (sessionId: string, layout: SessionPanelLayout | null) => {
     try {
       if (layout === null) {
-        databaseService.setSessionPanelLayout(sessionId, null);
+        saveLayout(sessionId, null);
         return { success: true };
       }
 
@@ -764,7 +762,7 @@ export function registerPanelHandlers(
 
       const cleanedRoot = stripUnknownIds(layout.root);
       if (!cleanedRoot) {
-        databaseService.setSessionPanelLayout(sessionId, null);
+        saveLayout(sessionId, null);
         return { success: true };
       }
 
@@ -772,7 +770,7 @@ export function registerPanelHandlers(
         ...layout,
         root: cleanedRoot,
       };
-      databaseService.setSessionPanelLayout(sessionId, JSON.stringify(cleanedLayout));
+      saveLayout(sessionId, JSON.stringify(cleanedLayout));
       return { success: true };
     } catch (error) {
       console.error('[IPC] Failed to set panel layout:', error);

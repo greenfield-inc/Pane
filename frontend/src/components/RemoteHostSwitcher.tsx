@@ -3,6 +3,7 @@ import { Plus, Radio, Settings } from 'lucide-react';
 import { Dropdown, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { MachineMark, MachineMarkStack } from './machines/MachineMark';
 import { MachineMarkEditor } from './machines/MachineMarkEditor';
+import { ReadOnlyPill } from './machines/ReadOnlyPill';
 import { RoutePillView } from './settings/computers/RoutePills';
 import { useAddDeviceStore } from './addDevice/addDeviceStore';
 import { showActionError } from '../stores/errorStore';
@@ -163,7 +164,12 @@ export function RemoteHostSwitcher({
   const items: DropdownItem[] = machines.map((machine) => ({
     id: machine.id,
     // The name has line one to itself; the route in use and its latency lead line two.
-    label: <span className="block truncate font-medium">{machine.name}</span>,
+    label: (
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="truncate font-medium">{machine.name}</span>
+        {machine.readOnly && <ReadOnlyPill />}
+      </span>
+    ),
     description: <MachineLine machine={machine} latencies={latencies} />,
     // A disabled row dims its mark and name, so the mark stays solid inside it.
     leading: <MachineMark letters={machine.letters} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,

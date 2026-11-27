@@ -539,6 +539,10 @@ export function registerRemoteDaemonHandlers(
     try {
       const decodedClientId = decodeBoundary(clientId, boundary.nonEmptyString);
 
+      const record = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon).host.clients.find((client) => client.id === decodedClientId);
+      if (record?.access === 'read' && record.grantedBy !== undefined) {
+        throw new PaneError('ERR_READ_ONLY_SHARED_ELSEWHERE', `${record.label} is shared by ${record.linkedBy ?? 'another computer'}, so removing it here alone would not last. Nothing was removed.`, `Remove it on ${record.linkedBy ?? 'that computer'}.`);
+      }
       // A removed phone takes the computer links it minted, and what those computers vouched for, with it.
       const { remote: next, revoked } = revokeClients(getRemoteDaemonConfig(configManager.getConfig().remoteDaemon), { clients: (client) => client.id === decodedClientId });
 

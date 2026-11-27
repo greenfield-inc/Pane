@@ -1,9 +1,10 @@
 import type { IpcMain } from 'electron';
+import fs from 'fs/promises';
 import path from 'path';
 import { teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { teammateSecretRefusal } from '../../../shared/types/paneSecrets';
 import type { AppServices } from './types';
-import type { ChatAgent, ChatPanelState, ChatTabAnswer, ChatTabCreate } from '../../../shared/types/chatTab';
+import type { ChatAgent, ChatPanelState, ChatTabAnswer, ChatTabCreate, ChatTabFile } from '../../../shared/types/chatTab';
 import type { CreatePanelRequest, PanelOpener, ToolPanel } from '../../../shared/types/panels';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError } from '../../../shared/paneError';
@@ -29,6 +30,11 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { canReadClaudeTranscripts, findClaudeSessionTranscript } from '../services/claudeSessionTranscript';
 import type { TerminalPanelState } from '../../../shared/types/panels';
 import { paneScratchDirectory } from '../services/paneScratch';
+import { contains, existingFiles, fileSearch, leavesFolder } from '../services/fileSearch';
+import { decodeChatPanelState } from '../services/chatTabs/state';
+import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
+import { CommandRunner } from '../utils/commandRunner';
+import { PathResolver } from '../utils/pathResolver';
 
 /** Any agent id; the launcher refuses one this host cannot run, with the agents it can. */
 const chatReadOptionsSchema = boundary.object({ start: boundary.optional(boundary.boolean) });
@@ -72,7 +78,7 @@ const agentFarmProfiles = new AgentFarmProfiles({
   checkCli: (agent, context) => checkAgentCli(agent, printedCli(agent, context.env, findExecutableInPath), context),
 });
 
-const CHAT_TAB_CHANNELS = ['create', 'switch', 'preview-session-switch', 'switch-session', 'get', 'history', 'send', 'receipt', 'unqueue', 'send-now', 'edit-queued', 'clear', 'stop-task', 'configure', 'cancel', 'permission', 'answer', 'restart', 'conversations', 'resume', 'dismiss-banner', 'sign-in', 'keys', 'set-key', 'agents', 'registry', 'install-agent', 'remove-agent'] as const;
+const CHAT_TAB_CHANNELS = ['create', 'switch', 'preview-session-switch', 'switch-session', 'get', 'history', 'send', 'receipt', 'unqueue', 'send-now', 'edit-queued', 'clear', 'stop-task', 'configure', 'cancel', 'permission', 'answer', 'restart', 'conversations', 'resume', 'dismiss-banner', 'files', 'sign-in', 'keys', 'set-key', 'agents', 'registry', 'install-agent', 'remove-agent'] as const;
 
 function chatTabsEnabled(): boolean { return getRuntimeConfigManager().getConfig().chatTabsEnabled === true; }
 
@@ -130,6 +136,7 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
   registry.register('chat-tab:conversations', (id: string) => manager.conversations(panelId(id)));
   registry.register('chat-tab:resume', async (id: string, sessionId: string) => { await manager.resume(panelId(id), decodeBoundary(sessionId, boundary.nonEmptyString)); });
   registry.register('chat-tab:dismiss-banner', (id: string) => { manager.dismissBanner(panelId(id)); return undefined; });
+  registry.register('chat-tab:files', (id: string, query: string) => chatTabFiles(services, panelId(id), decodeBoundary(query, boundary.string)));
   registry.register('chat-tab:sign-in', async (id: string) => {
     // Sign-in sets the owner's own agent account on this machine.
     const teammate = teammatePaneCaller();
@@ -198,6 +205,53 @@ function signInCommand(agent: ChatAgent, advertised: { args: string[] } | undefi
   if (!config?.chat) throw new PaneError('CHAT_SIGN_IN_UNKNOWN', `Pane does not know how to sign ${agentLabel(agent)} in.`, 'Sign in with the agent\'s own instructions in a terminal tab, then press Retry.');
   const args = advertised && plain(advertised.args) ? advertised.args : config.signIn;
   return [config.executables[0], ...args].join(' ');
+}
+
+const CHAT_FILES_LIMIT = 80;
+/** How long an opening @ menu waits for the Pane's changes before listing without them. */
+const CHANGED_FILES_WAIT_MS = 1_000;
+
+/** Runs git with its file-watcher hook off. */
+class QuietGitRunner extends CommandRunner {
+  override execFile(...[file, args, cwd, options]: Parameters<CommandRunner['execFile']>): ReturnType<CommandRunner['execFile']> {
+    return super.execFile(file, file === 'git' ? ['-c', 'core.fsmonitor=false', ...args] : args, cwd, options);
+  }
+}
+
+/**
+ * The @ menu's files (chat-tab:files): names under the tab's own folder, which the host finds from the
+ * tab. Nothing when that folder is outside the tab's Pane (a Session's chat is in the Session's own Pane).
+ */
+async function chatTabFiles(services: AppServices, id: string, query: string): Promise<ChatTabFile[]> {
+  const panel = panelManager.getPanel(id);
+  const state = panel?.type === 'chat' ? decodeChatPanelState(panel.state.customState) : undefined;
+  if (!panel || !state) throw new PaneError('CHAT_PANEL_MISSING', 'This chat tab no longer exists, so no files were listed.', 'Open another chat tab.');
+  if (state.autopilotRunId) throw new PaneError('CHAT_FILES_UNAVAILABLE', 'Autopilot\'s chat does not list files. Nothing was listed.', 'Name the file in your message instead.');
+  const session = services.sessionManager.getSession(panel.sessionId);
+  const worktree = session?.worktreePath;
+  if (!session || !worktree || leavesFolder(query)) return [];
+  const context = services.sessionManager.getProjectContext(panel.sessionId);
+  const walk = isOrchestrationInternalSessionId(panel.sessionId);
+  // Only a Session's own Pane has no project.
+  if (!context && !walk) return [];
+  const pathResolver = context?.pathResolver ?? new PathResolver({ path: worktree });
+  const roots = await Promise.all([worktree, state.cwd].map(folder => fs.realpath(pathResolver.toFileSystem(folder)))).catch(() => undefined);
+  if (!roots || !contains(roots[0], roots[1])) return [];
+  const commandRunner = new QuietGitRunner(context?.project ?? { path: worktree });
+  const found = fileSearch.search({ storedPath: state.cwd, pathResolver, commandRunner, walk }, query, CHAT_FILES_LIMIT);
+  if (query.trim() || walk || !context) return found;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const changes = services.gitDiffManager.getDiffManifest(worktree, { kind: 'session' }, commandRunner, {
+    comparisonBase: () => services.worktreeManager.getSessionComparisonBranch(session, context),
+  }).then(manifest => manifest.files.flatMap(file => file.kind === 'deleted' ? [] : [file.path]), () => []);
+  const late = new Promise<string[]>(resolve => { timer = setTimeout(() => resolve([]), CHANGED_FILES_WAIT_MS); });
+  const [files, changed] = await Promise.all([found, Promise.race([changes, late]).finally(() => clearTimeout(timer))]);
+  // The Pane's changes are under its worktree; the tab may run in a folder inside it.
+  const under = path.relative(roots[0], roots[1]).split(path.sep).filter(Boolean).join('/');
+  const mine = changed.flatMap(file => !under ? [file] : file.startsWith(`${under}/`) ? [file.slice(under.length + 1)] : []);
+  const first = (await existingFiles(roots[1], mine.sort((a, b) => a.localeCompare(b)), CHAT_FILES_LIMIT)).map(file => ({ ...file, changed: true as const }));
+  const shown = new Set(first.map(file => file.path));
+  return [...first, ...files.filter(file => !shown.has(file.path))].slice(0, CHAT_FILES_LIMIT);
 }
 
 /** `openedBy` is set only by runpane (`--source`), never from a renderer's request. */

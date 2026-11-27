@@ -1,13 +1,20 @@
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { AppState, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { use, useEffect, useRef, useState } from 'react';
+import { AppState, Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
+import { InColumn, screenJustClosed, useWideLayout } from '@/features/layout/wideLayout';
 import { IconButton } from '@/features/panes/PaneKit';
 import { useTheme } from '@/theme';
 import { Icon } from '@/ui';
+import { Focusable } from '@/features/controller/Focusable';
+import { ListeningBar } from '@/features/controller/ListeningBar';
+import { useControllerActions } from '@/features/controller/useControllerActions';
+import { useVoiceDictation } from '@/features/voice/useVoiceDictation';
+import { VoiceAudio } from '@/features/voice/VoiceAudio';
+import { insertAtSelection } from '@/features/composer/insertText';
 
 const CONTROL = 44;
 const PADDING_TOP = 10;
@@ -18,21 +25,63 @@ export function bottomBarHeight(insetBottom: number): number {
 }
 
 /**
- * Home's bottom bar, in thumb reach: Search panes, and + for a new Session or Pane. It rides up with
- * the keyboard, and fades the list out under it.
+ * Home's bottom bar, in thumb reach: Search panes, and + for a new Session or Pane
+ * (none when no machine takes one, `canCreate`). It rides up with
+ * the keyboard, and fades the list out under it. Docked beside an open screen, it rises only for
+ * its own keyboard, not one the screen beside it opens.
  */
-export function HomeBottomBar({ query, onQuery }: { query: string; onQuery: (query: string) => void }) {
+export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; onQuery: (query: string) => void; canCreate: boolean }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const keyboard = useAnimatedKeyboard();
   const returns = useReturnsToForeground();
+  const inColumn = use(InColumn);
+  const [typing, setTyping] = useState(false);
+  const setSearching = useWideLayout(state => state.setSearching);
+  const follows = !inColumn || typing;
+  // A fold that moves Home out of the column takes its keyboard along.
+  useEffect(() => () => {
+    if (inColumn) setSearching(false);
+  }, [inColumn, setSearching]);
+  // Search on the rail expands Home with the keyboard up.
+  const input = useRef<TextInput>(null);
+  const asked = useRef(false);
+  const searchRequested = useWideLayout(state => state.searchRequested);
+  useEffect(() => {
+    if (searchRequested && useWideLayout.getState().takeSearchRequest()) {
+      asked.current = true;
+      input.current?.focus();
+    }
+  }, [inColumn, searchRequested]);
+  const onFocus = () => {
+    const wanted = asked.current;
+    asked.current = false;
+    // Android's handoff from a screen that just closed beside the column: give the focus back.
+    if (inColumn && !wanted && screenJustClosed()) return input.current?.blur();
+    onFocusChange(true);
+  };
+  // While searching, a controller's R2 dictates the query.
+  const voice = useVoiceDictation(words => onQuery(insertAtSelection(query, null, words).text.trimEnd()));
+  useControllerActions('search', {
+    'dictate-hold': event => {
+      if (!voice.available) return false;
+      if (event.phase === 'start') voice.hold();
+      else voice.release();
+    },
+  }, typing);
+  const onFocusChange = (focused: boolean) => {
+    setTyping(focused);
+    if (inColumn) setSearching(focused);
+  };
   // The keyboard closes while the app is in the background, and that last update never reaches
   // the screen; reading it again on each return puts the bar back on the bottom edge. Listing
   // deps replaces Reanimated's own, so the inset is listed too (a rotation changes it).
-  const lift = useAnimatedStyle(() => ({ transform: [{ translateY: -Math.max(0, keyboard.height.value - insets.bottom) }] }), [returns, insets.bottom]);
+  const lift = useAnimatedStyle(() => ({ transform: [{ translateY: follows ? -Math.max(0, keyboard.height.value - insets.bottom) : 0 }] }), [returns, insets.bottom, follows]);
   return (
     <Animated.View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 12) }, lift]}>
-      <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+      {/* Keyed by its size: an Svg keeps drawing at its first one when a foldable opens or closes. */}
+      <Svg key={`${width}:${insets.bottom}`} style={StyleSheet.absoluteFill} pointerEvents="none">
         <Defs>
           <LinearGradient id="home-bar-fade" x1="0" y1="0" x2="0" y2="1">
             <Stop offset="0" stopColor={theme.colors.background} stopOpacity={0} />
@@ -41,9 +90,12 @@ export function HomeBottomBar({ query, onQuery }: { query: string; onQuery: (que
         </Defs>
         <Rect width="100%" height="100%" fill="url(#home-bar-fade)" />
       </Svg>
+      {voice.audio ? <VoiceAudio {...voice.audio} /> : null}
+      {voice.phase === 'idle' ? null : <View style={styles.listening}><ListeningBar phase={voice.phase} preview={voice.preview} /></View>}
       <View style={[styles.search, { backgroundColor: theme.colors.surfaceRaised }]}>
         <Icon ios="magnifyingglass" android="search" size={16} />
         <TextInput
+          ref={input}
           testID="panes-search"
           accessibilityLabel="Search panes"
           placeholder="Search panes"
@@ -54,6 +106,9 @@ export function HomeBottomBar({ query, onQuery }: { query: string; onQuery: (que
           returnKeyType="search"
           value={query}
           onChangeText={onQuery}
+          onPressIn={() => { asked.current = true; }}
+          onFocus={onFocus}
+          onBlur={() => onFocusChange(false)}
           style={[theme.typography.body, styles.input, { color: theme.colors.text }]}
         />
         {query ? (
@@ -62,7 +117,7 @@ export function HomeBottomBar({ query, onQuery }: { query: string; onQuery: (que
           </IconButton>
         ) : null}
       </View>
-      <Pressable
+      {canCreate ? <Focusable onActivate={() => router.push('/new')}><Pressable
         testID="home-new"
         accessibilityRole="button"
         accessibilityLabel="New"
@@ -71,7 +126,7 @@ export function HomeBottomBar({ query, onQuery }: { query: string; onQuery: (que
         style={({ pressed }) => [styles.new, { backgroundColor: theme.colors.accent, opacity: pressed ? 0.85 : 1 }]}
       >
         <Icon ios="plus" android="add" size={22} color={theme.colors.onAccent} />
-      </Pressable>
+      </Pressable></Focusable> : null}
     </Animated.View>
   );
 }
@@ -94,6 +149,7 @@ function useReturnsToForeground(): number {
 }
 
 const styles = StyleSheet.create({
+  listening: { position: 'absolute', left: 16, right: 16, bottom: '100%' },
   bar: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingTop: PADDING_TOP },
   search: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, height: CONTROL, borderRadius: CONTROL / 2, paddingLeft: 16, paddingRight: 7 },
   input: { flex: 1, paddingVertical: 0 },

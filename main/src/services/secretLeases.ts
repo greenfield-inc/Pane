@@ -10,14 +10,15 @@ import {
   type SecretLeaseEvent,
   type SecretLeaseSummary,
 } from '../../../shared/types/paneSecrets';
+import { decodeLogin, encodeLogin, secretIsLogin, type StoredLogin } from './paneLogins';
 import type { SecretValueBackend } from './paneSecrets';
 
 /** One lease as this machine keeps it. Never holds a value: values live in the value backend or in memory. */
 export interface SecretLeaseRecord {
   id: string;
   project: string;
-  /** Each leased name and the 1Password reference its value was read from. */
-  secrets: Array<{ name: string; reference: string }>;
+  /** Each leased name and the 1Password reference its value was read from; `login` when its sites are stored with the value. */
+  secrets: Array<{ name: string; reference: string; login?: true }>;
   /** ISO times on this machine's clock. A pushed lease's expiry is computed here from the time remaining. */
   grantedAt: string;
   expiresAt: string;
@@ -39,7 +40,8 @@ export interface SecretLeaseGrant {
   /** Kept when a desktop pushes or renews a lease, so every machine names it the same. */
   id?: string;
   project: string;
-  secrets: Array<{ name: string; reference: string; value: string }>;
+  /** `sites` makes the leased value a login, filled only there and never in a command's environment. */
+  secrets: Array<{ name: string; reference: string; value: string; sites?: string[] }>;
   /** Time remaining, never an absolute time, so a machine's clock cannot extend it. */
   expiresInMs: number;
   requestedBy: string;
@@ -51,7 +53,7 @@ export interface SecretLeaseGrant {
 const recordSchema = boundary.object({
   id: boundary.nonEmptyString,
   project: boundary.string,
-  secrets: boundary.array(boundary.object({ name: boundary.string, reference: boundary.string })),
+  secrets: boundary.array(boundary.object({ name: boundary.string, reference: boundary.string, login: boundary.optional(boundary.literal(true)) })),
   grantedAt: boundary.string,
   expiresAt: boundary.string,
   requestedBy: boundary.string,
@@ -280,7 +282,7 @@ export class SecretLeaseStore {
       const lease: SecretLeaseRecord = {
         id: grant.id ?? randomBytes(8).toString('hex'),
         project: grant.project,
-        secrets: grant.secrets.map(({ name, reference }) => ({ name, reference })),
+        secrets: grant.secrets.map(({ name, reference, sites }) => (sites ? { name, reference, login: true as const } : { name, reference })),
         grantedAt: previous?.grantedAt ?? new Date(now).toISOString(),
         // Never longer than the longest length Settings offers, whoever asks.
         expiresAt: new Date(now + Math.min(Math.max(grant.expiresInMs, 0), SECRET_LEASE_MAX_MS)).toISOString(),
@@ -298,8 +300,9 @@ export class SecretLeaseStore {
       try {
         for (const secret of grant.secrets) {
           const key = valueKey(lease.id, secret.name);
-          if (lease.memoryOnly) this.memory.set(key, secret.value);
-          else await this.options.values.write(key, secret.value);
+          const stored = secret.sites ? encodeLogin({ sites: secret.sites, value: secret.value }) : secret.value;
+          if (lease.memoryOnly) this.memory.set(key, stored);
+          else await this.options.values.write(key, stored);
         }
       } catch (error) {
         await this.remove(lease, 'ended');
@@ -353,8 +356,20 @@ export class SecretLeaseStore {
       .sort((a, b) => Date.parse(b.expiresAt) - Date.parse(a.expiresAt))[0] ?? null;
   }
 
-  /** The leased value of `project/name`. Throws SECRET_LEASE_ENDED when no live lease covers it. */
+  /** The leased value of `project/name`. Throws SECRET_LEASE_ENDED when no live lease covers it, SECRET_IS_LOGIN when it is a login. */
   async read(project: string, name: string): Promise<string> {
+    const { login, text } = await this.readStored(project, name);
+    if (login) throw secretIsLogin(project, name);
+    return text;
+  }
+
+  /** The leased login, or null when the leased value is not one. Throws like {@link read} without a live lease. */
+  async readLogin(project: string, name: string): Promise<StoredLogin | null> {
+    const { login, text } = await this.readStored(project, name);
+    return login ? decodeLogin(text) : null;
+  }
+
+  private async readStored(project: string, name: string): Promise<{ login: boolean; text: string }> {
     await this.loaded;
     const lease = this.covering(project, name);
     if (!lease) {
@@ -363,13 +378,14 @@ export class SecretLeaseStore {
       throw secretLeaseEnded(project, name, this.endedAt.get(paneSecretKey(project, name)) ?? null);
     }
     const key = valueKey(lease.id, name);
+    const login = lease.secrets.some(secret => secret.name === name && secret.login === true);
     if (lease.memoryOnly) {
-      const value = this.memory.get(key);
-      if (value === undefined) throw secretLeaseEnded(project, name, null);
-      return value;
+      const text = this.memory.get(key);
+      if (text === undefined) throw secretLeaseEnded(project, name, null);
+      return { login, text };
     }
     try {
-      return await this.options.values.read(key);
+      return { login, text: await this.options.values.read(key) };
     } catch (error) {
       throw new PaneError(
         'SECRET_UNREADABLE',

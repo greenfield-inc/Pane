@@ -5,7 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { boundary, decodeBoundary, type BoundarySchema } from './boundaryDecoder';
 import type { ParsedArgs, RunpaneAgent } from './commands';
-import { invokeDaemon, invokeRemoteDaemon, resolvePaneDirectory, type RemoteDaemonTarget } from './daemonClient';
+import { invokeDaemon, invokeRemoteDaemon, PaneDaemonClientError, READ_ONLY_ACCESS_CODE, resolvePaneDirectory, type RemoteDaemonTarget } from './daemonClient';
 import { RunpaneError } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { paneListResultSchema, repoListResultSchema } from './localControl';
@@ -472,8 +472,9 @@ export async function runModels(parsed: ParsedArgs): Promise<number> {
     try {
       const places = await placesOn(machine, parsed.paneDir);
       return (await Promise.all(places.map(place => listAt(place, agents)))).flat();
-    } catch {
-      return [{ machine: machine ?? thisMachineName(), environment: 'native', note: 'unreachable' }];
+    } catch (error) {
+      const readOnly = error instanceof PaneDaemonClientError && error.code === READ_ONLY_ACCESS_CODE;
+      return [{ machine: machine ?? thisMachineName(), environment: 'native', note: readOnly ? 'read only' : 'unreachable' }];
     }
   }));
   const search = parsed.query?.toLowerCase();

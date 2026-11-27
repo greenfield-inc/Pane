@@ -1530,6 +1530,12 @@
     ],
     [
       "notify",
+      "--close",
+      "Q-20",
+      "--json"
+    ],
+    [
+      "notify",
       "--took=n-1",
       "question",
       "--status",

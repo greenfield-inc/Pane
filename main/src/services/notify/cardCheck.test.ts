@@ -39,21 +39,16 @@ describe('checking an approval card', () => {
     ]);
   });
 
-  it('warns on a long subtitle, no recommendation, too many options, bare options and unlinked paths', () => {
+  it('warns on a long subtitle, no recommendation, too many options and bare options', () => {
     const many = ['A', 'B', 'C', 'D', 'E'].map(label => ({ label }));
     const result = checkCard({ title: 'Which build?', context: `${'Long. '.repeat(45)}See /Users/me/repo/plan.html.`, choices: many });
+    // Paths the card names are admission's (cardAdmit.ts): attached, refused or warned about there.
     expect(result.warnings.map(warning => warning.split(' ').slice(0, 3).join(' '))).toEqual([
       'The subtitle is',
       'No option is',
       'A question has',
       'Some options have',
-      'These paths aren’t',
     ]);
-  });
-
-  it('does not warn about a path that is linked', () => {
-    const result = checkCard({ title: 'Approve the plan?', context: 'Cover sheet r2 at /b/cover-sheet.html is ready.', choices, links: [{ label: 'Cover sheet', path: '/b/cover-sheet.html' }] });
-    expect(result.warnings).toEqual([]);
   });
 
   it('throws the refusal as a PaneError with a code and next step', () => {

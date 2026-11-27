@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["PaneControllerModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.panecontroller.PaneControllerModule"]
+  }
+}

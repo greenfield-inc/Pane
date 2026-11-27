@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 import type { NotifyItem, NotifySharedState } from '@shared/types/notify';
 import type { OrchestrationSessionRecord } from '@shared/types/orchestrationSession';
 
-import { buildAllMachinesList, feedsAnswered, sinceLabel, type MachineFeed } from './allMachinesList';
+import { sessionKey } from '@/features/approvals/approvals';
+import { sessionWaiting } from '@/features/home/statusBoard';
+
+import { buildAllMachinesList, feedsAnswered, recentlyOpened, sinceLabel, type MachineFeed } from './allMachinesList';
 
 const notify = (items: Array<Pick<NotifyItem, 'id' | 'createdAt' | 'title'> & { paneId?: string }>): NotifySharedState => ({
   machine: 'host', epoch: 'e1', revision: 1, enabled: true, queue: [], hidden: [],
@@ -68,7 +71,7 @@ describe('buildAllMachinesList', () => {
   it('describes a Pane with its repository and Session, and marks it blocked while it waits on you', () => {
     const { recent } = buildAllMachinesList([studio, build], '');
     const fromStudio = recent.find(row => row.key === 'profile-studio:pane:pane-1');
-    expect(fromStudio?.type === 'pane' && fromStudio.pane).toMatchObject({ repository: 'acme-web', session: 'Spring sale launch', status: 'blocked' });
+    expect(fromStudio?.type === 'pane' && fromStudio.pane).toMatchObject({ repository: 'acme-web', session: { name: 'Spring sale launch' }, status: 'blocked' });
     const fromBuild = recent.find(row => row.key === 'profile-build:pane:pane-1');
     expect(fromBuild?.type === 'pane' && fromBuild.pane).toMatchObject({ repository: 'infra', status: 'blocked' });
   });
@@ -98,13 +101,12 @@ describe('buildAllMachinesList', () => {
       inSession('held', 30, { state: 'sent' }),
     ] };
     const buildNotify: NotifySharedState = { ...studio.snapshot!.notify!, items: [inSession('b', 40)] };
-    const { recent } = buildAllMachinesList([
+    const counts = sessionWaiting(buildAllMachinesList([
       { ...studio, snapshot: { ...studio.snapshot!, notify: studioNotify } },
       { ...build, snapshot: { ...build.snapshot!, notify: buildNotify, sessions: [session('s-1', 'Spring sale launch', [], '2026-10-30T09:10:00Z')] } },
-    ], '');
-    const waitingOf = (key: string) => recent.flatMap(row => (row.key === key && row.type === 'session' ? [row.waiting] : []));
-    expect(waitingOf('profile-studio:session:s-1')).toEqual([2]);
-    expect(waitingOf('profile-build:session:s-1')).toEqual([1]);
+    ], ''));
+    expect(counts.get(sessionKey('profile-studio', 's-1'))).toBe(2);
+    expect(counts.get(sessionKey('profile-build', 's-1'))).toBe(1);
   });
 
   it('lists a machine that has not answered yet as nothing', () => {
@@ -126,8 +128,6 @@ describe('buildAllMachinesList', () => {
     expect(list.offline).toEqual([{ key: 'profile-build', name: 'build-box', waiting: 2 }]);
     expect(list.waiting.map(row => row.machineKey)).toEqual(['profile-studio']);
     expect(list.staleQuestions).toEqual([]);
-    const row = list.recent.find(candidate => candidate.key === 'profile-build:session:s-1');
-    expect(row?.type === 'session' && row.waiting).toBe(0);
   });
 
   it('shows no row for an offline machine with nothing waiting', () => {
@@ -142,8 +142,6 @@ describe('buildAllMachinesList', () => {
     expect(list.staleQuestions.map(row => row.key)).toEqual(['profile-studio:question:s']);
     const pane = list.recent.find(row => row.key === 'profile-studio:pane:pane-1');
     expect(pane?.type === 'pane' && pane.pane.status).not.toBe('blocked');
-    const sessionRow = list.recent.find(row => row.key === 'profile-studio:session:s-1');
-    expect(sessionRow?.type === 'session' && sessionRow.waiting).toBe(0);
   });
 
   it('lists the last 24 hours\' answered and closed items from online machines, newest first', () => {
@@ -155,6 +153,94 @@ describe('buildAllMachinesList', () => {
       { key: 'gone', name: 'gone-box', offlineSince: 1, snapshot: { projects: [], notify: { ...studio.snapshot!.notify!, items: [done('three', now)] } } },
     ], '', now);
     expect(list.answered.map(row => row.key)).toEqual(['profile-build:question:two', 'profile-studio:question:one']);
+  });
+});
+
+describe('recentlyOpened', () => {
+  const at = (iso: string) => Date.parse(iso);
+
+  it('lists what was last opened on any machine, newest first, at most ten, from hosts that report it', () => {
+    const opened: MachineFeed = {
+      key: 'profile-studio',
+      name: 'studio-mac',
+      snapshot: {
+        // Hosts send a Pane's last view as SQLite's UTC time, a Session's as ISO.
+        projects: [{ id: 1, name: 'acme-web', sessions: [
+          { id: 'pane-1', name: 'fix-tests', lastViewedAt: '2026-10-30 09:40:00' },
+          { id: 'pane-2', name: 'never-opened' },
+          { id: 'pane-3', name: 'hidden-chat', lastViewedAt: '2026-10-30 09:59:00', isHidden: true },
+          ...Array.from({ length: 10 }, (_, index) => ({ id: `old-${index}`, name: `old-${index}`, lastViewedAt: `2026-10-29 0${index}:00:00` })),
+        ] }],
+        sessions: [{ ...session('s-1', 'Spring sale launch', [], '2026-10-30T08:00:00Z'), openedAt: '2026-10-30T09:50:00.000Z' }],
+      },
+    };
+    const other: MachineFeed = {
+      key: 'profile-build',
+      name: 'build-box',
+      snapshot: {
+        projects: [{ id: 1, name: 'infra', sessions: [{ id: 'pane-1', name: 'deploy', lastViewedAt: '2026-10-30 09:45:00' }] }],
+        sessions: [{ ...session('s-9', 'Infra', [], '2026-10-01T08:00:00Z'), openedAt: '2026-10-01T08:00:00.000Z' }],
+      },
+    };
+    const rows = recentlyOpened(buildAllMachinesList([opened, other], '').recent);
+    expect(rows.map(row => row.key)).toEqual([
+      'profile-studio:session:s-1',
+      'profile-build:pane:pane-1',
+      'profile-studio:pane:pane-1',
+      ...[9, 8, 7, 6, 5, 4, 3].map(index => `profile-studio:pane:old-${index}`),
+    ]);
+    expect(rows[0].openedAt).toBe(at('2026-10-30T09:50:00Z'));
+    expect(rows[2].openedAt).toBe(at('2026-10-30T09:40:00Z'));
+  });
+
+  it('counts a Session as opened when a Pane in it was, on the desktop or this phone', () => {
+    const machine: MachineFeed = {
+      key: 'profile-studio',
+      name: 'studio-mac',
+      snapshot: {
+        projects: [{ id: 1, name: 'acme-web', sessions: [
+          { id: 'worker', name: 'worker', lastViewedAt: '2026-10-30 09:30:00' },
+          { id: 'other', name: 'other', lastViewedAt: '2026-10-30 09:20:00' },
+        ] }],
+        sessions: [
+          { ...session('s-1', 'App and fixes', ['worker', 'other'], '2026-10-30T08:00:00Z'), openedAt: '2026-10-30T08:00:00.000Z' },
+          { ...session('s-2', 'Cloud', [], '2026-10-30T08:00:00Z'), openedAt: '2026-10-30T09:00:00.000Z' },
+        ],
+      },
+    };
+    const list = buildAllMachinesList([machine], '').recent;
+    expect(recentlyOpened(list).map(row => [row.key, row.openedAt])).toEqual([
+      ['profile-studio:session:s-1', at('2026-10-30T09:30:00Z')],
+      ['profile-studio:pane:worker', at('2026-10-30T09:30:00Z')],
+      ['profile-studio:pane:other', at('2026-10-30T09:20:00Z')],
+      ['profile-studio:session:s-2', at('2026-10-30T09:00:00Z')],
+    ]);
+    // Opened since on this phone, before the host's list caught up.
+    expect(recentlyOpened(list, { 'profile-studio': { other: at('2026-10-30T09:55:00Z') } }).slice(0, 2).map(row => row.key))
+      .toEqual(['profile-studio:session:s-1', 'profile-studio:pane:other']);
+  });
+
+  it('lists only what this phone opened on a host that does not report Sessions\' openedAt', () => {
+    // Such a host never marked a Session's Panes viewed, so its Panes' last views are days old.
+    const olderHost: MachineFeed = {
+      key: 'profile-studio',
+      name: 'studio-mac',
+      snapshot: {
+        projects: [{ id: 1, name: 'acme-web', sessions: [
+          { id: 'stale', name: 'stale', lastViewedAt: '2026-10-21 09:00:00' },
+          { id: 'worker', name: 'worker', lastViewedAt: '2026-10-21 08:00:00' },
+          { id: 'chat', name: 'chat', isHidden: true },
+        ] }],
+        sessions: [{ ...session('s-1', 'App and fixes', ['worker'], '2026-10-30T08:00:00Z'), internalSessionId: 'chat' }],
+      },
+    };
+    const list = buildAllMachinesList([olderHost], '').recent;
+    expect(recentlyOpened(list)).toEqual([]);
+    expect(recentlyOpened(list, { 'profile-studio': { chat: at('2026-10-30T09:50:00Z'), worker: at('2026-10-30T09:10:00Z') } })
+      .map(row => [row.key, row.openedAt])).toEqual([
+      ['profile-studio:session:s-1', at('2026-10-30T09:50:00Z')],
+      ['profile-studio:pane:worker', at('2026-10-30T09:10:00Z')],
+    ]);
   });
 });
 
