@@ -637,3 +637,39 @@ describe('an arrow stops the return\'s own switch (review 1781 round 4)', () => 
     expect(switchMachine).not.toHaveBeenCalled();
   });
 });
+
+describe('a switch that fails while the person types keeps every key (QA 1781, M-280)', () => {
+  it('keys landing on the page after the failure go into the kept text, and Enter retries from there', async () => {
+    const switchMachine = vi.fn(async (): Promise<MachineSelectOutcome> => ({ ok: false, error: 'Build box answered 503.' }));
+    const { engage, state } = await setup(switchMachine);
+    const body = {};
+    vi.stubGlobal('document', { body, activeElement: body, querySelector: () => null });
+    engage.holdRemoteText(target, 'qa-');
+    engage.engageRemoteSession(target, 'type');
+    await vi.waitFor(() => expect(state().failure).toBeDefined());
+    // The kept bar takes focus as it draws.
+    expect(state().keptFocus).toBe(true);
+    const preventDefault = vi.fn();
+    const press = (key: string) => { for (const listener of keyListeners) listener({ key, metaKey: false, ctrlKey: false, altKey: false, isComposing: false, preventDefault }); };
+    for (const key of 'check') press(key);
+    expect(state().held[engage.engageKey(target)]?.text).toBe('qa-check');
+    press('Enter');
+    await vi.waitFor(() => expect(switchMachine).toHaveBeenCalledTimes(2));
+    expect(state().held[engage.engageKey(target)]).toMatchObject({ text: 'qa-check' });
+  });
+
+  it('a failure the person was not typing into takes no keys and no focus', async () => {
+    const switchMachine = vi.fn(async (): Promise<MachineSelectOutcome> => ({ ok: false, error: 'Build box answered 503.' }));
+    const { engage, state } = await setup(switchMachine);
+    const body = {};
+    vi.stubGlobal('document', { body, activeElement: body, querySelector: () => null });
+    engage.holdRemoteText(target, 'qa-');
+    engage.engageRemoteSession(target, 'click');
+    await vi.waitFor(() => expect(state().failure).toBeDefined());
+    expect(state().keptFocus).toBeFalsy();
+    const preventDefault = vi.fn();
+    for (const listener of keyListeners) listener({ key: 'x', metaKey: false, ctrlKey: false, altKey: false, isComposing: false, preventDefault });
+    expect(state().held[engage.engageKey(target)]?.text).toBe('qa-');
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
+});

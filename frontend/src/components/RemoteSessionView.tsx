@@ -303,13 +303,24 @@ export function EngageKept() {
     const timer = setTimeout(() => setNow(Date.now()), wait + 1);
     return () => clearTimeout(timer);
   }, [sendsBy]);
+  const takesFocus = useRemoteEngage(state => state.keptFocus === true);
   if (!kept) return null;
-  return <KeptBar kept={kept} machineName={name ?? 'the other machine'} now={now} />;
+  return <KeptBar kept={kept} machineName={name ?? 'the other machine'} now={now} takesFocus={takesFocus} />;
 }
 
 /** What `EngageKept` draws. */
-export function KeptBar({ kept, machineName, now = Date.now() }: { kept: NonNullable<ReturnType<typeof keptEngage>>; machineName: string; now?: number }) {
+export function KeptBar({ kept, machineName, now = Date.now(), takesFocus = false }: { kept: NonNullable<ReturnType<typeof keptEngage>>; machineName: string; now?: number; takesFocus?: boolean }) {
   const target = { machineId: kept.machineId, sessionId: kept.sessionId };
+  const box = useRef<HTMLTextAreaElement>(null);
+  // The switch failed while the person typed: the next key goes here, not to the page (M-280).
+  useLayoutEffect(() => {
+    const input = box.current;
+    if (!takesFocus || !input) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected && !active.closest('[data-testid="engage-hold"], [data-remote-composer]')) return;
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(input.value.length, input.value.length);
+  }, [takesFocus]);
   let sends = '';
   if (kept.sendsBy !== undefined) sends = now <= kept.sendsBy ? ' It sends then.' : ' It goes in unsent: its 60 s to send have passed.';
   return (
@@ -323,6 +334,7 @@ export function KeptBar({ kept, machineName, now = Date.now() }: { kept: NonNull
         </button>
       </div>
       <textarea
+        ref={box}
         className="chat-input w-full"
         rows={2}
         value={kept.text}

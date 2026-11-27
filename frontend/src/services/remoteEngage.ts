@@ -73,6 +73,8 @@ interface RemoteEngageState {
    * the connection says connected.
    */
   settling?: boolean;
+  /** The kept bar takes focus as it draws: its switch failed while the person was typing (M-280). */
+  keptFocus?: boolean;
 }
 
 export const useRemoteEngage = create<RemoteEngageState>(() => ({ held: {} }));
@@ -110,14 +112,31 @@ const undelivered = new Map<string, EngageTarget>();
 /** What the key handlers read of a keydown. */
 type KeyPress = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'isComposing' | 'preventDefault'>;
 
+/**
+ * The switch failed while the person was typing: until they move focus themselves, keys that land
+ * on the page (the checklist took the main area) go into the kept text, and Enter retries (M-280).
+ */
+let keysToKept = false;
+
+function keptBox(): HTMLTextAreaElement | null {
+  return document.querySelector<HTMLTextAreaElement>('[data-testid="engage-kept"] textarea');
+}
+
 function onStrayKey(event: KeyPress): void {
-  const engaging = useRemoteEngage.getState().engaging;
-  if (!engaging || event.key.length !== 1 || event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+  const state = useRemoteEngage.getState();
+  const kept = !state.engaging && keysToKept ? keptEngage(state) : undefined;
+  const engaging = state.engaging ?? (kept ? { machineId: kept.machineId, sessionId: kept.sessionId } : undefined);
+  if (!engaging || event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+  if (event.key.length !== 1 && !(kept && event.key === 'Enter')) return;
   const active = document.activeElement;
   if (active && active !== document.body && active.isConnected) return;
   event.preventDefault();
+  if (kept && event.key === 'Enter') {
+    engageRemoteSession(engaging, 'enter', { send: true });
+    return;
+  }
   holdRemoteText(engaging, (useRemoteEngage.getState().held[engageKey(engaging)]?.text ?? '') + event.key);
-  const box = heldBox();
+  const box = kept ? keptBox() : heldBox();
   if (box) {
     box.focus({ preventScroll: true });
     box.setSelectionRange(box.value.length + 1, box.value.length + 1);
@@ -141,6 +160,8 @@ function heldBox(): HTMLTextAreaElement | null {
  * the person's own move and keeps it. An element that takes focus back a third time keeps it.
  */
 function onFocusIn(event: FocusEvent): void {
+  // Focus moved somewhere of the person's choosing: keys there are theirs again.
+  if (keysToKept && event.target !== keptBox() && event.target !== document.body) keysToKept = false;
   const engaging = useRemoteEngage.getState().engaging;
   const box = heldBox();
   if (!engaging || !box) return;
@@ -311,11 +332,12 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
   const ticket = ++engageTicket;
   clearTimeout(liveWait);
   listen();
+  keysToKept = false;
   shownMeanwhile.clear();
   const panelId = mirroredChatPanel(target);
   personMovedFocus = false;
   boxRestores = 0;
-  useRemoteEngage.setState({ engaging: { ...target, cause, panelId, switched: false }, failure: undefined });
+  useRemoteEngage.setState({ engaging: { ...target, cause, panelId, switched: false }, failure: undefined, keptFocus: false });
   switchMark('engage:start', { machineId: target.machineId, sessionId: target.sessionId, status: cause });
   // A dial that hangs (a dead link) says so: nothing is sent until the machine answers (QA 1781 F-1).
   liveWait = setTimeout(() => {
@@ -339,7 +361,9 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
       keepUnsent(target);
       const chat = panelId ?? mirroredChatPanel(target);
       if (chat) undelivered.set(chat, target);
-      useRemoteEngage.setState({ failure: { ...target, panelId: chat, message: outcome.reason } });
+      // Typing when it failed: the kept bar takes focus and the keys that follow (M-280).
+      keysToKept = cause === 'type' || cause === 'enter';
+      useRemoteEngage.setState({ failure: { ...target, panelId: chat, message: outcome.reason }, keptFocus: keysToKept });
     }
     switchMark('engage:end', { machineId: target.machineId, sessionId: target.sessionId, status: outcome.kind });
   });
@@ -404,6 +428,7 @@ export function keptEngage(state: RemoteEngageState): (EngageTarget & { text: st
 
 /** The person cleared the kept bar's text themselves. */
 export function dismissKept(): void {
+  keysToKept = false;
   const failure = useRemoteEngage.getState().failure;
   if (failure?.panelId) undelivered.delete(failure.panelId);
   useRemoteEngage.setState({ failure: undefined });
