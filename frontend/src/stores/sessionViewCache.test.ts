@@ -11,6 +11,11 @@ function deferred<T>() {
 const peek = vi.fn();
 const open = vi.fn();
 const getPaneLayout = vi.fn();
+const connectionListeners: Array<(state: { status: string }) => void> = [];
+const remoteDaemon = {
+  getConnectionState: vi.fn(async () => ({ success: true, data: { status: 'restoring' } })),
+  onConnectionStateChanged: vi.fn((listener: (state: { status: string }) => void) => { connectionListeners.push(listener); return () => undefined; }),
+};
 
 function result(sessionId: string, panelType: 'chat' | 'terminal' = 'chat') {
   // SAFETY: the cache reads only these fields of the view; no record content is rendered.
@@ -28,12 +33,13 @@ const target = (sessionId: string) => ({ sessionId, internalSessionId: `internal
 
 async function setup() {
   vi.resetModules();
-  vi.stubGlobal('window', { electronAPI: { orchestrationSessions: { peek, open }, uiState: { getPaneLayout } } });
+  vi.stubGlobal('window', { electronAPI: { orchestrationSessions: { peek, open }, uiState: { getPaneLayout }, remoteDaemon } });
   return import('./sessionViewCache');
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  connectionListeners.length = 0;
   getPaneLayout.mockResolvedValue({ success: true, data: null });
 });
 
@@ -50,6 +56,23 @@ describe('Session view cache (T-87)', () => {
     expect(cache.cachedSessionView('a')?.opened).toBe(false);
     await cache.peekSessionView(target('a'));
     expect(peek).toHaveBeenCalledTimes(1);
+  });
+
+  it('a Session opened while the window\'s host is still restoring shows from a peek, and opens once the host is connected (T-116 D-20)', async () => {
+    const cache = await setup();
+    open.mockRejectedValueOnce(new Error("Error invoking remote method 'daemon:invoke': Error [ERR_REMOTE_OFFLINE]: Remote connection interrupted: the action was not sent while the workspace is disconnected."));
+    open.mockResolvedValueOnce(result('a'));
+    peek.mockResolvedValueOnce(result('a'));
+
+    const opening = cache.openSessionView({ sessionId: 'a', internalSessionId: 'internal-a', hostId: 'build' });
+    await vi.waitFor(() => expect(cache.cachedSessionView('a')?.opened).toBe(false));
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(cache.isOpening('a')).toBe(true);
+
+    for (const listener of connectionListeners) listener({ status: 'connected' });
+    await opening;
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(cache.cachedSessionView('a')?.opened).toBe(true);
   });
 
   it('opens with the selection saved, and the open replaces a peeked entry', async () => {

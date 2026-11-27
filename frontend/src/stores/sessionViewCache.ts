@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { API } from '../utils/api';
+import { API, type IPCResponse } from '../utils/api';
 import { readPaneLayout } from '../utils/paneLayoutMemory';
 import { switchMark } from '../../../shared/switchMarks';
 import type { Session } from '../types/session';
@@ -128,7 +128,9 @@ function touch(sessionId: string): string[] {
  */
 function store(sessionId: string, entry: SessionViewEntry, sequence: number): void {
   const current = heldFrom.get(sessionId);
-  if (current && cachedSessionView(sessionId) && (current.sequence > sequence || (current.opened && !entry.opened))) return;
+  // An open replaces a peek, even one read later (a peek shown while an open waited on a restoring host).
+  const openOverPeek = entry.opened && !current?.opened;
+  if (current && cachedSessionView(sessionId) && ((current.sequence > sequence && !openOverPeek) || (current.opened && !entry.opened))) return;
   heldFrom.set(sessionId, { sequence, opened: entry.opened });
   const dropped = touch(sessionId);
   for (const id of dropped) heldFrom.delete(id);
@@ -218,6 +220,12 @@ export function peekSessionView(target: SessionViewTarget): Promise<SessionViewE
   if (held) return Promise.resolve(held);
   const pending = peeks.get(sessionId) ?? opens.get(sessionId)?.then(() => cachedSessionView(sessionId) ?? null);
   if (pending) return pending;
+  return readPeek(target);
+}
+
+/** One `peek` read of the Session, stored as a held (not opened) entry. */
+function readPeek(target: SessionViewTarget): Promise<SessionViewEntry | null> {
+  const { sessionId } = target;
   const started = generation;
   const sequence = ++readSequence;
   switchMark('session:peek', { sessionId });
@@ -248,7 +256,7 @@ export function openSessionView(target: SessionViewTarget, { select = false, res
   const sequence = ++readSequence;
   switchMark('session:open', { sessionId });
   const open = whileReading(target.internalSessionId, async changes => {
-    const [response, remembered] = await Promise.all([API.orchestrationSessions.open({ sessionId }, { select, resume }), rememberedLayout(target)]);
+    const [response, remembered] = await Promise.all([openOnceConnected(target, { select, resume }), rememberedLayout(target)]);
     const result = responseData(response, 'Failed to open Session');
     if (started === generation) {
       const entry = entryFrom(result, remembered, true, changes());
@@ -258,6 +266,41 @@ export function openSessionView(target: SessionViewTarget, { select = false, res
   }).finally(() => { if (opens.get(sessionId) === open) opens.delete(sessionId); });
   opens.set(sessionId, open);
   return open;
+}
+
+/** How long an open made while the window's host restores waits for it to be connected. */
+const CONNECTED_WAIT_MS = 20_000;
+
+function refusedWhileRestoring(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('ERR_REMOTE_OFFLINE');
+}
+
+/** Settles when the window's host connection says connected, or after `timeoutMs`. */
+function connectedOrTimeout(timeoutMs: number): Promise<void> {
+  const remote = window.electronAPI?.remoteDaemon;
+  return new Promise(resolve => {
+    let stop: (() => void) | undefined;
+    const done = () => { clearTimeout(timer); stop?.(); resolve(); };
+    const timer = setTimeout(done, timeoutMs);
+    stop = remote?.onConnectionStateChanged?.(state => { if (state.status === 'connected') done(); });
+    void remote?.getConnectionState?.().then(answer => { if (answer.data?.status === 'connected') done(); }, () => undefined);
+  });
+}
+
+/**
+ * `open` refuses while the window's host is still restoring after a switch (it saves a selection
+ * and may start an agent): the Session shows from a read-only peek meanwhile, and opens once the
+ * host is connected (T-116 D-20, a window that just switched machines).
+ */
+async function openOnceConnected(target: SessionViewTarget, options: { select: boolean; resume: boolean }): Promise<IPCResponse<OrchestrationSessionOpenResult<Session>>> {
+  try {
+    return await API.orchestrationSessions.open({ sessionId: target.sessionId }, options);
+  } catch (error) {
+    if (!refusedWhileRestoring(error)) throw error;
+    if (!cachedSessionView(target.sessionId) && !peeks.has(target.sessionId)) void readPeek(target).catch(() => undefined);
+    await connectedOrTimeout(CONNECTED_WAIT_MS);
+    return API.orchestrationSessions.open({ sessionId: target.sessionId }, options);
+  }
 }
 
 /** Whether an open for this Session is in flight. */
