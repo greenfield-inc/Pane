@@ -217,7 +217,8 @@ describe('ReceiptHashes', () => {
     fs.utimesSync(file, mtime, mtime);
     expect(await hashes.hash('team')).toBe(first);
     // A real edit moves the mtime.
-    fs.writeFileSync(file, 'Lead, edited.');
+    // Review r2 N-4: the same size, so only the mtime tells the edit apart.
+    fs.writeFileSync(file, 'Leap.');
     fs.utimesSync(file, new Date(mtime.getTime() + 5000), new Date(mtime.getTime() + 5000));
     expect(await hashes.hash('team')).toBe(await receiptFilesHash(root, 'team'));
     expect(await hashes.hash('team')).not.toBe(first);

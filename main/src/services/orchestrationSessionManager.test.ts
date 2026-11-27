@@ -677,6 +677,62 @@ describe('OrchestrationSessionManager', () => {
         expect(farm.pluginHash).not.toHaveBeenCalled();
       }));
 
+      // Review r2 N-1: with the 10 s check running, listing Sessions still refreshes the gone mark, both ways.
+      it('keeps the gone mark current from listing while the 10 s check runs', async () => withChatTabs(async (fixture, farm) => {
+        fixture.manager.attachChatTabs(chatTabs());
+        const created = await fixture.manager.create({ name: 'Goes and comes back', agentProfile: 'greenfield/product-researcher' });
+        const listed = { profiles: [{ ref: 'greenfield/product-researcher', plugin: 'greenfield', version: '0.1.0', harness: 'codex', hidden: false }], linked: [] };
+        const removed = { profiles: [{ ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.1.0', harness: 'claude', hidden: false }], linked: [] };
+        farm.profiles.mockResolvedValue(listed);
+        const gone = async () => (await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileGone;
+        vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+        try {
+          fixture.manager.watchProfileChanges();
+          await vi.advanceTimersByTimeAsync(10_000);
+          farm.profiles.mockResolvedValue(removed);
+          await vi.advanceTimersByTimeAsync(10_000);
+          await fixture.manager.list();
+          await vi.waitFor(async () => expect(await gone()).toBe(true));
+          farm.profiles.mockResolvedValue(listed);
+          await vi.advanceTimersByTimeAsync(10_000);
+          await fixture.manager.list();
+          await vi.waitFor(async () => expect(await gone()).toBeUndefined());
+        } finally {
+          fixture.manager.stopWatchingProfileChanges();
+          vi.useRealTimers();
+        }
+      }));
+
+      // Review r2 F-3: a chat lead's Reload with Chat tabs off is refused before it writes a snapshot.
+      it('refuses a chat lead\'s Reload with Chat tabs off before taking a snapshot', async () => withChatTabs(async (fixture, farm) => {
+        fixture.manager.attachChatTabs(chatTabs());
+        const created = await fixture.manager.create({ name: 'Chat lead', agentProfile: 'greenfield/orchestrator' });
+        Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false });
+        const before = farm.snapshot.mock.calls.length;
+        await expect(fixture.manager.reloadProfile({ sessionId: created.session.id })).rejects.toMatchObject({ code: 'SESSION_PROFILE_UNSUPPORTED' });
+        expect(farm.snapshot.mock.calls.length).toBe(before);
+      }));
+
+      // Review r2 N-5: a chat lead whose profile update() dropped is told the truth.
+      it('tells a chat lead that lost its profile to switch, not that it started before profiles', async () => withChatTabs(async fixture => {
+        fixture.manager.attachChatTabs(chatTabs());
+        const created = await fixture.manager.create({ name: 'Lost its profile', agent: 'claude' });
+        fixture.store.write({ ...fixture.store.read(), sessions: fixture.store.read().sessions.map(session => session.id === created.session.id ? { ...session, agentProfile: undefined } : session) });
+        const refusal = fixture.manager.reloadProfile({ sessionId: created.session.id });
+        await expect(refusal).rejects.toMatchObject({ code: 'SESSION_PROFILE_NONE', next: expect.stringContaining('Switch profile') });
+        await expect(refusal).rejects.not.toMatchObject({ message: expect.stringContaining('started before') });
+      }));
+
+      // Review r2 N-3: with no snapshot, the mark shows only for a chat lead, where Reload can act.
+      it('shows no changed mark for a terminal lead with a profile and no snapshot', async () => withChatTabs(async (fixture, farm) => {
+        fixture.manager.attachChatTabs(chatTabs());
+        const created = await fixture.manager.create({ name: 'Old terminal lead', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+        fixture.store.write({ ...fixture.store.read(), sessions: fixture.store.read().sessions.map(session => session.id === created.session.id ? { ...session, agentProfile: { ref: 'pane/claude', hash: 'hash-pane' }, agentFarmSnapshot: undefined } : session) });
+        farm.pluginHash.mockImplementation(async (plugin: string) => `changed-${plugin}`);
+        await fixture.manager.refreshPluginHashes(true);
+        expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileChanged).toBeUndefined();
+      }));
+
       it('reloads nothing when the new snapshot can\'t be saved', async () => withChatTabs(async (fixture, farm) => {
         const port = chatTabs();
         fixture.manager.attachChatTabs(port);
