@@ -483,3 +483,43 @@ describe('an Enter whose minute passes on a dead link says so, and never sends l
     expect(taken).toEqual([expect.objectContaining({ text: 'ship it', send: true })]);
   });
 });
+
+describe('an arrow that comes after main committed the switch (QA 1781 F-3)', () => {
+  async function tooLate() {
+    const switchMachine = vi.fn(async (machineId: string): Promise<MachineSelectOutcome> => {
+      const { useAllMachinesStore } = await import('../stores/allMachinesStore');
+      useAllMachinesStore.setState(current => ({ entries: current.entries.map(entry => ({ ...entry, active: entry.id === machineId })) }));
+      return { ok: true };
+    });
+    const ctx = await setup(switchMachine);
+    const landing = deferred<{ success: boolean }>();
+    saveNavigationMemory.mockImplementationOnce(() => landing.promise);
+    // Main already committed it: the cancel can't stop it.
+    cancelSwitch.mockImplementationOnce(async () => ({ success: true, data: { cancelled: false } }));
+    return { ...ctx, switchMachine, landing };
+  }
+
+  it('the window goes back, once, to the machine of the row the cursor moved to', async () => {
+    const { engage, switchMachine } = await tooLate();
+    engage.engageRemoteSession(target, 'rest');
+    await vi.waitFor(() => expect(saveNavigationMemory).toHaveBeenCalled());
+    // The open is already past the point a cancel stops (its switch call went out).
+    saveNavigationMemory.mockClear();
+    const { useAllMachinesStore } = await import('../stores/allMachinesStore');
+    useAllMachinesStore.setState(current => ({ entries: current.entries.map(entry => ({ ...entry, active: entry.id === 'build' })) }));
+    engage.cancelRemoteEngage({ machineId: 'local', sessionId: 'a1' });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(switchMachine.mock.calls.map(call => call[0])).toEqual(['local']);
+  });
+
+  it('a cursor still on that machine\'s rows keeps the window there', async () => {
+    const { engage, switchMachine } = await tooLate();
+    engage.engageRemoteSession(target, 'rest');
+    await vi.waitFor(() => expect(saveNavigationMemory).toHaveBeenCalled());
+    const { useAllMachinesStore } = await import('../stores/allMachinesStore');
+    useAllMachinesStore.setState(current => ({ entries: current.entries.map(entry => ({ ...entry, active: entry.id === 'build' })) }));
+    engage.cancelRemoteEngage({ machineId: 'build', sessionId: 'c' });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(switchMachine).not.toHaveBeenCalled();
+  });
+});

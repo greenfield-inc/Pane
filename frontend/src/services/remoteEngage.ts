@@ -502,7 +502,8 @@ function deliverHeld(engaging: EngageTarget & { panelId?: string }, { focused, s
  * An arrow press (D-6): the rest that has not ended starts nothing, and a switch still running is
  * cancelled, so the window stays where it is. What was typed waits for the cursor to come back.
  */
-export function cancelRemoteEngage(): void {
+export function cancelRemoteEngage(cursor?: EngageTarget): void {
+  if (cursor) lastCursor = cursor;
   clearTimeout(restTimer);
   restTimer = undefined;
   const { engaging } = useRemoteEngage.getState();
@@ -524,7 +525,45 @@ export function cancelRemoteEngage(): void {
   // is stopped in main.
   cancelMachineOpen();
   withdrawMachineSwitch(engaging.machineId);
-  void API.remoteDaemon.cancelSwitch(engaging.machineId).catch(() => undefined);
+  const cancelledTicket = engageTicket;
+  void API.remoteDaemon.cancelSwitch(engaging.machineId).then(result => {
+    switchMark('engage:cancel-result', { machineId: engaging.machineId, sessionId: engaging.sessionId, status: String(result?.data?.cancelled) });
+    // Main had already committed it (the arrow came in the moment before the window showed it):
+    // once it lands, the window goes back to where the cursor is, once (QA 1781 F-3).
+    if (result?.success && result.data?.cancelled === false) returnToCursorOnceLanded(engaging.machineId, cancelledTicket);
+  }).catch(() => undefined);
+}
+
+/** The row the cursor last moved to, as an arrow reported it. */
+let lastCursor: EngageTarget | undefined;
+/** How long a switch main couldn't stop may take to land before the window stops waiting to go back. */
+const TOO_LATE_LAND_MS = 10_000;
+
+function windowOn(): string | undefined {
+  return useAllMachinesStore.getState().entries.find(entry => entry.active)?.id;
+}
+
+/**
+ * The switch to `machineId` couldn't be stopped. When the window lands there, it goes back to the
+ * machine of the row the cursor is on, quietly, unless the cursor is on that machine's rows (the
+ * window is where it is then) or a newer engage owns the window.
+ */
+function returnToCursorOnceLanded(machineId: string, ticket: number): void {
+  let stop: () => void = () => undefined;
+  const check = (): boolean => {
+    if (ticket !== engageTicket || useRemoteEngage.getState().engaging) return true;
+    if (windowOn() !== machineId) return false;
+    const cursor = lastCursor;
+    if (cursor && cursor.machineId !== machineId) {
+      switchMark('engage:return', { machineId: cursor.machineId, sessionId: cursor.sessionId });
+      void openOnMachine(cursor.machineId, { kind: 'session', id: cursor.sessionId, name: sessionName(cursor) }, { quiet: true, reportErrors: false });
+    }
+    return true;
+  };
+  if (check()) return;
+  const unsubscribe = useAllMachinesStore.subscribe(() => { if (check()) stop(); });
+  const cap = setTimeout(() => stop(), TOO_LATE_LAND_MS);
+  stop = () => { unsubscribe(); clearTimeout(cap); };
 }
 
 const switchListeners = new Set<(cause: EngageCause) => void>();

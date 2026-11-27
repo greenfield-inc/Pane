@@ -190,7 +190,7 @@ export function showSessionAtCursor(sessionId: string, machineId: string = windo
   listen();
   clearTimer();
   // The cursor moved: a rest on another machine's Session, or the switch it started, is off (D-6).
-  cancelRemoteEngage();
+  cancelRemoteEngage({ machineId, sessionId });
   if (machineId !== windowMachineId()) { showRemoteSessionAtCursor(machineId, sessionId); return; }
   clearRemoteSession();
   const sessions = useOrchestrationSessionStore.getState();
