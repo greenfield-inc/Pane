@@ -17,8 +17,9 @@
  */
 import { create } from 'zustand';
 import { API } from '../utils/api';
-import { cancelMachineOpen, openOnMachine } from '../utils/machineRowActions';
-import { withdrawMachineSwitch } from '../hooks/useMachines';
+import { cancelMachineOpen, machineOpenPressCount, openOnMachine } from '../utils/machineRowActions';
+import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
+import { latestMachineSwitchTicket, withdrawMachineSwitch } from '../hooks/useMachines';
 import { showActionError } from '../stores/errorStore';
 import { useWindowLink } from '../stores/windowLink';
 import { chatDraftTakerMounted, handOverChatDraft, onChatDraftTaker, onChatTabShown } from '../utils/chatDraftHandover';
@@ -504,6 +505,7 @@ function deliverHeld(engaging: EngageTarget & { panelId?: string }, { focused, s
  */
 export function cancelRemoteEngage(cursor?: EngageTarget): void {
   if (cursor) lastCursor = cursor;
+  stopReturn();
   clearTimeout(restTimer);
   restTimer = undefined;
   const { engaging } = useRemoteEngage.getState();
@@ -530,7 +532,7 @@ export function cancelRemoteEngage(cursor?: EngageTarget): void {
     switchMark('engage:cancel-result', { machineId: engaging.machineId, sessionId: engaging.sessionId, status: String(result?.data?.cancelled) });
     // Main had already committed it (the arrow came in the moment before the window showed it):
     // once it lands, the window goes back to where the cursor is, once (QA 1781 F-3).
-    if (result?.success && result.data?.cancelled === false) returnToCursorOnceLanded(engaging.machineId, cancelledTicket);
+    if (result?.success && result.data?.outcome === 'committed') returnToCursorOnceLanded(engaging.machineId, cancelledTicket);
   }).catch(() => undefined);
 }
 
@@ -543,27 +545,55 @@ function windowOn(): string | undefined {
   return useAllMachinesStore.getState().entries.find(entry => entry.active)?.id;
 }
 
+/** The machine a return after a too-late cancel is switching back to, while it runs. */
+let returning: string | undefined;
+
 /**
- * The switch to `machineId` couldn't be stopped. When the window lands there, it goes back to the
- * machine of the row the cursor is on, quietly, unless the cursor is on that machine's rows (the
- * window is where it is then) or a newer engage owns the window.
+ * The switch to `machineId` committed before the cancel reached main. When the window lands there,
+ * it goes back once, quietly, to the machine of the row the cursor is on, unless the cursor is on
+ * that machine's rows (the window is where it is then). A newer engage, row press or machine switch
+ * since the cancel drops it, and it runs at most once (review 1781 R4-MF-1, R4-SF-1).
  */
 function returnToCursorOnceLanded(machineId: string, ticket: number): void {
-  let stop: () => void = () => undefined;
-  const check = (): boolean => {
-    if (ticket !== engageTicket || useRemoteEngage.getState().engaging) return true;
-    if (windowOn() !== machineId) return false;
-    const cursor = lastCursor;
-    if (cursor && cursor.machineId !== machineId) {
-      switchMark('engage:return', { machineId: cursor.machineId, sessionId: cursor.sessionId });
-      void openOnMachine(cursor.machineId, { kind: 'session', id: cursor.sessionId, name: sessionName(cursor) }, { quiet: true, reportErrors: false });
-    }
-    return true;
+  const presses = machineOpenPressCount();
+  const switches = latestMachineSwitchTicket();
+  let done = false;
+  let unsubscribe: (() => void) | undefined;
+  let cap: ReturnType<typeof setTimeout> | undefined;
+  const stop = (): void => {
+    done = true;
+    unsubscribe?.();
+    clearTimeout(cap);
   };
-  if (check()) return;
-  const unsubscribe = useAllMachinesStore.subscribe(() => { if (check()) stop(); });
-  const cap = setTimeout(() => stop(), TOO_LATE_LAND_MS);
-  stop = () => { unsubscribe(); clearTimeout(cap); };
+  const newer = (): boolean => ticket !== engageTicket || !!useRemoteEngage.getState().engaging
+    || machineOpenPressCount() !== presses || latestMachineSwitchTicket() !== switches;
+  // One-shot: opening writes the store this listens to, so it stops before it opens.
+  const check = (): void => {
+    if (done) return;
+    if (newer()) { stop(); return; }
+    if (windowOn() !== machineId) return;
+    stop();
+    const cursor = lastCursor;
+    if (!cursor || cursor.machineId === machineId) return;
+    switchMark('engage:return', { machineId: cursor.machineId, sessionId: cursor.sessionId });
+    returning = cursor.machineId;
+    void openOnMachine(cursor.machineId, { kind: 'session', id: cursor.sessionId, name: sessionName(cursor) }, { quiet: true, reportErrors: false })
+      .finally(() => { if (returning === cursor.machineId) returning = undefined; });
+  };
+  check();
+  if (done) return;
+  unsubscribe = useAllMachinesStore.subscribe(check);
+  cap = setTimeout(stop, TOO_LATE_LAND_MS);
+}
+
+/** An arrow during a return stops it too: the open starts no switch, and a switch running is cancelled. */
+function stopReturn(): void {
+  const back = returning;
+  if (!back) return;
+  returning = undefined;
+  cancelMachineOpen();
+  withdrawMachineSwitch(back);
+  if (back !== LOCAL_MACHINE_ID) void API.remoteDaemon.cancelSwitch(back).catch(() => undefined);
 }
 
 const switchListeners = new Set<(cause: EngageCause) => void>();

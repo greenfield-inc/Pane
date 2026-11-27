@@ -45,7 +45,7 @@ import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
 import { FindBar } from '../find/FindBar';
 import { useSurfaceFind } from '../find/surfaceFind';
 import { takeLaunchDraft, type LaunchDraft } from '../../utils/launchOutline';
-import { acceptChatDraft, chatTabShown, draftNoteStays, handOverChatDraft, pendingSendStep, sendDeadline } from '../../utils/chatDraftHandover';
+import { acceptChatDraft, chatTabShown, draftNoteStays, handOverChatDraft, pendingSendStep, rememberDraftNote, rememberedDraftNote, sendDeadline, type DraftNote } from '../../utils/chatDraftHandover';
 import { useWindowLink } from '../../stores/windowLink';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import '../agentChat/agentChat.css';
@@ -476,7 +476,12 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const launchSend = useRef<{ text: string; until: number; expiredNote?: string } | null>(null);
   // Why a handed-over text is in the box unsent. It stays until that text is edited or sent, not
   // only until the chat's next read clears its error (QA 1781 F-2, D-22).
-  const [draftNote, setDraftNote] = useState<{ text: string; note: string } | null>(null);
+  const [draftNote, setShownDraftNote] = useState<DraftNote | null>(() => rememberedDraftNote(panelId));
+  // Remembered per tab, so a remount (a reconnect redraws the chat) keeps showing it.
+  const setDraftNote = useCallback((note: DraftNote | null) => {
+    rememberDraftNote(panelId, note);
+    setShownDraftNote(note);
+  }, [panelId]);
   const linkUp = useWindowLink(state => state.up);
   /** Re-runs the launch send check: the handover can land after mount, once the box settles, and the send window closes. */
   const [launchTick, setLaunchTick] = useState(0);
@@ -514,7 +519,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         handOverChatDraft(panelId, { text: pending.text, selectionStart: pending.text.length, selectionEnd: pending.text.length, focused: false, send: true, sendBy: pending.until });
       }
     };
-  }, [panelId, runtime, viewer, watching]);
+  }, [panelId, runtime, setDraftNote, viewer, watching]);
   // The live chat painted: an engage waiting on it lets the mirror's view go (T-132).
   const painted = !watching && view !== undefined;
   useLayoutEffect(() => {
@@ -539,12 +544,12 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     launchSend.current = null;
     switchMark('chat:draft-send', { panelId, status: 'sent' });
     void runtime.thread.composer.send();
-  }, [runtime, sendDisabled, linkUp, launchTick, viewer]);
+  }, [runtime, sendDisabled, linkUp, launchTick, setDraftNote, viewer]);
   useEffect(() => {
     if (!draftNote) return undefined;
     const composer = runtime.thread.composer;
     return composer.subscribe(() => { if (!draftNoteStays(draftNote, composer.getState().text)) setDraftNote(null); });
-  }, [draftNote, runtime]);
+  }, [draftNote, runtime, setDraftNote]);
   // Every refusal is shown (assistant-ui's own paste and picker swallow them), and a file
   // that failed while copying leaves no chip behind.
   useEffect(() => runtime.thread.composer.unstable_on('attachmentAddError', event => {

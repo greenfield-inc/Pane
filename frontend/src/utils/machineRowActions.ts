@@ -152,6 +152,11 @@ export async function openOnMachine(machineId: string, target: MachineTarget, op
 /** Presses of rows on any machine so far; the newest one owns the landing. */
 let openPresses = 0;
 
+/** How many row presses there have been: a change means a newer one (review 1781 R4-SF-1). */
+export function machineOpenPressCount(): number {
+  return openPresses;
+}
+
 /**
  * An engage the person moved off before its switch started (T-132, review 1781 SF-2): the open in
  * flight starts no switch, and nothing lands.

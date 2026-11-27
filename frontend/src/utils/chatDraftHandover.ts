@@ -58,6 +58,26 @@ export function pendingSendStep(pending: { until: number }, { edited, now, sendD
   return 'send';
 }
 
+/** A handed-over text's note, and the text it is about. */
+export interface DraftNote {
+  text: string;
+  note: string;
+}
+
+/** Each chat tab's note, so a remount of the chat (a reconnect redraws it) keeps showing it. */
+const draftNotes = new Map<string, DraftNote>();
+
+/** Keeps `note` for the chat tab `panelId`, or forgets it (null). */
+export function rememberDraftNote(panelId: string, note: DraftNote | null): void {
+  if (note) draftNotes.set(panelId, note);
+  else draftNotes.delete(panelId);
+}
+
+/** The note a chat tab showed before it remounted, if it still has one. */
+export function rememberedDraftNote(panelId: string): DraftNote | null {
+  return draftNotes.get(panelId) ?? null;
+}
+
 /** Whether the note on a handed-over text still applies: the box still holds that text, unsent. */
 export function draftNoteStays(note: { text: string }, composerText: string): boolean {
   return composerText === note.text;

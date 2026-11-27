@@ -495,7 +495,7 @@ describe('an arrow that comes after main committed the switch (QA 1781 F-3)', ()
     const landing = deferred<{ success: boolean }>();
     saveNavigationMemory.mockImplementationOnce(() => landing.promise);
     // Main already committed it: the cancel can't stop it.
-    cancelSwitch.mockImplementationOnce(async () => ({ success: true, data: { cancelled: false } }));
+    cancelSwitch.mockImplementationOnce(async () => ({ success: true, data: { cancelled: false, outcome: 'committed' } }));
     return { ...ctx, switchMachine, landing };
   }
 
@@ -519,6 +519,120 @@ describe('an arrow that comes after main committed the switch (QA 1781 F-3)', ()
     const { useAllMachinesStore } = await import('../stores/allMachinesStore');
     useAllMachinesStore.setState(current => ({ entries: current.entries.map(entry => ({ ...entry, active: entry.id === 'build' })) }));
     engage.cancelRemoteEngage({ machineId: 'build', sessionId: 'c' });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(switchMachine).not.toHaveBeenCalled();
+  });
+});
+
+describe('the return after a cancel main could not stop (review 1781 R4-MF-1, R4-SF-1)', () => {
+  async function activate(machineId: string) {
+    const { useAllMachinesStore } = await import('../stores/allMachinesStore');
+    useAllMachinesStore.setState(current => ({ entries: current.entries.map(entry => ({ ...entry, active: entry.id === machineId })) }));
+  }
+
+  it('main had nothing to stop: no return, so the person\'s own later switch stands', async () => {
+    const switchMachine = vi.fn(async (): Promise<MachineSelectOutcome> => ({ ok: true }));
+    const { engage } = await setup(switchMachine);
+    const saving = deferred<{ success: boolean }>();
+    saveNavigationMemory.mockImplementationOnce(() => saving.promise);
+    cancelSwitch.mockImplementationOnce(async () => ({ success: true, data: { cancelled: false, outcome: 'nothing' } }));
+    engage.engageRemoteSession(target, 'rest');
+    await Promise.resolve();
+    engage.cancelRemoteEngage({ machineId: 'local', sessionId: 'a1' });
+    saving.resolve({ success: true });
+    await vi.advanceTimersByTimeAsync(4000);
+    await activate('build');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(switchMachine).not.toHaveBeenCalled();
+  });
+
+  it('a committed switch returns once, and never again however the window moves after', async () => {
+    const switchMachine = vi.fn(async (machineId: string): Promise<MachineSelectOutcome> => { await activate(machineId); return { ok: true }; });
+    const { engage } = await setup(switchMachine);
+    const landing = deferred<{ success: boolean }>();
+    saveNavigationMemory.mockImplementationOnce(() => landing.promise);
+    cancelSwitch.mockImplementationOnce(async () => ({ success: true, data: { cancelled: false, outcome: 'committed' } }));
+    engage.engageRemoteSession(target, 'rest');
+    await vi.waitFor(() => expect(saveNavigationMemory).toHaveBeenCalled());
+    await activate('build');
+    engage.cancelRemoteEngage({ machineId: 'local', sessionId: 'a1' });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(switchMachine.mock.calls.map(call => call[0])).toEqual(['local']);
+    await activate('build');
+    await vi.advanceTimersByTimeAsync(50);
+    await activate('local');
+    await activate('build');
+    await vi.advanceTimersByTimeAsync(11_000);
+    expect(switchMachine.mock.calls.map(call => call[0])).toEqual(['local']);
+  });
+
+  it('the cancel answers before the window lands: one return when it does, with no recursion', async () => {
+    const switchMachine = vi.fn(async (_machineId: string): Promise<MachineSelectOutcome> => ({ ok: true }));
+    const { engage, landOn } = await setup(switchMachine);
+    cancelSwitch.mockImplementationOnce(async () => ({ success: true, data: { cancelled: false, outcome: 'committed' } }));
+    engage.engageRemoteSession(target, 'rest');
+    await vi.waitFor(() => expect(saveNavigationMemory).toHaveBeenCalled());
+    engage.cancelRemoteEngage({ machineId: 'local', sessionId: 'a1' });
+    await vi.advanceTimersByTimeAsync(10);
+    landOn.mockClear();
+    await activate('build');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(landOn).toHaveBeenCalledTimes(1);
+    expect(switchMachine.mock.calls.map(call => call[0])).toEqual(['local']);
+  });
+
+  it('a newer press of any row before the window lands drops the return', async () => {
+    const switchMachine = vi.fn(async (): Promise<MachineSelectOutcome> => ({ ok: true }));
+    const { engage } = await setup(switchMachine);
+    cancelSwitch.mockImplementationOnce(async () => ({ success: true, data: { cancelled: false, outcome: 'committed' } }));
+    engage.engageRemoteSession(target, 'rest');
+    await vi.waitFor(() => expect(saveNavigationMemory).toHaveBeenCalled());
+    engage.cancelRemoteEngage({ machineId: 'local', sessionId: 'a1' });
+    await vi.advanceTimersByTimeAsync(10);
+    // The person opens a row themselves (a click or Enter, not an engage).
+    const { openOnMachine } = await import('../utils/machineRowActions');
+    void openOnMachine('build', { kind: 'session', id: 'c', name: 'Other' });
+    await vi.advanceTimersByTimeAsync(10);
+    switchMachine.mockClear();
+    await activate('build');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(switchMachine).not.toHaveBeenCalled();
+  });
+
+  it('a newer switch from the machine switcher drops the return too', async () => {
+    const switchMachine = vi.fn(async (): Promise<MachineSelectOutcome> => ({ ok: true }));
+    const { engage } = await setup(switchMachine);
+    cancelSwitch.mockImplementationOnce(async () => ({ success: true, data: { cancelled: false, outcome: 'committed' } }));
+    engage.engageRemoteSession(target, 'rest');
+    await vi.waitFor(() => expect(saveNavigationMemory).toHaveBeenCalled());
+    engage.cancelRemoteEngage({ machineId: 'local', sessionId: 'a1' });
+    await vi.advanceTimersByTimeAsync(10);
+    const { requestMachinePress } = await import('../hooks/useMachines');
+    void requestMachinePress({ id: 'build', kind: 'computer', action: 'switch', computerId: 'build' }, async () => ({ ok: true }));
+    switchMachine.mockClear();
+    await activate('build');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(switchMachine).not.toHaveBeenCalled();
+  });
+});
+
+describe('an arrow stops the return\'s own switch (review 1781 round 4)', () => {
+  it('the return\'s open has not reached its switch: an arrow means it never switches', async () => {
+    const switchMachine = vi.fn(async (): Promise<MachineSelectOutcome> => ({ ok: true }));
+    const { engage } = await setup(switchMachine);
+    cancelSwitch.mockImplementationOnce(async () => ({ success: true, data: { cancelled: false, outcome: 'committed' } }));
+    engage.engageRemoteSession(target, 'rest');
+    await vi.waitFor(() => expect(saveNavigationMemory).toHaveBeenCalled());
+    const { useAllMachinesStore } = await import('../stores/allMachinesStore');
+    useAllMachinesStore.setState(current => ({ entries: current.entries.map(entry => ({ ...entry, active: entry.id === 'build' })) }));
+    // The return's own open waits to remember the row.
+    const remembering = deferred<{ success: boolean }>();
+    saveNavigationMemory.mockImplementationOnce(() => remembering.promise);
+    engage.cancelRemoteEngage({ machineId: 'local', sessionId: 'a1' });
+    await vi.advanceTimersByTimeAsync(10);
+    switchMachine.mockClear();
+    engage.cancelRemoteEngage({ machineId: 'build', sessionId: 'c' });
+    remembering.resolve({ success: true });
     await vi.advanceTimersByTimeAsync(50);
     expect(switchMachine).not.toHaveBeenCalled();
   });

@@ -87,3 +87,15 @@ describe('the note beside a handed-over text (QA 1781 F-2, D-22)', () => {
     expect(draftNoteStays({ text: 'ship it' }, '')).toBe(false);
   });
 });
+
+describe('the note beside a handed-over text outlives a remount of its chat (review 1781 round 4)', () => {
+  it('is remembered per chat tab until it is cleared', async () => {
+    const { rememberDraftNote, rememberedDraftNote } = await import('./chatDraftHandover');
+    const note = { text: 'ship it', note: 'Not sent: Build box didn\'t answer within a minute. Press Enter to send.' };
+    rememberDraftNote('panel-a', note);
+    expect(rememberedDraftNote('panel-a')).toEqual(note);
+    expect(rememberedDraftNote('panel-b')).toBeNull();
+    rememberDraftNote('panel-a', null);
+    expect(rememberedDraftNote('panel-a')).toBeNull();
+  });
+});

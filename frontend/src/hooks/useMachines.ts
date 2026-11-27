@@ -55,6 +55,11 @@ export function requestMachinePress(machine: MachinePress, job: () => Promise<Ma
   return machineSwitches.request({ machineId: machine.id, computerId: machine.kind === 'local' ? undefined : machine.computerId, job: run });
 }
 
+/** The newest machine switch requested so far: a change means a newer one (review 1781 R4-SF-1). */
+export function latestMachineSwitchTicket(): number {
+  return machineSwitches.latestTicket();
+}
+
 /** An engage the person moved off (T-132): its switch still waiting behind another one never runs. */
 export function withdrawMachineSwitch(machineId: string): boolean {
   return machineSwitches.withdraw(press => press.machineId === machineId);
