@@ -31,7 +31,7 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 /** Machine `build` online and mirroring Session `b` (chat `rp`) at `revision` with `count` messages, shown, the cursor resting on it, and a viewer on its chat. */
-async function shown(revision: number, count: number) {
+async function shown(revision: number, count: number, settleMs = 2500) {
   const { useMachineMirrorStore } = await import('./machineMirrorStore');
   const { useAllMachinesStore } = await import('./allMachinesStore');
   const remote = await import('./remoteSessionView');
@@ -46,7 +46,7 @@ async function shown(revision: number, count: number) {
   viewer.subscribe(() => undefined);
   await tick();
   // The rest's own read (the 200-message fill) is not what these tests count.
-  await tick(2500);
+  await tick(settleMs);
   machineRead.mockClear();
   const mirrorTo = async (next: number, nextCount: number) => {
     mirrorSession.mockResolvedValue(snap('b', 'rp', next, nextCount));
@@ -72,6 +72,22 @@ describe('a shown remote chat stays current (T-116 PR 6)', () => {
     expect(remote.cachedRemoteSession('build', 'b')?.snapshot?.revision).toBe(8);
     expect(viewer.snapshot().transcript?.revision).toBe(8);
     expect(viewer.snapshot().transcript?.messages).toHaveLength(4);
+  });
+
+  it("the host's first message after the cursor rests shows at once, even when it starts a new conversation run (QA F-1)", async () => {
+    // The rest's own read landed 1.35 s ago; the chat's agent wasn't running on the host.
+    const { viewer } = await shown(5, 3, 1350);
+    const fresh = { panelId: 'rp', generation: 2, revision: 2, start: 0, messages: [msg(0), msg(1)] };
+    machineRead.mockImplementation(async (machineId: string) => ({ machineId, data: { success: true, data: { view: null, panels: [], layout: null, chat: { ...snap('b', 'rp', 2, 2).chat, generation: 2, transcript: fresh } } } }));
+
+    // A message on the host starts its agent: a new generation, then its events.
+    chatListeners.forEach(listener => listener({ machineId: 'build', channel: 'chat-tab:view', payload: { ...snap('b', 'rp', 2, 2).chat, generation: 2, transcript: undefined } }));
+    chatListeners.forEach(listener => listener({ machineId: 'build', channel: 'chat-tab:event', payload: { panelId: 'rp', generation: 2, revision: 2, index: 1, change: { type: 'append', id: 'm1', role: 'assistant', part: { type: 'text', text: 'x' } } } }));
+    await tick(50);
+
+    expect(machineRead).toHaveBeenCalledTimes(1);
+    expect(viewer.snapshot().transcript?.generation).toBe(2);
+    expect(viewer.snapshot().transcript?.messages.map(message => message.id)).toEqual(['m0', 'm1']);
   });
 
   it('a mirror copy that lags the live events never replaces them (review follow-up SF)', async () => {
