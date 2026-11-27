@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MachineMirror, MIRROR_MEMORY_SESSIONS, type MirrorMachines } from './machineMirror';
 import { SessionSnapshotService } from './sessionSnapshots';
 import { PaneError } from '../../../shared/paneError';
+import { RemoteRequestError } from '../../../shared/remoteClient/remoteDaemonClient';
 import type { MachineConnectionsEvent, MachineState } from '../../../shared/types/machineConnections';
 import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 import type { AgentChatMessage } from '../../../shared/types/agentChat';
@@ -24,11 +25,11 @@ function message(index: number): AgentChatMessage {
  * `{ success, data }` shape the channel does. `refuse` answers as a host that doesn't take this computer as its owner.
  */
 function fakeHost(name: string) {
-  const sessions = new Map<string, { record: OrchestrationSessionSummary; messages: AgentChatMessage[] }>();
+  const sessions = new Map<string, { record: OrchestrationSessionSummary; messages: AgentChatMessage[]; generation: number; unread?: boolean }>();
   const tab = (id: string): ToolPanel => ({ id: `chat-${id}`, sessionId: `pane-${id}`, type: 'chat', title: 'Claude', state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } });
   const byPanel = (panelId: string) => sessions.get(panelId.replace(/^chat-/, ''));
   const notices: Array<{ sessionId: string; revision: number }> = [];
-  const service = new SessionSnapshotService({
+  const serve = () => new SessionSnapshotService({
     sessions: async () => [...sessions.values()].map(session => structuredClone(session.record)),
     tabs: paneId => (sessions.has(paneId.replace(/^pane-/, '')) ? [tab(paneId.replace(/^pane-/, ''))] : []),
     panel: panelId => (byPanel(panelId) ? tab(panelId.replace(/^chat-/, '')) : undefined),
@@ -37,14 +38,18 @@ function fakeHost(name: string) {
       const session = byPanel(panelId);
       if (!session) return undefined;
       const window = session.messages.slice(-limit);
-      return {
-        panelId, agent: 'claude', generation: 1, status: 'idle', canAttachImages: false, controls: [], commands: [], permissions: [], questions: [], queue: [],
-        transcript: { panelId, generation: 1, revision: session.messages.length, start: session.messages.length - window.length, messages: structuredClone(window) },
+      const { generation } = session;
+      const view = {
+        panelId, agent: 'claude' as const, generation, status: 'idle' as const, canAttachImages: false, controls: [], commands: [], permissions: [], questions: [], queue: [],
+        transcript: { panelId, generation, revision: session.messages.length, start: session.messages.length - window.length, messages: structuredClone(window) },
         messageCount: session.messages.length,
       };
+      // As ChatTabManager answers after a restart, for a chat whose agent hasn't run yet: no transcript, no count.
+      return session.unread ? { ...view, transcript: undefined, messageCount: 0 } : view;
     },
     announce: (sessionId, revision) => { notices.push({ sessionId, revision }); },
   });
+  let service = serve();
   let refuse: string | undefined;
   return {
     name,
@@ -59,6 +64,7 @@ function fakeHost(name: string) {
           revision: 1, createdAt: updatedAt, updatedAt,
         },
         messages: Array.from({ length: messages }, (_, index) => message(index)),
+        generation: 1,
       });
       service.send('orchestration-sessions:changed', { sessionId: id, kind: 'created' });
     },
@@ -68,8 +74,21 @@ function fakeHost(name: string) {
         const index = session.messages.length;
         session.messages.push(message(index));
         // The transcript's revision is its message count here: one change per message.
-        service.send('chat-tab:event', { panelId: `chat-${id}`, generation: 1, revision: session.messages.length, index });
+        service.send('chat-tab:event', { panelId: `chat-${id}`, generation: session.generation, revision: session.messages.length, index });
       }
+    },
+    /** Pane restarts on the host: a new run, and no chat's agent has run since, so none has a transcript. */
+    restart() {
+      service.dispose();
+      for (const session of sessions.values()) session.unread = true;
+      service = serve();
+    },
+    /** The chat is opened on the host: its agent starts and replays the conversation as a new generation. */
+    open(id: string) {
+      const session = sessions.get(id)!;
+      session.unread = false;
+      session.generation += 1;
+      service.send('chat-tab:view', { panelId: `chat-${id}` });
     },
     remove(id: string) {
       sessions.delete(id);
@@ -776,5 +795,102 @@ describe('MachineMirror', () => {
     expect(mirror.state('mac')).toBeUndefined();
     expect(await mirror.session('mac', 'a')).toBeUndefined();
     expect(readdirSync(directory)).toEqual([]);
+  });
+
+  it('keeps the messages it holds when the host restarts and can\'t read the chat yet, until it can (QA F-1)', async () => {
+    const mac = fakeHost('mac');
+    mac.add('restart-one', 12);
+    const link = fakeMachines([mac]);
+    const mirror = mirrorOf(link.machines);
+    await mirror.start();
+    link.online('mac');
+    await vi.advanceTimersByTimeAsync(0);
+    expect((await mirror.session('mac', 'restart-one'))?.chat.transcript?.messages).toHaveLength(12);
+
+    link.offline('mac');
+    mac.restart();
+    vi.advanceTimersByTime(5000);
+    link.online('mac');
+    await vi.advanceTimersByTimeAsync(0);
+    await mirror.flush();
+
+    expect(mirror.state('mac')?.sync).toBe('live');
+    const kept = await mirror.session('mac', 'restart-one');
+    expect(kept?.chat.transcript?.messages).toHaveLength(12);
+    expect(kept?.chat.messageCount).toBe(12);
+    expect(readSession(directory, 'mac', 'restart-one').chat.transcript?.messages).toHaveLength(12);
+
+    // Opened on the host: the agent replays, and the real transcript replaces the held one.
+    await settle(mac);
+    mac.open('restart-one');
+    mac.say('restart-one');
+    link.deliver(mac);
+    await vi.advanceTimersByTimeAsync(250);
+    const fresh = await mirror.session('mac', 'restart-one');
+    expect(fresh?.chat.transcript?.messages).toHaveLength(13);
+    expect(fresh?.chat.transcript?.generation).toBe(2);
+  });
+
+  it('keeps the held messages after a restart of this desktop too, when the host also restarted', async () => {
+    const mac = fakeHost('mac');
+    mac.add('a', 12);
+    const link = fakeMachines([mac]);
+    const before = mirrorOf(link.machines);
+    await before.start();
+    link.online('mac');
+    await vi.advanceTimersByTimeAsync(0);
+    await before.stop();
+
+    link.offline('mac');
+    mac.restart();
+    const after = mirrorOf(link.machines);
+    await after.start();
+    link.online('mac');
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect((await after.session('mac', 'a'))?.chat.transcript?.messages).toHaveLength(12);
+  });
+
+  it('copies a cold host\'s Sessions with no messages it doesn\'t know, and their messages once a chat is opened there', async () => {
+    const mac = fakeHost('mac');
+    mac.add('a', 4);
+    mac.add('b', 2);
+    mac.restart();
+    const link = fakeMachines([mac]);
+    const mirror = mirrorOf(link.machines);
+    await mirror.start();
+    link.online('mac');
+    await vi.advanceTimersByTimeAsync(0);
+    await settle(mac);
+
+    expect(ids(mirror, 'mac')).toEqual(['a', 'b']);
+    expect((await mirror.session('mac', 'a'))?.chat.transcript).toBeUndefined();
+    expect((await mirror.session('mac', 'a'))?.transcriptUnknown).toBe(true);
+
+    mac.open('a');
+    await vi.advanceTimersByTimeAsync(0);
+    link.deliver(mac);
+    await vi.advanceTimersByTimeAsync(250);
+    expect((await mirror.session('mac', 'a'))?.chat.transcript?.messages).toHaveLength(4);
+  });
+
+  it.each([
+    ['a PaneError', () => { throw new PaneError('ERR_UNKNOWN_CHANNEL', 'Unknown channel: orchestration-sessions:snapshots', 'Update Pane on mac.'); }],
+    ['an HTTP refusal', () => { throw new RemoteRequestError('Unknown channel', 404, 'ERR_UNKNOWN_CHANNEL'); }],
+    ['an answer', () => ({ success: false, error: 'Unknown channel', code: 'ERR_UNKNOWN_CHANNEL' })],
+  ])('leaves a host whose Pane doesn\'t know the snapshots channel (%s) alone until it reconnects (QA F-2)', async (_how, answer) => {
+    const mac = fakeHost('mac');
+    const link = fakeMachines([mac]);
+    const reads: string[] = [];
+    link.machines.read = async machineId => { reads.push(machineId); return { machineId, data: answer() }; };
+    const mirror = mirrorOf(link.machines);
+    await mirror.start();
+    link.online('mac');
+    await vi.advanceTimersByTimeAsync(0);
+    link.resync('mac');
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(reads).toEqual(['mac']);
+    expect(mirror.state('mac')).toBeUndefined();
   });
 });

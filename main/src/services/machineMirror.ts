@@ -2,6 +2,7 @@ import { promises } from 'fs';
 import path from 'path';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { PaneError } from '../../../shared/paneError';
+import { RemoteRequestError } from '../../../shared/remoteClient/remoteDaemonClient';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { MachineConnectionsEvent, MachineResult, MachineState } from '../../../shared/types/machineConnections';
 import type { MachineMirrorIndexEntry, MachineMirrorIndexFile, MachineMirrorState } from '../../../shared/types/machineMirror';
@@ -245,7 +246,7 @@ export class MachineMirror {
       const result = await this.options.machines.read(mirror.machineId, SESSION_SNAPSHOTS_CHANNEL, [requestOf(mirror)]);
       const answer = decodeBoundary(result.data, answerSchema);
       if (!answer.success) {
-        if (answer.code === 'SESSION_SNAPSHOTS_OWNER_ONLY') {
+        if (answer.code === 'SESSION_SNAPSHOTS_OWNER_ONLY' || answer.code === 'ERR_UNKNOWN_CHANNEL') {
           this.ignore(mirror.machineId);
           return;
         }
@@ -258,7 +259,7 @@ export class MachineMirror {
       await this.apply(mirror, (result.data as { data: SessionSnapshotsResult }).data);
     } catch (error) {
       // A Pane without snapshots keeps opening its Sessions with Enter, as today.
-      if (error instanceof PaneError && error.code === 'ERR_HOST_OUTDATED') {
+      if (error instanceof Error && withoutSnapshots(error)) {
         this.ignore(mirror.machineId);
         return;
       }
@@ -283,6 +284,8 @@ export class MachineMirror {
     const joined = await Promise.all(result.snapshots.map(async sent => {
       // The host projects what it sends; the desktop projects it again, so it never stores more than the plan allows.
       const projected = projectSnapshot(sent);
+      // A host that can't read the chat yet (it restarted) says nothing of its messages: the held ones stay, in any run.
+      if (projected.transcriptUnknown === true) return withHeldMessages(mirror.index.has(sent.sessionId) ? await this.load(mirror, sent.sessionId) : undefined, projected);
       return merged(sameRun && joinsHeld(mirror.index.get(sent.sessionId), projected) ? await this.load(mirror, sent.sessionId) : undefined, projected);
     }));
     if (this.stopped || this.mirrors.get(mirror.machineId) !== mirror) return;
@@ -540,6 +543,19 @@ function requestOf(mirror: Mirror): SessionSnapshotsRequest {
   for (const [sessionId, entry] of mirror.index) if (entry.held) held[sessionId] = entry.held;
   if (Object.keys(held).length > 0) request.held = held;
   return request;
+}
+
+/** The host has no snapshots channel: an older Pane (`ERR_HOST_OUTDATED`), or one that answers it as unknown. */
+function withoutSnapshots(error: Error): boolean {
+  if (error instanceof PaneError) return error.code === 'ERR_HOST_OUTDATED' || error.code === 'ERR_UNKNOWN_CHANNEL';
+  return error instanceof RemoteRequestError && error.code === 'ERR_UNKNOWN_CHANNEL';
+}
+
+/** A snapshot whose messages the host doesn't know yet, carrying the messages and count held for it, when any. */
+function withHeldMessages(held: SessionSnapshot | undefined, next: SessionSnapshot): SessionSnapshot {
+  const transcript = held?.chat.transcript;
+  if (!held || !transcript) return next;
+  return { ...next, chat: { ...next.chat, transcript, messageCount: held.chat.messageCount } };
 }
 
 /** Whether the held copy is needed to fill a window the host sent short: same conversation, fewer than 30 messages. */

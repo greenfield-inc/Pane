@@ -1114,8 +1114,12 @@ Some machines are never copied, and their folder is removed:
 - a machine that is forgotten;
 - a machine not seen for 30 days.
 
-A machine whose Pane has no snapshots is left alone until it reconnects. Each
-machine's state is `live`, `catching-up` or `offline`, with `lastSeenAt`.
+A snapshot marked `transcriptUnknown` (its host restarted and hasn't run the
+chat's agent since) keeps the messages and count the mirror already holds, in
+any host run, until a snapshot with a transcript arrives. A machine whose Pane
+has no snapshots (`ERR_HOST_OUTDATED`, or `ERR_UNKNOWN_CHANNEL` from an older
+host) is left alone until it reconnects. Each machine's state is `live`,
+`catching-up` or `offline`, with `lastSeenAt`.
 
 The existing
 `pane-chat:*` channels remain compatibility endpoints for the imported legacy
