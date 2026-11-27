@@ -351,6 +351,15 @@ composer marks it in amber like a mode that never asks.
   a check and On/Off settings are switches. A mode that never asks (Bypass), or
   Pane's Full access when on, leaves a small shield on the row. **Stop** (or Esc in the composer) cancels the turn.
   What `@`, `$` and `/` open is under [Files and skills in a message](#files-and-skills-in-a-message).
+- The input grows with its text to about 40% of the chat's height (never less
+  than 192px) before it scrolls. A line starting `- ` (or `* `) is a bullet:
+  Enter starts the next bullet, Enter on an empty bullet ends the list, and
+  Tab / Shift-Tab indent and outdent it by two spaces. Off a bullet, Enter sends
+  as usual. The message is sent as the plain markdown you see.
+- The dock (approval and question cards, the status bar, the composer) floats
+  over the conversation: only its cards and rows cover it, and the conversation
+  shows, scrolls and takes clicks in the gaps around them. Scrolled to the end,
+  the last message sits fully above the dock.
 - **Status bar** (D-222, D-253, D-267, D-276): one muted line just above the composer,
   items split by dots, each opening what it names:
   - **Context left** ("Ctx 41%", amber at 20% or less) opens the tokens used,

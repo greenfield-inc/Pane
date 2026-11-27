@@ -181,7 +181,8 @@ test('the highlight stays on its text while it wraps and scrolls', async ({ page
   await expect(options(page).first()).toBeVisible();
   await input.press('Enter');
   await input.pressSequentially('wrap under 360px?');
-  for (let line = 0; line < 12; line += 1) await input.press('Shift+Enter');
+  // Enough lines to pass the input's cap (about 40% of the chat) so it scrolls.
+  for (let line = 0; line < 24; line += 1) await input.press('Shift+Enter');
   const read = () => page.evaluate(() => {
     const box = document.querySelector('textarea')!;
     const layer = document.querySelector<HTMLElement>('.chat-input-highlight')!;

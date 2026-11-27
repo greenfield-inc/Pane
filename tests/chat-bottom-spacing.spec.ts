@@ -37,10 +37,9 @@ for (const query of ['working=1', 'working=1&queue=2', 'permission=1', '']) {
   test(`the latest message stays fully above the composer (${query || 'idle'})`, async ({ page }) => {
     await open(page, `status=1&conversation=1&long=1&${query}&width=${width()}`);
     const last = await lastRow(page);
-    const viewport = await box(page, '.chat-viewport');
+    // The conversation runs on under the dock (T-137); scrolled to the end, its last row clears it.
     const footer = await box(page, '.chat-composer-footer');
-    expect(last.bottom).toBeLessThanOrEqual(viewport.bottom);
-    expect(viewport.bottom).toBeLessThanOrEqual(footer.top + 0.5);
+    expect(last.bottom).toBeLessThanOrEqual(footer.top + 0.5);
     // Not a large empty band either.
     expect(footer.top - last.bottom, 'last row to the footer').toBeLessThanOrEqual(20);
   });

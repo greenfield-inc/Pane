@@ -23,6 +23,7 @@ import { ChatComposerMenu } from './ChatComposerMenu';
 import { ChatReferencesContext, type ChatReferences } from './chatReferences';
 import { ComposerHighlight } from './ComposerHighlight';
 import { CLEAR_COMMAND, isClearCommand, isResumeCommand, menuCommands } from './chatCommands';
+import { bulletKey, typeBulletEdit } from './composerBullets';
 import { useComposerMenu } from './useComposerMenu';
 import { COMPOSER_MENU_TEXT, composerPlaceholder, skillNames } from '../../../../shared/composerMentions';
 import { ChatQueue } from './ChatQueue';
@@ -92,6 +93,28 @@ function ScrollToLatest({ viewer, hasNewer, follow }: { viewer: ChatTabViewer; h
     requestAnimationFrame(() => viewport.getState().scrollToBottom({ behavior: 'instant' }));
   };
   return <button type="button" disabled={isAtBottom && !hasNewer} onClick={() => void jump()} className="chat-latest" aria-label="Scroll to latest message"><ArrowDown className="h-4 w-4" /></button>;
+}
+
+/**
+ * The dock (cards, status row, input) floats over the conversation, which shows through the
+ * gaps around it (T-137). The conversation pads its end by the dock's height so its last line
+ * scrolls fully above it, and the input may grow to 40% of the chat's height.
+ */
+function useDockSize(rootRef: RefObject<HTMLElement | null>, footerRef: RefObject<HTMLElement | null>) {
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const footer = footerRef.current;
+    if (!root || !footer) return;
+    const measure = () => {
+      root.style.setProperty('--chat-dock-height', `${footer.offsetHeight}px`);
+      root.style.setProperty('--chat-height', `${root.clientHeight}px`);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    observer.observe(footer);
+    return () => observer.disconnect();
+  }, [rootRef, footerRef]);
 }
 
 interface ScrollAnchor {
@@ -302,6 +325,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const actionsRef = useRef<HTMLDivElement>(null);
   const phone = usePhoneWidth(actionsRef);
   const footerRef = useRef<HTMLDivElement>(null);
+  useDockSize(findRootRef, footerRef);
   /** The bar's "2 queued": brings the queue into view and puts focus on its first row. */
   const showQueue = () => {
     const queue = footerRef.current?.querySelector<HTMLElement>('.chat-queue');
@@ -697,7 +721,15 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
                 void runtime.thread.composer.send();
                 return;
               }
-              composerMenu.keyDown(event);
+              if (composerMenu.keyDown(event)) return;
+              // Bullet lists: Enter continues one and Tab indents it; off a bullet, both keep their usual meaning.
+              const box = event.currentTarget;
+              const bullet = !event.altKey && !event.metaKey && !event.ctrlKey && !box.readOnly
+                ? bulletKey(box.value, box.selectionStart, box.selectionEnd, event.key, event.shiftKey) : undefined;
+              if (bullet) {
+                event.preventDefault();
+                typeBulletEdit(box, bullet);
+              }
             }}
             className="chat-input" />
           </div>

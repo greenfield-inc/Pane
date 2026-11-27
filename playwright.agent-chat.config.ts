@@ -3,7 +3,7 @@ import { defineConfig, type Project } from '@playwright/test';
 // The chat composer specs mount renderer-only host fixtures (chat-tab-composer.html);
 // no Electron process, native agent or real data. Each runs at a desktop and a
 // phone size. CI runs them in the browser smoke lane (playwright.ci.minimal.config.ts).
-export const CHAT_SPECS = ['agent-chat-lifecycle.spec.ts', 'chat-composer-layout.spec.ts', 'chat-attachments.spec.ts', 'chat-copy.spec.ts', 'chat-queue.spec.ts', 'chat-questions.spec.ts', 'chat-status-bar.spec.ts', 'chat-agents-working.spec.ts', 'chat-bottom-spacing.spec.ts', 'chat-mentions.spec.ts'];
+export const CHAT_SPECS = ['agent-chat-lifecycle.spec.ts', 'chat-composer-layout.spec.ts', 'chat-attachments.spec.ts', 'chat-copy.spec.ts', 'chat-queue.spec.ts', 'chat-questions.spec.ts', 'chat-status-bar.spec.ts', 'chat-agents-working.spec.ts', 'chat-bottom-spacing.spec.ts', 'chat-mentions.spec.ts', 'chat-composer-input.spec.ts'];
 
 export const CHAT_PROJECTS: Project[] = [
   { name: 'desktop', testMatch: CHAT_SPECS, timeout: 45000, use: { viewport: { width: 1400, height: 950 } } },
