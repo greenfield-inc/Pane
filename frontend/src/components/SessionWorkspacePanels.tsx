@@ -33,6 +33,8 @@ import { escapeApprovalColumn, useLeaveOnClose } from './approvals/useSplitOverl
 import { useProjectViewActionsStore, type ProjectViewActions } from '../stores/projectViewActionsStore';
 import { announceTerminalReflow } from '../utils/terminalReflow';
 import { switchMark } from '../../../shared/switchMarks';
+import { useSessionShow } from '../contexts/SessionShowContext';
+import { rememberCachedLayout, rememberCachedPanels } from '../stores/sessionViewCache';
 import {
   activatePanelInLayout,
   addPanelToGroup,
@@ -222,6 +224,17 @@ export function SessionWorkspacePanels({
     return () => observer.disconnect();
   }, []);
   const [loaded, setLoaded] = useState(false);
+  // What the Session view cache holds for this Session (T-87): its tabs and layouts, read
+  // in one call, so the layout is placed before the first paint instead of after three reads.
+  const show = useSessionShow();
+  const prefetched = show.entry?.view.internalSession.id === sessionId ? show.entry : undefined;
+  const prefetchedRef = useRef(prefetched);
+  // Shown by the sidebar cursor and not settled: nothing is saved (layout, active tab).
+  const peekingRef = useRef(show.peeking);
+  useLayoutEffect(() => {
+    prefetchedRef.current = prefetched;
+    peekingRef.current = show.peeking;
+  }, [prefetched, show.peeking]);
   // The split layout measures itself before its panels paint: for those first
   // frames the stage keeps the skeleton the terminal's own mask then takes over.
   const [stageUnderlay, setStageUnderlay] = useState(true);
@@ -289,6 +302,7 @@ export function SessionWorkspacePanels({
     // The host keeps it as the last-used layout; this desktop keeps its own.
     panelApi.setLayout(pending.sessionId, pending.layout).catch(() => {});
     rememberPaneLayout(pending.hostId, pending.sessionId, pending.layout);
+    rememberCachedLayout(pending.sessionId, pending.layout);
   }, []);
   const hostId = useConfigStore(state => state.config ? getActiveRemoteHostId(state.config.remoteDaemon) : undefined);
   // The host this Session's layout was loaded from, so writes land in its memory.
@@ -324,6 +338,8 @@ export function SessionWorkspacePanels({
     const store = usePanelStore.getState();
     store.setLayout(sessionId, repaired);
     store.setFocusedGroup(sessionId, focusedGroupId);
+    // A Session the cursor only passes over is shown as it was left, and nothing of it is saved (T-87).
+    if (peekingRef.current) return;
     const focusedPanelId = findGroup(repaired.root, focusedGroupId)?.activePanelId;
     // The Overview and To-dos have no panel record, so the host keeps the last real tab as the active one.
     if (focusedPanelId && focusedPanelId !== sessionOverviewTabId(sessionId) && focusedPanelId !== sessionTodosTabId(sessionId) && store.activePanels[sessionId] !== focusedPanelId) {
@@ -335,19 +351,17 @@ export function SessionWorkspacePanels({
     persistTimer.current = setTimeout(flushLayout, 300);
   }, [sessionId, flushLayout]);
   useEffect(() => flushLayout, [sessionId, flushLayout]);
+  // Leaving the Session hands its tabs to the Session view cache, as they are now (T-87).
+  useEffect(() => () => rememberCachedPanels(sessionId, usePanelStore.getState().panels[sessionId]), [sessionId]);
 
-  useEffect(() => {
+  // A layout effect: with the tabs and layout already held (the Session view cache), the
+  // layout is placed in this commit, before the first paint.
+  useLayoutEffect(() => {
     let cancelled = false;
     setLoaded(false);
     setError(null);
     switchMark('panels:start', { sessionId });
-    void panelApi.loadPanelsForSession(sessionId).then(async saved => {
-      if (cancelled) return;
-      usePanelStore.getState().setPanels(sessionId, saved);
-      // applyLayout below remembers whatever this desktop shows first.
-      const remembered = await readPaneLayout(hostIdRef.current, sessionId);
-      const stored = remembered ?? await panelApi.getLayout(sessionId);
-      if (cancelled) return;
+    const place = (saved: ToolPanel[], stored: SessionPanelLayout | null) => {
       const live = usePanelStore.getState().panels[sessionId] ?? saved;
       // The Session moves to its chat a moment before the terminal closes; that terminal's slot is already the chat's.
       const replaced = live.find(panel => panel.id === agentPanelId)?.metadata?.replacesPanelId;
@@ -367,9 +381,24 @@ export function SessionWorkspacePanels({
       applyLayout(reconcile(withOverview, [agentPanelId, overviewId, ...(todosId ? [todosId] : []), ...stage.map(panel => panel.id)], splitIds).layout);
       setLoaded(true);
       switchMark('panels:loaded', { sessionId });
-    }).catch(error => {
-      if (!cancelled) setError(error instanceof Error ? error.message : 'Could not load Session tools');
-    });
+    };
+    const held = prefetchedRef.current;
+    if (held) {
+      usePanelStore.getState().setPanels(sessionId, held.panels);
+      place(held.panels, held.remembered ?? held.layout);
+    } else {
+      void panelApi.loadPanelsForSession(sessionId).then(async saved => {
+        if (cancelled) return;
+        usePanelStore.getState().setPanels(sessionId, saved);
+        // applyLayout below remembers whatever this desktop shows first.
+        const remembered = await readPaneLayout(hostIdRef.current, sessionId);
+        const stored = remembered ?? await panelApi.getLayout(sessionId);
+        if (cancelled) return;
+        place(saved, stored);
+      }).catch(error => {
+        if (!cancelled) setError(error instanceof Error ? error.message : 'Could not load Session tools');
+      });
+    }
     const events = window.electronAPI.events;
     const created = events.onPanelCreated(panel => {
       if (panel.sessionId !== sessionId) return;

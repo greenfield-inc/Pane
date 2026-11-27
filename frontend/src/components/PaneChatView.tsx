@@ -50,6 +50,18 @@ import { useHotkey } from '../hooks/useHotkey';
 import { readDraggedSessionId, startSessionDrag, useDraggedSessionId } from '../utils/sessionDrag';
 import type { DropZone, LayoutDirection } from '../utils/layoutTree';
 import { switchMark } from '../../../shared/switchMarks';
+import { useCursorFollowEnabled } from '../services/sessionCursor';
+import { SessionShowContext } from '../contexts/SessionShowContext';
+import { QuietSkeletons } from './ui/Skeleton';
+import {
+  cachedSessionView,
+  isOpening,
+  openSessionView,
+  peekSessionView,
+  updateCachedSession,
+  useSessionViewCache,
+  type SessionViewEntry,
+} from '../stores/sessionViewCache';
 import {
   closeSessionTile,
   dropSessionOnTile,
@@ -59,6 +71,7 @@ import {
   focusedSessionTile,
   resizeSessionSplit,
   showSessionInLayout,
+  findTileForSession,
   toggleMaximizedTile,
 } from '../utils/sessionWorkspaceLayout';
 
@@ -182,6 +195,8 @@ function SessionWorkspace() {
   const selectedSessionId = useOrchestrationSessionStore(state => state.selectedSessionId);
   const selectionRevision = useOrchestrationSessionStore(state => state.selectionRevision);
   const select = useOrchestrationSessionStore(state => state.select);
+  // The sidebar cursor's Session shows in the focused tile only, and is never saved into the layout (T-87).
+  const cursorSessionId = useOrchestrationSessionStore(state => state.cursorSessionId);
   const layout = useSessionWorkspaceLayoutStore(state => state.layout);
   const applyLayout = useSessionWorkspaceLayoutStore(state => state.apply);
   const hydrateLayout = useSessionWorkspaceLayoutStore(state => state.hydrate);
@@ -368,7 +383,12 @@ function SessionWorkspace() {
 
   // The displayed tree follows intent in this commit. The passive effect above
   // only remembers it; it must never expose the outgoing focused workspace.
-  const displayedLayout = selectedSessionId ? showSessionInLayout(layout, selectedSessionId) : layout;
+  // The cursor shows its Session in the focused tile only. One already on screen in another
+  // tile is left where it is: the settled focus (and a maximized tile) stays until it settles.
+  const settledLayout = selectedSessionId ? showSessionInLayout(layout, selectedSessionId) : layout;
+  const displayedLayout = cursorSessionId && !findTileForSession(settledLayout.root, cursorSessionId)
+    ? showSessionInLayout(settledLayout, cursorSessionId)
+    : settledLayout;
   return (
     <div data-testid="session-tile-layout" className="relative flex min-h-0 flex-1 overflow-hidden bg-bg-primary">
       <SessionTileLayout
@@ -429,6 +449,8 @@ function SessionTile({
 }: SessionTileProps) {
   const sessionId = tile.sessionId;
   const hostId = useConfigStore(state => state.config ? getActiveRemoteHostId(state.config.remoteDaemon) : undefined);
+  // Arrow keys open chat Sessions (T-87): the tile paints from the Session view cache.
+  const cached = useCursorFollowEnabled() && !inline;
   const visit = useOrchestrationSessionStore(state => state.selectionVisits[sessionId] ?? 0);
   const [view, setView] = useState<OrchestrationSessionView<Session> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -467,15 +489,16 @@ function SessionTile({
   }, [sessionId, hostId, visit]);
 
   useEffect(() => {
+    if (cached) return undefined;
     void load();
     return () => { requestGeneration.current += 1; };
-  }, [load]);
+  }, [cached, load]);
 
   // The view carries a snapshot of the record; a changed agent, or an agent tab
   // that moved (Switch to chat), needs a fresh panel, while any other edit only
   // needs the newer record folded in.
   useEffect(() => {
-    if (!view || !record || view.session.id !== record.id) return;
+    if (cached || !view || !record || view.session.id !== record.id) return;
     if (view.agent !== record.agent || view.panel.id !== record.panelIds[record.agent]) {
       const reloadKey = `${record.id}:${record.agent}:${record.panelIds[record.agent]}`;
       if (agentReloadKey.current === reloadKey) return;
@@ -488,7 +511,7 @@ function SessionTile({
     agentReloadKey.current = null;
     if (view.session.revision === record.revision) return;
     setView(current => current ? { ...current, session: record } : current);
-  }, [load, record, view]);
+  }, [cached, load, record, view]);
 
   const handleOverviewUpdate = useCallback(async (input: OrchestrationSessionUpdateInput): Promise<OrchestrationSessionRecord> => {
     if (!view) throw new Error('This Session is not open');
@@ -544,7 +567,9 @@ function SessionTile({
       onMouseDownCapture={focusThisTile}
       onFocusCapture={focusThisTile}
     >
-      {view && view.session.id === sessionId && loadingSessionId === sessionId && loadingHostId === hostId && loadingVisit === visit && !isLoading && !selectionError && !error ? (
+      {cached ? (
+        <CachedSessionTileBody sessionId={sessionId} record={record} hostId={hostId} chrome={chrome} />
+      ) : view && view.session.id === sessionId && loadingSessionId === sessionId && loadingHostId === hostId && loadingVisit === visit && !isLoading && !selectionError && !error ? (
         <NamedSessionWorkspace
           // Changing which Session a tile shows starts that Session's workspace
           // fresh, exactly as switching Sessions always has: its inspector, its
@@ -582,6 +607,123 @@ function SessionTile({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * A tile's Session painted from the Session view cache (T-87, with arrow keys opening
+ * Sessions). A Session held is shown at once; one not held is read with one `peek` while
+ * the sidebar cursor shows it (nothing saved, no agent started) or one `open` once
+ * settled. Until it arrives the tile keeps what it showed, dimmed, under the new name:
+ * no skeleton, so moving the cursor never flashes bones.
+ */
+function CachedSessionTileBody({ sessionId, record, hostId, chrome }: {
+  sessionId: string;
+  record?: OrchestrationSessionRecord;
+  hostId: string | null | undefined;
+  chrome: SessionTileChrome;
+}) {
+  const cursorSessionId = useOrchestrationSessionStore(state => state.cursorSessionId);
+  const quietSessionId = useOrchestrationSessionStore(state => state.quietSessionId);
+  const peeking = cursorSessionId === sessionId;
+  const selectionError = useOrchestrationSessionStore(state => state.selectedSessionId === sessionId ? state.selectionError : null);
+  const entry = useSessionViewCache(state => state.entries[sessionId]);
+  const [failure, setFailure] = useState<{ sessionId: string; message: string } | null>(null);
+  const [retry, setRetry] = useState(0);
+  // What the tile showed last, kept on screen (dimmed) while the next Session is read.
+  const [shown, setShown] = useState<SessionViewEntry | undefined>(entry);
+  if (entry && entry !== shown) setShown(entry);
+
+  const internalSessionId = record?.internalSessionId;
+  // The agent changed, or its tab moved (Switch to chat): what the cache holds is another tab.
+  const stale = !!entry && !!record && (entry.view.agent !== record.agent || entry.view.panel.id !== record.panelIds[record.agent]);
+  const opened = entry?.opened === true;
+  const held = entry !== undefined;
+  useEffect(() => {
+    if (!internalSessionId) return undefined;
+    let cancelled = false;
+    const target = { sessionId, internalSessionId, hostId };
+    const fail = (cause: unknown) => {
+      if (!cancelled) setFailure({ sessionId, message: cause instanceof Error ? cause.message : 'Failed to open Session' });
+    };
+    setFailure(current => (current?.sessionId === sessionId ? current : null));
+    if (peeking) {
+      if (!held) void peekSessionView(target).catch(fail);
+    } else if ((!opened || stale) && !isOpening(sessionId)) {
+      void openSessionView(target).catch(fail);
+    }
+    return () => { cancelled = true; };
+  }, [sessionId, internalSessionId, hostId, peeking, held, opened, stale, retry]);
+
+  const display = entry ?? shown;
+  const view = useMemo(() => {
+    if (!display) return undefined;
+    // A newer record (a rename, a pin) folds into the held view without a read.
+    const current = record?.id === display.view.session.id ? record : undefined;
+    return current && current.revision > display.view.session.revision ? { ...display.view, session: current } : display.view;
+  }, [display, record]);
+
+  // The cursor's Session, and the one kept dimmed behind it while the next is read, are only
+  // being looked at: nothing is saved for them, and no agent starts.
+  const showsAnother = !!display && display.view.session.id !== sessionId;
+  const show = useMemo(() => {
+    const shownId = display?.view.session.id;
+    const lookedAt = showsAnother || shownId === cursorSessionId;
+    return { peeking: lookedAt, startsAgents: !lookedAt && shownId !== quietSessionId, entry: display };
+  }, [cursorSessionId, display, quietSessionId, showsAnother]);
+
+  const onOverviewUpdate = useCallback(async (input: OrchestrationSessionUpdateInput): Promise<OrchestrationSessionRecord> => {
+    const base = cachedSessionView(sessionId)?.view;
+    if (!base) throw new Error('This Session is not open');
+    const next = await useOrchestrationSessionStore.getState().update({ sessionId }, { ...input, expectedRevision: Math.max(base.session.revision, record?.revision ?? 0) });
+    updateCachedSession(sessionId, { view: { ...base, session: next } });
+    return next;
+  }, [record?.revision, sessionId]);
+
+  const retryOpen = useCallback(() => {
+    setFailure(null);
+    if (selectionError) void useOrchestrationSessionStore.getState().select({ sessionId }).catch(() => undefined);
+    setRetry(value => value + 1);
+  }, [selectionError, sessionId]);
+
+  const error = selectionError ?? (failure?.sessionId === sessionId ? failure.message : null);
+  if (error && !entry) {
+    return <SessionTileFallback record={record} error={error} isLoading={false} chrome={chrome} onRetry={retryOpen} />;
+  }
+  if (!display || !view) {
+    // Nothing shown yet (the cursor came from another view): no bones while the cursor only passes over.
+    return (
+      <QuietSkeletons quiet={peeking}>
+        <SessionTileFallback record={record} error={null} isLoading chrome={chrome} onRetry={retryOpen} />
+      </QuietSkeletons>
+    );
+  }
+  return (
+    <SessionShowContext.Provider value={show}>
+      <div
+        className={cn('flex h-full min-h-0 flex-col', showsAnother && 'pointer-events-none opacity-50')}
+        // The Session shown before, while this one is read: it takes no focus and no clicks.
+        inert={showsAnother || undefined}
+        data-session-shown-before={showsAnother ? display.view.session.id : undefined}
+      >
+        {/* No bones anywhere in a Session the cursor only passes over, nor in the one kept dimmed behind it (T-87, G). */}
+        <QuietSkeletons quiet={show.peeking}>
+          <NamedSessionWorkspace
+            key={display.view.session.id}
+            view={view}
+            error={null}
+            chrome={chrome}
+            onOverviewUpdate={onOverviewUpdate}
+            onRetry={retryOpen}
+          />
+        </QuietSkeletons>
+      </div>
+      {showsAnother && (
+        <div className="absolute inset-x-0 top-0 z-20 bg-bg-primary" data-testid="session-tile-next-name">
+          <SessionTileHeader name={record?.name ?? 'Session'} chrome={chrome} />
+        </div>
+      )}
+    </SessionShowContext.Provider>
   );
 }
 

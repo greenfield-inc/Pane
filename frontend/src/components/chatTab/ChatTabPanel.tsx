@@ -10,6 +10,7 @@ import { chatTurns, messageTime, steeredMessageId, waitingToolIds, workerNotes, 
 import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
 import { switchMark } from '../../../../shared/switchMarks';
+import { useSessionShow } from '../../contexts/SessionShowContext';
 import { toAssistantMessage } from '../agentChat/convertMessage';
 import type { ActiveMachine } from '../../stores/activeMachineStore';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
@@ -210,6 +211,14 @@ function TurnsSkeleton() {
 
 export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
+  // A Session the sidebar cursor only shows (T-87): its chat reads never start the agent,
+  // and it paints the window the Session's one open or peek call returned.
+  const show = useSessionShow();
+  const primed = show.entry?.chat?.panelId === panelId ? show.entry.chat : undefined;
+  useMemo(() => {
+    viewer.setStartOnRead(show.startsAgents);
+    if (primed && show.entry) viewer.prime(primed, show.entry.readAt);
+  }, [viewer, show.startsAgents, show.entry, primed]);
   const catalog = useChatAgents(client);
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
   const view = snapshot.view;

@@ -13,6 +13,14 @@
 import { create } from 'zustand';
 import { useNavigationStore } from '../stores/navigationStore';
 import {
+  SESSION_CURSOR_ATTRIBUTE,
+  cursorFollowEnabled,
+  pauseSessionCursor,
+  pendingCursorSession,
+  settleSessionCursor,
+  showSessionAtCursor,
+} from './sessionCursor';
+import {
   sidebarListKey,
   stepStop,
   stopInDirection,
@@ -489,6 +497,12 @@ export function handleSidebarListKey(event: KeyboardEvent): void {
     sidebarCursor = next;
     next.focus({ preventScroll: false });
     next.scrollIntoView({ block: 'nearest' });
+    // Arrow keys open chat Sessions (T-87): the row's Session shows, and focus stays here.
+    if (cursorFollowEnabled()) {
+      const sessionId = next.getAttribute(SESSION_CURSOR_ATTRIBUTE);
+      if (sessionId) showSessionAtCursor(sessionId);
+      else pauseSessionCursor();
+    }
   };
 
   switch (sidebarListKey(event.key)) {
@@ -558,6 +572,8 @@ export function handleSidebarListKey(event: KeyboardEvent): void {
       return;
     }
     default:
+      // Typing on the row settles what the cursor shows (T-87); the key keeps its own meaning.
+      if (event.key.length === 1 && pendingCursorSession()) settleSessionCursor();
   }
 }
 

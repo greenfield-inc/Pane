@@ -558,6 +558,26 @@ export function clientShowsChatTab(options: PaneCommandValue | undefined, agent:
   return decoded?.chatTabs === true && (decoded.chatAgents === true || agentConfig(agent)?.chat?.legacyClients === true);
 }
 
+/** A Pane's tabs as `panels:list` gives them to this client: chat tabs only when it can show them. */
+export function panelsForClient(sessionId: string, options: PaneCommandValue | undefined): ToolPanel[] {
+  return panelManager.getPanelsForSession(sessionId).filter(panel => panel.type !== 'chat' || clientShowsChatTab(options, decodeChatPanelState(panel.state.customState)?.agent ?? ''));
+}
+
+/** The host's last-used tab layout of a Pane, or null when it has none or it is unreadable. */
+export function storedPanelLayout(sessionId: string): SessionPanelLayout | null {
+  const raw = databaseService.getSessionPanelLayout(sessionId);
+  if (!raw) return null;
+  try {
+    // The same decoder reads each desktop's own layout memory.
+    const parsed = decodeSessionPanelLayout(JSON.parse(raw));
+    if (parsed) return parsed;
+  } catch {
+    // Malformed JSON should never brick a session
+  }
+  console.warn('[IPC] Corrupt panel_layout JSON for session', sessionId);
+  return null;
+}
+
 export function registerPanelHandlers(
   ipcMain: IpcMain,
   services: AppServices,
@@ -675,8 +695,7 @@ export function registerPanelHandlers(
   // Clients list chat tabs only when they say they understand them (`clientShowsChatTab`).
   commandRegistry.register('panels:list', async (sessionId: string, options?: PaneCommandValue) => {
     try {
-      const panels = panelManager.getPanelsForSession(sessionId).filter(panel => panel.type !== 'chat' || clientShowsChatTab(options, decodeChatPanelState(panel.state.customState)?.agent ?? ''));
-      return { success: true, data: panels };
+      return { success: true, data: panelsForClient(sessionId, options) };
     } catch (error) {
       console.error('[IPC] Failed to list panels:', error);
       return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -700,17 +719,7 @@ export function registerPanelHandlers(
   // Layout get/set for split tab groups
   commandRegistry.register('panels:get-layout', async (sessionId: string) => {
     try {
-      const raw = databaseService.getSessionPanelLayout(sessionId);
-      if (!raw) return { success: true, data: null };
-      try {
-        // The same decoder reads each desktop's own layout memory.
-        const parsed = decodeSessionPanelLayout(JSON.parse(raw));
-        if (parsed) return { success: true, data: parsed };
-      } catch {
-        // Malformed JSON should never brick a session
-      }
-      console.warn('[IPC] Corrupt panel_layout JSON for session', sessionId);
-      return { success: true, data: null };
+      return { success: true, data: storedPanelLayout(sessionId) };
     } catch (error) {
       console.error('[IPC] Failed to get panel layout:', error);
       return { success: false, error: error instanceof Error ? error.message : String(error) };

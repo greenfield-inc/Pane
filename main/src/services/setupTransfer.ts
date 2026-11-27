@@ -74,7 +74,7 @@ const APPEARANCE_KEYS = [
 ] as const satisfies readonly (keyof SetupAppearance)[];
 
 const PREFERENCE_CONFIG_KEYS = [
-  'notifications', 'keyboardShortcutsEnabled', 'commandPaletteShortcutEnabled', 'keyboardShortcutOverrides',
+  'notifications', 'keyboardShortcutsEnabled', 'commandPaletteShortcutEnabled', 'arrowKeysOpenSessions', 'keyboardShortcutOverrides',
   'kittyKeyboardEnabled', 'terminalCopyOnSelect', 'terminalReferencesEnabled',
   'htmlFileOpenMode', 'enableCommitFooter', 'gitAttributionEnabled', 'autoCheckUpdates',
   'keepAwakeWhileSessionsActive', 'keepAwakeWhilePluggedIn', 'keepAwakeOnBattery', 'backgroundActivity', 'terminalPowerMode',
@@ -120,6 +120,7 @@ const FIELD_LABELS = {
   notifications: 'Notifications',
   keyboardShortcutsEnabled: 'Keyboard shortcuts',
   commandPaletteShortcutEnabled: 'Command Palette shortcut',
+  arrowKeysOpenSessions: 'Arrow keys open chat Sessions',
   keyboardShortcutOverrides: 'Changed key bindings',
   kittyKeyboardEnabled: 'Kitty keyboard',
   terminalCopyOnSelect: 'Copy on select',
@@ -493,6 +494,7 @@ const sectionSchemas = {
     notifications: boundary.optional(boundary.object({ playSound: boundary.boolean, enabled: boundary.boolean })),
     keyboardShortcutsEnabled: booleanField,
     commandPaletteShortcutEnabled: booleanField,
+    arrowKeysOpenSessions: booleanField,
     keyboardShortcutOverrides: boundary.optional(boundary.record(keyboardOverrideValue)),
     kittyKeyboardEnabled: booleanField,
     terminalCopyOnSelect: booleanField,

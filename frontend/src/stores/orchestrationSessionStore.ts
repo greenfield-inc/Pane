@@ -10,6 +10,7 @@ import type {
 } from '../../../shared/types/orchestrationSession';
 import type { Session } from '../types/session';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
+import { clearSessionViewCache, openSessionView } from './sessionViewCache';
 
 export function isArchivedOrchestrationSession(session: OrchestrationSessionRecord): boolean {
   return session.archived === true;
@@ -33,6 +34,24 @@ interface OrchestrationSessionState {
   selectionVisits: Record<string, number>;
   /** Bumps on every host switch, so host-scoped UI state (such as a pending Undo) can tell hosts apart. */
   hostRevision: number;
+  /**
+   * The Session the sidebar cursor shows but has not settled on (T-87): the focused tile
+   * shows it, while `selectedSessionId` stays what was last settled. Nothing is saved and
+   * no agent starts for it until `settle`.
+   */
+  cursorSessionId?: string;
+  /**
+   * The selected Session was settled by the cursor resting (not Enter or a click): its chat's
+   * reads do not start a stopped or paused agent until it is opened by hand (T-87).
+   */
+  quietSessionId?: string;
+  /** Show a Session under the sidebar cursor; the selected one clears the cursor. */
+  showAtCursor: (sessionId: string | undefined) => void;
+  /**
+   * The cursor rested, or Enter, a click or typing: select the Session with one `open`
+   * call, which also starts its chat's agent (T-87). `select` without the extra reads.
+   */
+  settle: (sessionId: string, hostId: string | null | undefined, options?: { resume?: boolean }) => Promise<void>;
   invalidateHost: () => void;
   load: () => Promise<void>;
   refresh: (options?: { adoptServerSelection?: boolean; throwOnError?: boolean }) => Promise<void>;
@@ -53,6 +72,8 @@ let loadSequence = 0;
 let operationGeneration = 0;
 let refreshSequence = 0;
 let pendingSelectionGeneration: number | null = null;
+/** Bumps each time a Session list lands in the store, so a settle can tell a newer one arrived meanwhile. */
+let listsApplied = 0;
 // Each desktop keeps its own selected Session. The host's selectedSessionId is
 // the one any client picked last, a starting point when this desktop has none.
 let preferredSessionId: string | undefined;
@@ -90,6 +111,7 @@ function revisionAfter(state: OrchestrationSessionState, selectedSessionId: stri
 }
 
 function applyList(data: OrchestrationSessionListResult, ownSelectionId?: string): void {
+  listsApplied += 1;
   useOrchestrationSessionStore.setState((state) => {
     const selectedSessionId = activeSessionIdFromList(data.sessions, ownSelectionId)
       ?? activeSessionIdFromList(data.sessions, data.selectedSessionId);
@@ -112,6 +134,8 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
   selectionRevision: 0,
   selectionVisits: {},
   hostRevision: 0,
+  cursorSessionId: undefined,
+  quietSessionId: undefined,
   invalidateHost: () => {
     operationGeneration += 1;
     refreshSequence += 1;
@@ -119,7 +143,44 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
     preferredSessionId = undefined;
     loadPromise = null;
     loadSequence += 1;
-    set(state => ({ sessions: [], selectedSessionId: undefined, availability: 'idle', error: null, selectionError: null, selectionRevision: 0, selectionVisits: {}, hostRevision: state.hostRevision + 1 }));
+    clearSessionViewCache();
+    set(state => ({ sessions: [], selectedSessionId: undefined, cursorSessionId: undefined, quietSessionId: undefined, availability: 'idle', error: null, selectionError: null, selectionRevision: 0, selectionVisits: {}, hostRevision: state.hostRevision + 1 }));
+  },
+
+  showAtCursor: (sessionId) => {
+    const state = get();
+    const next = sessionId === state.selectedSessionId ? undefined : sessionId;
+    if (state.cursorSessionId !== next) set({ cursorSessionId: next });
+  },
+
+  settle: async (sessionId, hostId, options) => {
+    const intended = get().sessions.find(session => session.id === sessionId);
+    if (!intended || isArchivedOrchestrationSession(intended)) {
+      set({ cursorSessionId: undefined });
+      return get().select({ sessionId });
+    }
+    const generation = ++operationGeneration;
+    pendingSelectionGeneration = generation;
+    const resume = options?.resume !== false;
+    const listsBefore = listsApplied;
+    // What the cursor showed becomes the selection in the same render: the tile keeps it.
+    set(state => ({ selectedSessionId: intended.id, cursorSessionId: undefined, quietSessionId: resume ? undefined : intended.id, selectionRevision: state.selectionRevision + 1, availability: 'ready', error: null, selectionError: null }));
+    try {
+      const result = await openSessionView({ sessionId: intended.id, internalSessionId: intended.internalSessionId, hostId }, { select: true, resume });
+      // A list that landed meanwhile (a rename, an archive) is newer than this one: keep it.
+      if (generation === operationGeneration && result.list && listsApplied === listsBefore) {
+        refreshSequence += 1;
+        applyList(result.list, intended.id);
+      }
+    } catch (error) {
+      if (generation === operationGeneration) {
+        const message = error instanceof Error ? error.message : 'Failed to select Session';
+        set({ availability: 'error', error: message, selectionError: message });
+        throw error;
+      }
+    } finally {
+      if (pendingSelectionGeneration === generation) pendingSelectionGeneration = null;
+    }
   },
 
   load: async () => {
@@ -170,6 +231,7 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
         if (options?.throwOnError && generation === operationGeneration) throw new Error('Session list changed during restoration; retrying the current view.');
         return;
       }
+      listsApplied += 1;
       set((state) => {
         // Adopting starts from this desktop's own choice and falls back to the
         // host's last-used Session only when it has none.
@@ -220,7 +282,7 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
     if (!orchestrationApi) throw new Error('Sessions are unavailable in this Pane runtime');
     const generation = ++operationGeneration;
     pendingSelectionGeneration = generation;
-    set({ selectionRevision: get().selectionRevision + 1, selectionError: null });
+    set({ selectionRevision: get().selectionRevision + 1, selectionError: null, cursorSessionId: undefined, quietSessionId: undefined });
     const intended = get().sessions.find(session => session.id === selector.sessionId || session.name === selector.name);
     if (intended && !isArchivedOrchestrationSession(intended)) {
       set(state => ({ selectedSessionId: intended.id, availability: 'ready', error: null, selectionError: null,

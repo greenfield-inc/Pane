@@ -97,6 +97,23 @@ node scripts/benchmark-startup-milestones.mjs --pane-dir ~/.pane_bench_a1 --home
 The Pane directory also holds the Chromium profile (`chromium-user-data`, whose
 caches every run clears), the main-process probe and the run's log.
 
+## benchmark-session-switch.mjs
+
+Session switch latency on this Mac, A/B (T-87). Each run is
+`tests/session-switch-latency.spec.ts` in one app checkout: real Electron, an
+isolated Pane (its own PANE_DIR, HOME and Electron profile under a temporary
+TMPDIR), the production renderer and the scripted ACP agent. Runs alternate
+between the `--app` checkouts, each of which must be built first. It prints p50
+and p95 from keydown or click to the Session's last message on screen, per
+scenario and chat size, and checks the arrow-key targets on the last app: p95
+≤ 50 ms for a Session shown before, ≤ 100 ms for one not opened since launch.
+A checkout without the arrow-key scenarios reports click and Enter only.
+
+```bash
+pnpm build:main && pnpm build:frontend && pnpm electron:rebuild   # in each checkout
+node scripts/benchmark-session-switch.mjs --app base=../t87-p0-switch-leak-benchmark --app change=. --runs 2
+```
+
 ## benchmark-session-output.js
 
 Compares loading terminal history just to count it with an indexed SQLite

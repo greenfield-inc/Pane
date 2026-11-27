@@ -260,6 +260,19 @@ out of Pinned until it is restored. RunPane can set the same preference with
 `isPinned` (default false), and update JSON accepts it without changing the
 preference when omitted.
 
+**Arrow keys open chat Sessions** (Settings > Shortcuts, on by default). With a
+Session row focused, **↑** and **↓** show each chat Session as the cursor reaches
+it, and keyboard focus stays in the sidebar. A Session shown before paints at
+once; one not opened since Pane started shows its newest messages as they were
+saved, without starting its agent. The cursor *settles* when it rests on a row
+for a second, or you press **Enter** (which also moves focus into the message
+box), **Space**, start typing, or click into the Session: only then is the
+Session selected and its agent started. Passing over a Session never starts its
+agent or resumes a paused one; Enter or a click resumes it when **Resume a
+paused Pane when you open it** is on. Sessions whose agent runs in a terminal,
+Pane and project rows, the All machines view and a window showing another
+machine keep Enter. With the setting off, the arrows only move the cursor.
+
 Drag a Session up or down in Pinned, in Sessions, or in the compact rail to
 change its place; a line shows where it will land. With a Session row focused,
 **Alt+↑** and **Alt+↓** move it one place and a screen reader hears its new

@@ -2,6 +2,8 @@ import { showActionError } from '../stores/errorStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
+import { clearSessionViewCache } from '../stores/sessionViewCache';
+import { dropSessionCursor } from '../services/sessionCursor';
 import { isMachineDimmed, useAllMachinesStore } from '../stores/allMachinesStore';
 import { LOCAL_MACHINE_ID, type MachineCommand } from '../../../shared/types/machineConnections';
 import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
@@ -94,6 +96,9 @@ export async function openOnMachine(machineId: string, target: MachineTarget): P
   useAllMachinesStore.setState({ offlineNotice: null });
   try {
     await rememberOnMachine(machineId, target);
+    // Every Session view this window holds is this machine's (T-87); the host switch clears them again.
+    dropSessionCursor();
+    clearSessionViewCache();
     const outcome = await state.switchMachine(machineId);
     if (!outcome.ok) showActionError(`Could not open ${target.name} on ${name}`, outcome.needsPassword ? `${name} needs its password. Enter it in Remote Access settings, then try again.` : outcome.error);
   } catch (error) {

@@ -5,7 +5,7 @@ import { teammateSecretRefusal } from '../../../shared/types/paneSecrets';
 import type { AppServices } from './types';
 import type { ChatAgent, ChatPanelState, ChatTabAnswer, ChatTabCreate } from '../../../shared/types/chatTab';
 import type { CreatePanelRequest, PanelOpener, ToolPanel } from '../../../shared/types/panels';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError } from '../../../shared/paneError';
 import { getRuntimeConfigManager } from '../core/runtime';
 import { ShellDetector } from '../utils/shellDetector';
@@ -31,6 +31,7 @@ import type { TerminalPanelState } from '../../../shared/types/panels';
 import { paneScratchDirectory } from '../services/paneScratch';
 
 /** Any agent id; the launcher refuses one this host cannot run, with the agents it can. */
+const chatReadOptionsSchema = boundary.object({ start: boundary.optional(boundary.boolean) });
 const agentSchema = boundary.refine(boundary.nonEmptyString, id => /^[a-z0-9][a-z0-9._-]*$/i.test(id), 'expected an agent id');
 const imageSchema = boundary.object({ mimeType: boundary.string, data: boundary.string });
 const sendSchema = boundary.object({ operationId: boundary.nonEmptyString, text: boundary.string, images: boundary.optional(boundary.array(imageSchema)), now: boundary.optional(boundary.boolean) });
@@ -103,7 +104,12 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
     panelIds === undefined || panelIds === null ? undefined : decodeBoundary(panelIds, boundary.array(boundary.nonEmptyString)),
     sessionSwitchPorts(services, registry),
   ));
-  registry.register('chat-tab:get', (id: string, limit?: number) => manager.view(panelId(id), limit === undefined ? undefined : decodeBoundary(limit, boundary.number)));
+  // `{ start: false }` reads without starting a stopped agent (the sidebar cursor's peek, T-87).
+  registry.register('chat-tab:get', (id: string, limit?: number | null, options?: PaneCommandValue) => manager.view(
+    panelId(id),
+    limit === undefined || limit === null ? undefined : decodeBoundary(limit, boundary.number),
+    decodeOptionalBoundary(options ?? undefined, chatReadOptionsSchema)?.start !== false,
+  ));
   registry.register('chat-tab:history', (id: string, before: number, limit: number) => manager.history(panelId(id), decodeBoundary(before, boundary.number), decodeBoundary(limit, boundary.number)));
   registry.register('chat-tab:send', (id: string, request: PaneCommandValue) => manager.send(panelId(id), decodeBoundary(request, sendSchema)));
   registry.register('chat-tab:receipt', (id: string, operationId: string) => manager.receipt(panelId(id), decodeBoundary(operationId, boundary.nonEmptyString)) ?? null);

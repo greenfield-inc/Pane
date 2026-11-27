@@ -212,6 +212,7 @@ export class ConfigManager extends EventEmitter {
       remoteDaemon: createDefaultRemoteDaemonConfig(),
       keyboardShortcutsEnabled: true,
       commandPaletteShortcutEnabled: true,
+      arrowKeysOpenSessions: true,
       // A fresh install starts on the VS Code keymap, so it has nothing to be told.
       keymapNotice: 'seen',
       terminalShortcuts: [

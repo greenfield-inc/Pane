@@ -182,3 +182,77 @@ describe('Session order', () => {
     expect(ids(store.getState().sessions)).toEqual(['a', 'b', 'c', 'd']);
   });
 });
+
+describe('the sidebar cursor (T-87)', () => {
+  async function setupWithOpen(open: ReturnType<typeof vi.fn>) {
+    vi.resetModules();
+    const getPaneLayout = vi.fn().mockResolvedValue({ success: true, data: null });
+    vi.stubGlobal('window', { electronAPI: { orchestrationSessions: { select, list, open }, uiState: { getPaneLayout } } });
+    const { useOrchestrationSessionStore: store } = await import('./orchestrationSessionStore');
+    // SAFETY: settle reads only the id, name and internal Session id of a record.
+    const records = ['a', 'b'].map(id => ({ id, name: id.toUpperCase(), internalSessionId: `internal-${id}` } as OrchestrationSessionRecord));
+    store.setState({ sessions: records, selectedSessionId: 'a', availability: 'ready' });
+    return store;
+  }
+
+  it('shows a Session at the cursor without selecting it, and the selected one clears the cursor', async () => {
+    const store = await setupWithOpen(vi.fn());
+    store.getState().showAtCursor('b');
+    expect(store.getState()).toMatchObject({ cursorSessionId: 'b', selectedSessionId: 'a' });
+    store.getState().showAtCursor('a');
+    expect(store.getState().cursorSessionId).toBeUndefined();
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it('settles with one selecting open call and selects at once', async () => {
+    const reply = deferred<{ success: true; data: { view: null; panels: never[]; layout: null; list: { sessions: OrchestrationSessionRecord[]; selectedSessionId: string } } }>();
+    const open = vi.fn().mockReturnValue(reply.promise);
+    const store = await setupWithOpen(open);
+    store.getState().showAtCursor('b');
+    const settling = store.getState().settle('b', null);
+    expect(store.getState()).toMatchObject({ cursorSessionId: undefined, selectedSessionId: 'b' });
+    expect(open).toHaveBeenCalledWith({ sessionId: 'b' }, { select: true, resume: true });
+    reply.resolve({ success: true, data: { view: null, panels: [], layout: null, list: { sessions: store.getState().sessions, selectedSessionId: 'b' } } });
+    await settling;
+    expect(store.getState().selectedSessionId).toBe('b');
+    expect(select).not.toHaveBeenCalled();
+    // Settling never counts as a visit: the tile paints from the cache instead of reloading.
+    expect(store.getState().selectionVisits.b).toBeUndefined();
+  });
+
+  it('a newer settle wins over a slower one', async () => {
+    const first = deferred<{ success: true; data: { view: null; panels: never[]; layout: null; list: { sessions: OrchestrationSessionRecord[]; selectedSessionId: string } } }>();
+    const open = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValueOnce({ success: true, data: { view: null, panels: [], layout: null } });
+    const store = await setupWithOpen(open);
+    const slow = store.getState().settle('b', null);
+    await store.getState().settle('a', null);
+    first.resolve({ success: true, data: { view: null, panels: [], layout: null, list: { sessions: store.getState().sessions, selectedSessionId: 'b' } } });
+    await slow;
+    expect(store.getState().selectedSessionId).toBe('a');
+  });
+
+  it('a settle by itself keeps a paused chat paused until Enter or a click', async () => {
+    const open = vi.fn().mockResolvedValue({ success: true, data: { view: null, panels: [], layout: null } });
+    const store = await setupWithOpen(open);
+    await store.getState().settle('b', null, { resume: false });
+    expect(open).toHaveBeenCalledWith({ sessionId: 'b' }, { select: true, resume: false });
+    expect(store.getState().quietSessionId).toBe('b');
+    await store.getState().settle('b', null);
+    expect(store.getState().quietSessionId).toBeUndefined();
+  });
+
+  it('keeps a list that landed while the settle read, instead of the settle\'s own', async () => {
+    const reply = deferred<{ success: true; data: { view: null; panels: never[]; layout: null; list: { sessions: OrchestrationSessionRecord[]; selectedSessionId: string } } }>();
+    const open = vi.fn().mockReturnValue(reply.promise);
+    const store = await setupWithOpen(open);
+    const settling = store.getState().settle('b', null);
+    // A rename lands first.
+    const renamed = store.getState().sessions.map(session => (session.id === 'b' ? { ...session, name: 'B renamed' } : session));
+    list.mockResolvedValueOnce({ success: true, data: { sessions: renamed, selectedSessionId: 'b' } });
+    await store.getState().refresh();
+    reply.resolve({ success: true, data: { view: null, panels: [], layout: null, list: { sessions: store.getState().sessions.map(session => ({ ...session, name: session.id.toUpperCase() })), selectedSessionId: 'b' } } });
+    await settling;
+    expect(store.getState().sessions.find(session => session.id === 'b')?.name).toBe('B renamed');
+    expect(store.getState().selectedSessionId).toBe('b');
+  });
+});

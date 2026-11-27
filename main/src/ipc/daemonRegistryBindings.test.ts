@@ -94,6 +94,8 @@ const ORCHESTRATION_SESSION_CHANNELS = [
   'orchestration-sessions:select',
   'orchestration-sessions:create',
   'orchestration-sessions:get',
+  'orchestration-sessions:peek',
+  'orchestration-sessions:open',
   'orchestration-sessions:update',
   'orchestration-sessions:archive-preview',
   'orchestration-sessions:archive',

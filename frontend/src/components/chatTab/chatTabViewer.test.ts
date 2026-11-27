@@ -271,3 +271,39 @@ describe('chat tab viewer reopen', () => {
     expect(ids(scrolled)).toEqual([]);
   });
 });
+
+describe('a Session shown by the sidebar cursor (T-87)', () => {
+  it('reads without starting the agent while the cursor only shows it', async () => {
+    const fake = host(3);
+    const viewer = new ChatTabViewer(fake.client, 'p');
+    viewer.setStartOnRead(false);
+    const off = viewer.subscribe(() => undefined);
+    await settle();
+    expect(fake.get).toHaveBeenLastCalledWith('p', 200, { start: false });
+    off();
+  });
+
+  it('paints a window read just now, reads it again only after the paint, and reads an older one at once', async () => {
+    const fake = host(3);
+    const viewer = new ChatTabViewer(fake.client, 'p');
+    viewer.prime(fake.view(), performance.now());
+    expect(ids(viewer)).toEqual(['m0', 'm1', 'm2']);
+    // A message the agent finished between that read and this subscription: no event will say so.
+    fake.append(false);
+    const off = viewer.subscribe(() => undefined);
+    await settle();
+    expect(fake.get).not.toHaveBeenCalled();
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(fake.get).toHaveBeenCalledTimes(1);
+    expect(ids(viewer)).toEqual(['m0', 'm1', 'm2', 'm3']);
+    off();
+    fake.get.mockClear();
+
+    const stale = new ChatTabViewer(fake.client, 'p');
+    stale.prime(fake.view(), performance.now() - 60_000);
+    const offStale = stale.subscribe(() => undefined);
+    await settle();
+    expect(fake.get).toHaveBeenCalledTimes(1);
+    offStale();
+  });
+});

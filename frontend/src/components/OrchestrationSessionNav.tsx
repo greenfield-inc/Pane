@@ -41,6 +41,7 @@ import { resumeIfOpenResumes, runPauseAction } from '../utils/pause';
 import { usePanelStore } from '../stores/panelStore';
 import { panePausedMark } from '../../../shared/types/panels';
 import { moveMarkLabel } from '../utils/sessionMoveView';
+import { SESSION_CURSOR_ATTRIBUTE, cursorFollowEnabled, settleOnSession } from '../services/sessionCursor';
 import { switchMark } from '../../../shared/switchMarks';
 
 interface OrchestrationSessionNavProps {
@@ -234,7 +235,9 @@ export function OrchestrationSessionNav({
     void setActiveSession(null);
     navigateToPaneChat();
     try {
-      await select({ sessionId });
+      // With arrow keys opening Sessions (T-87), a click, Enter or Space settles: one open call.
+      if (cursorFollowEnabled()) await settleOnSession(sessionId);
+      else await select({ sessionId });
     } catch {
       // The store owns selection errors, including retries from the content view.
       // Keeping a second local copy would leave the sidebar error after recovery.
@@ -468,6 +471,8 @@ export function OrchestrationSessionNav({
         data-testid={rowId}
         data-sidebar-item
         data-sidebar-key={`session-${placement}-${session.id}`}
+        // The sidebar cursor shows this Session as it passes (T-87); an arriving one opens only once it has arrived.
+        {...{ [SESSION_CURSOR_ATTRIBUTE]: arriving ? undefined : session.id }}
         aria-current={isOpen ? 'page' : undefined}
         aria-label={isLegacy ? label : `Open Session ${session.name}${moveLabel ? ` (${moveLabel})` : ''}`}
         aria-disabled={arriving || undefined}
