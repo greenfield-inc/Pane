@@ -45,7 +45,7 @@ import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
 import { FindBar } from '../find/FindBar';
 import { useSurfaceFind } from '../find/surfaceFind';
 import { takeLaunchDraft, type LaunchDraft } from '../../utils/launchOutline';
-import { acceptChatDraft, chatTabShown } from '../../utils/chatDraftHandover';
+import { acceptChatDraft, chatTabShown, handOverChatDraft } from '../../utils/chatDraftHandover';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
@@ -494,7 +494,17 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     // What was typed into this Session on another machine while the window switched here (T-132).
     const stopAccepting = acceptChatDraft(panelId, take);
     const stopLaunch = takeLaunchDraft(panelId, input, take);
-    return () => { stopAccepting(); stopLaunch(); };
+    return () => {
+      stopAccepting();
+      stopLaunch();
+      // An Enter still waiting to send outlives this instance (a reconnect redraws the chat): the
+      // next one to show this tab sends it, once.
+      const pending = launchSend.current;
+      if (pending && pending.until > Date.now()) {
+        launchSend.current = null;
+        handOverChatDraft(panelId, { text: pending.text, selectionStart: pending.text.length, selectionEnd: pending.text.length, focused: false, send: true, sendWithinMs: pending.until - Date.now() });
+      }
+    };
   }, [panelId, runtime, viewer, watching]);
   // The live chat painted: an engage waiting on it lets the mirror's view go (T-132).
   const painted = !watching && view !== undefined;
