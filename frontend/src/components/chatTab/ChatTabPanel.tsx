@@ -218,7 +218,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   useMemo(() => {
     viewer.setStartOnRead(show.startsAgents);
     if (primed && show.entry) viewer.prime(primed, show.entry.readAt);
-  }, [viewer, show.peeking, show.entry, primed]);
+  }, [viewer, show.startsAgents, show.entry, primed]);
   const catalog = useChatAgents(client);
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
   const view = snapshot.view;
