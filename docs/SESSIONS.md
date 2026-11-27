@@ -270,11 +270,30 @@ box), **Space**, start typing, or click into the Session: only then is the
 Session selected and its agent started. Passing over a Session never starts its
 agent or resumes a paused one; Enter or a click resumes it when **Resume a
 paused Pane when you open it** is on. In the **All machines** view this
-computer's Session rows work the same way; another machine's rows keep Enter
-(the cursor stops on them, and nothing switches machines until you press Enter
-or click). Sessions whose agent runs in a terminal, Pane and project rows, and
-a window showing another machine keep Enter. With the setting off, the arrows
+computer's Session rows work the same way. The rows of your other machines
+(those this computer mirrors: see the desktop mirror below) show their Session
+at once too, read-only and without switching the window: the header says
+**On** *machine*, its tabs are listed but not usable, and the message box reads
+"Type to continue on *machine*". The chat paints from the mirror (its newest 30
+messages); once the cursor stays about 150 ms, one read of that machine
+(`orchestration-sessions:peek`, which starts nothing) brings its newest 200
+messages, and while it is shown the chat follows that machine's chat events for
+it alone. A Session the mirror doesn't hold (just created, or one whose agent
+runs in a terminal) shows its name at once and fills from that same one read.
+An offline machine's Session shows what it last sent, with an **Offline · last
+seen** *time* chip and a note in place of the message box; while the mirror
+catches up after a reconnect, the header says **Updating from** *machine*; and
+a chat its host can't read yet says its messages load when it is opened there.
+Resting on another machine's row shows it and nothing more: it starts no agent
+there and switches nothing until you press Enter or click. A teammate's machine,
+or one that isn't mirrored, keeps Enter (the cursor stops on its rows). Sessions
+whose agent runs in a terminal on this computer, Pane and project rows, and a
+window showing another machine keep Enter. With the setting off, the arrows
 only move the cursor.
+
+While the cursor only passes over a chat, it draws the newest 30 messages, so a
+held arrow key never waits on a long chat; the rest of what it holds draws once
+the cursor stays.
 
 Drag a Session up or down in Pinned, in Sessions, or in the compact rail to
 change its place; a line shows where it will land. With a Session row focused,
