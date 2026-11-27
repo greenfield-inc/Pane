@@ -177,8 +177,11 @@ describe('MachineMirror', () => {
 
     await mirror.flush();
     const file = path.join(directory, 'mac.json');
-    expect(statSync(file).mode & 0o777).toBe(0o600);
-    expect(statSync(directory).mode & 0o777).toBe(0o700);
+    // Windows has no POSIX modes; its files inherit the user profile's access instead.
+    if (process.platform !== 'win32') {
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+      expect(statSync(directory).mode & 0o777).toBe(0o700);
+    }
     expect(readFile(directory, 'mac').sessions).toHaveLength(2);
   });
 
