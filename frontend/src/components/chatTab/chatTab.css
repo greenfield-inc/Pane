@@ -226,11 +226,12 @@ dialog.chat-confirm { position:static; inset:auto; width:auto; max-width:none; m
 /* The dock floats over the conversation (T-137): only its cards, rows and input cover it, and
    the gaps around them show the conversation and let clicks and scrolling through. */
 .chat-tab .chat-composer-footer { position:absolute; left:0; right:0; bottom:0; z-index:10; background:transparent; pointer-events:none; }
-.chat-tab .chat-composer-footer > :not(.chat-queue,.chat-statusline,[data-testid=session-approval-cards]),
-.chat-tab .chat-composer-footer :is(.chat-queue,.chat-statusline,[data-testid=session-approval-cards]) > * { pointer-events:auto; }
-.chat-tab .chat-composer-footer :is(.chat-statusline > *,.chat-queue li,.chat-notice) { background:var(--chat-background); border-radius:8px; }
-/* The status row's cells sit close together: a spread shadow closes the gaps between them, so text behind never peeks through. */
-.chat-tab .chat-composer-footer .chat-statusline > * { box-shadow:0 0 0 6px var(--chat-background); }
+.chat-tab .chat-composer-footer > :not(.chat-queue,[data-testid=session-approval-cards]),
+.chat-tab .chat-composer-footer :is(.chat-queue,[data-testid=session-approval-cards]) > * { pointer-events:auto; }
+.chat-tab .chat-composer-footer :is(.chat-queue li,.chat-notice) { background:var(--chat-background); border-radius:8px; }
+/* The status row is one component: its own pill keeps its text readable over the conversation. */
+.chat-tab .chat-composer-footer .chat-statusline { position:relative; }
+.chat-tab .chat-composer-footer .chat-statusline::before { content:''; position:absolute; inset:-4px 0; z-index:-1; border-radius:10px; background:var(--chat-background); box-shadow:0 0 8px 4px var(--chat-background); pointer-events:none; }
 .chat-tab .chat-composer-footer .chat-notice { width:fit-content; max-width:100%; margin:0; padding:2px 8px; }
 .chat-tab .chat-composer-footer .chat-dock { padding:8px 12px; border:1px solid var(--chat-border); border-radius:12px; background:var(--chat-background); }
 .chat-tab .chat-question { background:color-mix(in oklab,var(--chat-muted) 40%,var(--chat-background)); }
