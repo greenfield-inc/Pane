@@ -175,11 +175,12 @@ test.describe('Settings', () => {
 
     await page.getByRole('button', { name: 'AI & Agents', exact: true }).click();
     const agentChoices = page.getByRole('radiogroup', { name: 'Default Pane Chat agent' });
-    await expect(agentChoices.getByRole('radio')).toHaveCount(4);
+    await expect(agentChoices.getByRole('radio')).toHaveCount(5);
     await expect(agentChoices.getByRole('radio', { name: 'Claude', exact: true })).toBeVisible();
     await expect(agentChoices.getByRole('radio', { name: 'Codex', exact: true })).toBeVisible();
     await expect(agentChoices.getByRole('radio', { name: 'OpenCode', exact: true })).toBeVisible();
     await expect(agentChoices.getByRole('radio', { name: 'Pi', exact: true })).toBeVisible();
+    await expect(agentChoices.getByRole('radio', { name: 'Antigravity', exact: true })).toBeVisible();
     await expect(agentChoices.getByRole('radio', { name: 'Cursor' })).toHaveCount(0);
   });
 

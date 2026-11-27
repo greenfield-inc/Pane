@@ -141,6 +141,14 @@ through a wrapper or shell syntax runs unchanged, and `--resume` is refused for
 it. Pi has no `promptArgument`: as an argument, pi reads a leading `@` as a
 file to attach and sends a slash command to the model as text.
 
+Antigravity (`agy`) allocates its own conversation UUID on the first turn and
+prints a two-line resume block at column 0 when leaving its TUI
+(`Resume with -c (or command below):` followed by `agy --conversation=<uuid>`).
+Its config entry sets `terminal.session` (`flag: "--conversation"`, `idFlags`,
+`exitIdPattern`, `selectors`) without `paneChoosesId`, so a fresh launch runs
+bare (`agy --dangerously-skip-permissions`) and every restart or update recovery
+reopens the captured UUID with `--conversation <id>`.
+
 A held starting message waits for positive evidence of the agent's own input
 box: its manifest's `visibleIdle` rule, or the composer signature in
 `agentScreenSignature.ts` (Claude, Codex). An idle status alone is not enough,

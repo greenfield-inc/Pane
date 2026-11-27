@@ -201,7 +201,7 @@ function piComposer(text: string, topRule = '─'.repeat(40)): string {
 function terminalSnapshot(
   text: string,
   activityStatus: 'active' | 'idle',
-  agentType: 'claude' | 'codex' | 'cursor' | 'opencode' | 'pi' = 'codex',
+  agentType: 'claude' | 'codex' | 'cursor' | 'opencode' | 'pi' | 'agy' = 'codex',
   lastActivityTime = '2026-01-01T00:02:00.000Z',
 ) {
   return {
@@ -896,6 +896,54 @@ describe('runpane IPC handlers', () => {
         expect(panelManager.createPanel).not.toHaveBeenCalled();
       },
     );
+
+    it('adopts an Antigravity conversation by UUID and rejects non-UUIDs or commands with their own selector', async () => {
+      const { repoPath, worktreePath } = createAdoptWorktree('agy-adopt');
+      const services = adoptionServices(repoPath, worktreePath);
+      let createdPanel: ToolPanel | undefined;
+      vi.mocked(panelManager.createPanel).mockImplementation(async (request) => {
+        createdPanel = {
+          ...terminalPanel,
+          title: request.title ?? '',
+          // SAFETY: The create request is for a terminal panel, so its initial state is TerminalPanelState.
+          state: { isActive: false, customState: { ...(request.initialState as TerminalPanelState) } },
+        };
+        return createdPanel;
+      });
+      vi.mocked(panelManager.getPanel).mockImplementation(() => createdPanel);
+      terminalPanelStore.getPanel.mockImplementation(() => createdPanel);
+      vi.mocked(terminalPanelManager.initializeTerminal).mockResolvedValue(undefined);
+      const conversationId = '9185c7d9-2fb6-4d7c-b961-60653809aee6';
+
+      const adopted = await createRegistry(services).invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        panes: [{ path: worktreePath, name: 'Agy existing', tool: { agent: 'agy' }, resume: conversationId }],
+      }]);
+      expect(adopted, JSON.stringify(adopted)).toMatchObject({ ok: true, items: [{ ok: true }] });
+      expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
+        initialState: expect.objectContaining({ agentType: 'agy', agentSessionId: conversationId, hasClaudeSessionId: false }),
+      }));
+
+      const badId = await createRegistry(services).invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        dryRun: true,
+        panes: [{ path: worktreePath, name: 'Invalid Agy', tool: { agent: 'agy' }, resume: 'latest' }],
+      }]);
+      expect(badId).toMatchObject({
+        ok: false,
+        items: [{ ok: false, error: { message: expect.stringMatching(/Antigravity --resume must be a session id matching/) } }],
+      });
+
+      const ownSelector = await createRegistry(services).invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        dryRun: true,
+        panes: [{ path: worktreePath, name: 'Own selector', tool: { command: 'agy -c' }, resume: conversationId }],
+      }]);
+      expect(ownSelector).toMatchObject({
+        ok: false,
+        items: [{ ok: false, error: { message: expect.stringMatching(/--resume needs a plain Antigravity command/) } }],
+      });
+    });
 
     it.each(['', 'thread-1', 'ses_bad-value', ' ses_existing '])(
       'rejects invalid OpenCode resume %j before dry-run output or mutation',
@@ -5516,6 +5564,47 @@ describe('runpane IPC handlers', () => {
             ok: supported,
             message: supported ? expect.stringContaining('--session-id') : expect.stringMatching(/upgrade pi to 0\.76\.0/i),
           }),
+        ]),
+      });
+    } finally {
+      if (originalPlatform) Object.defineProperty(process, 'platform', originalPlatform);
+    }
+  });
+
+  it('finds Antigravity at $HOME/.local/bin/agy and checks --conversation in --help', async () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    const fallbackExecutable = '/Users/dev/.local/bin/agy';
+    const execAsync = vi.fn(async (command: string) => {
+      if (command === 'command -v agy') throw new Error('not found');
+      if (command === 'command -v "$HOME/.local/bin/agy"') return { stdout: `${fallbackExecutable}\n`, stderr: '' };
+      if (command === '"$HOME/.local/bin/agy" --version') return { stdout: '1.5.18\n', stderr: '' };
+      if (command === `'${fallbackExecutable}' --help`) {
+        return { stdout: '', stderr: '  --conversation                  Resume a previous conversation by ID\n' };
+      }
+      return { stdout: '', stderr: '' };
+    });
+    const base = createServices();
+    const services = createServices({
+      // SAFETY: This test fixture replaces only the command-runner seam used by the doctor unit.
+      sessionManager: {
+        ...base.sessionManager,
+        getProjectContextByProjectId: vi.fn(() => ({ commandRunner: { wslContext: null, execAsync } })),
+      } as never,
+    });
+
+    try {
+      const result = await createRegistry(services).invoke('runpane:agents:doctor', [{ agent: 'agy', repo: 'active' }]);
+      expect(result).toMatchObject({
+        ok: true,
+        available: true,
+        agent: 'agy',
+        command: 'agy --dangerously-skip-permissions',
+        executablePath: fallbackExecutable,
+        version: '1.5.18',
+        checks: expect.arrayContaining([
+          expect.objectContaining({ name: 'executable-fallback', ok: true }),
+          expect.objectContaining({ name: 'session-capability', ok: true, message: expect.stringContaining('--conversation') }),
         ]),
       });
     } finally {

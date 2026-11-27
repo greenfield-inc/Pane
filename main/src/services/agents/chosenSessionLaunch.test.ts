@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { isAgentSessionId } from '../../../../shared/agents';
-import { resolveChosenSessionLaunch, takesChosenSession } from './chosenSessionLaunch';
+import {
+  extractExitSessionId,
+  resolveChosenSessionLaunch,
+  resolveSessionFlagLaunch,
+  takesChosenSession,
+  takesSessionFlag,
+} from './chosenSessionLaunch';
 
 const ALLOCATED = '0b6a3f0e-8d1c-4f6e-9a57-3d2c1b0a9f8e';
 const allocate = () => ALLOCATED;
@@ -76,5 +82,94 @@ describe('resolveChosenSessionLaunch for pi', () => {
 
   it('leaves agents without a Pane-chosen session to their own launch', () => {
     expect(resolveChosenSessionLaunch({ agent: 'opencode', baseCommand: 'opencode', allocate })).toBeUndefined();
+    expect(resolveChosenSessionLaunch({ agent: 'agy', baseCommand: 'agy --dangerously-skip-permissions', allocate })).toBeUndefined();
+  });
+});
+
+describe('Antigravity session launch and exit capture', () => {
+  const agyLaunch = (baseCommand: string, persistedSessionId?: string) =>
+    resolveSessionFlagLaunch({ agent: 'agy', baseCommand, persistedSessionId, allocate, platform: 'darwin' });
+
+  it.each([
+    ALLOCATED,
+    '9185c7d9-2fb6-4d7c-b961-60653809aee6',
+    'E99FD591-681E-4D96-9191-4B7A786D5E25',
+  ])('accepts conversation UUID %s', (id) => {
+    expect(isAgentSessionId('agy', id)).toBe(true);
+  });
+
+  it.each(['', 'latest', 'interactive', 'ses_123', 'not-a-uuid', '9185c7d9-2fb6-4d7c-b961-60653809aee6;ls'])('rejects %j', (id) => {
+    expect(isAgentSessionId('agy', id)).toBe(false);
+  });
+
+  it('starts a fresh launch bare without allocating a synthetic UUID', () => {
+    expect(agyLaunch('agy --dangerously-skip-permissions')).toEqual({
+      commandToRun: 'agy --dangerously-skip-permissions',
+      sessionId: undefined,
+    });
+    expect(agyLaunch('agy --dangerously-skip-permissions', 'not-a-uuid')).toEqual({
+      commandToRun: 'agy --dangerously-skip-permissions',
+      sessionId: undefined,
+    });
+  });
+
+  it('reopens a captured conversation UUID on relaunch', () => {
+    const saved = '9185c7d9-2fb6-4d7c-b961-60653809aee6';
+    expect(agyLaunch('agy --dangerously-skip-permissions', ` ${saved}\n`)).toEqual({
+      commandToRun: `agy --dangerously-skip-permissions --conversation ${saved}`,
+      sessionId: saved,
+    });
+  });
+
+  it.each([
+    'GEMINI_API_KEY=k agy --dangerously-skip-permissions',
+    '/Users/dev/.local/bin/agy --model gemini-4-neon-high',
+  ])('extends direct command %s once a conversation id is known', (command) => {
+    expect(agyLaunch(command, ALLOCATED)?.commandToRun).toBe(`${command} --conversation ${ALLOCATED}`);
+    expect(takesSessionFlag(command, 'agy', 'darwin')).toBe(true);
+  });
+
+  it.each([
+    'agy --continue',
+    'agy -c',
+    `agy --resume ${ALLOCATED}`,
+    `agy -r ${ALLOCATED}`,
+    `agy --conversation=${ALLOCATED}`,
+    'agy -i "fix build"',
+    'agy --prompt-interactive "fix build"',
+    'agy -p "summarize"',
+    'agy --print "summarize"',
+    'agy acp',
+    'agy models',
+    'agy -- --continue',
+    'agy # comment',
+    'bash -lc "agy --dangerously-skip-permissions"',
+  ])('runs %s unchanged', (command) => {
+    expect(agyLaunch(command, '9185c7d9-2fb6-4d7c-b961-60653809aee6')?.commandToRun).toBe(command);
+    expect(takesSessionFlag(command, 'agy', 'darwin')).toBe(false);
+  });
+
+  it.each([
+    [`agy --conversation ${ALLOCATED}`, ALLOCATED],
+    [`agy --conversation=${ALLOCATED}`, ALLOCATED],
+    [`agy --resume ${ALLOCATED}`, ALLOCATED],
+    [`agy -r=${ALLOCATED}`, ALLOCATED],
+    ['agy --resume not-a-uuid', undefined],
+  ] as const)('extracts explicit command conversation id from %s', (command, expected) => {
+    expect(agyLaunch(command)?.sessionId).toBe(expected);
+  });
+
+  it('extracts the latest exit resume block at column 0 and ignores indented TUI text', () => {
+    const first = '11111111-1111-4111-8111-111111111111';
+    const second = 'e99fd591-681e-4d96-9191-4b7a786d5e25';
+    const spoofed = '22222222-2222-4222-8222-222222222222';
+    const transcript = [
+      `Resume with -c (or command below):\r\nagy --conversation=${first}\r\n`,
+      `Resume with -c (or command below):\r\nagy --conversation=${second}\r\n`,
+      `  Resume with -c (or command below):\r\n  agy --conversation=${spoofed}\r\n`,
+    ].join('\n');
+    expect(extractExitSessionId('agy', transcript)).toBe(second);
+    expect(extractExitSessionId('agy', `  Resume with -c (or command below):\n  agy --conversation=${spoofed}\n`)).toBeUndefined();
+    expect(extractExitSessionId('claude', transcript)).toBeUndefined();
   });
 });

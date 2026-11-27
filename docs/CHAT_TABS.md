@@ -4,7 +4,7 @@ A chat tab runs a coding agent as a conversation, with no terminal. Pane is an
 [Agent Client Protocol](https://agentclientprotocol.com) (ACP) client. Any
 agent in the agents config with a `chat` section can run in a chat tab
 ([Agents](#agents)): Claude and Codex through Pane's bundled ACP adapters,
-Cursor and OpenCode as their own CLI in ACP mode. A chat tab stays a chat:
+Cursor, OpenCode and Antigravity as their own CLI in ACP mode. A chat tab stays a chat:
 there is no move back into a terminal. A terminal agent tab can move the other
 way with **Switch to chat** (below). The *In a terminal* entries of the + menu
 open terminal agent tabs, as before.
@@ -34,7 +34,7 @@ entries and new Sessions open their orchestrator in a terminal. Open chat tabs k
   With `--chat`, `--agent` takes any agent id; the host refuses one it cannot
   run. `--initial-input` is the first prompt, sent once.
 - **Sessions**: with chat tabs on, a new Session runs its orchestrator in a
-  chat tab for any chat agent, Cursor and OpenCode included (see
+  chat tab for any chat agent, Cursor, OpenCode and Antigravity included (see
   [SESSIONS.md](SESSIONS.md)).
 
 ## Agents
@@ -49,6 +49,7 @@ Its `chat` section says how its chat starts:
 | Codex | bundled `codex-acp` running `codex` | session mode `agent-full-access` | yes, most recent conversation |
 | Cursor | `cursor-agent acp` | launch flag `--force` | no |
 | OpenCode | `opencode acp` | Pane answers each approval | yes, most recent conversation |
+| Antigravity | `agy acp` | launch flag `--dangerously-skip-permissions` | yes, most recent conversation |
 
 The host's agent catalog (`chat-tab:agents`,
 `main/src/services/chatTabs/agentCatalog.ts`) lists the agents this machine can

@@ -119,7 +119,7 @@ Each of these is a small thing. Together they compound fast.
 
 | Feature | | |
 |---|---|---|
-| **Pane Chat** | A global orchestrator terminal that starts in the Pane data directory, reads local orchestration instructions, and can coordinate Claude, Codex, Cursor, OpenCode, or Pi across repositories, panes, tabs, worktrees, and review loops. | <a href="#pane-chat">Details</a> |
+| **Pane Chat** | A global orchestrator terminal that starts in the Pane data directory, reads local orchestration instructions, and can coordinate Claude, Codex, Cursor, OpenCode, Pi, or Antigravity across repositories, panes, tabs, worktrees, and review loops. | <a href="#pane-chat">Details</a> |
 | **Remote Pane** | Run panes, worktrees, terminals, files, git state, and approval prompts on a self-hosted remote machine while controlling them from desktop Pane or the browser app at [runpane.com/app](https://runpane.com/app/). | <a href="#remote-pane">Setup</a> |
 | **Pane Workspaces** | Let an agent on one of your machines read files, run commands, and drive Pane on another over Tailscale. Hand off a task with its branch and a written note; a handoff to the same agent continues your own session there. | [Workspaces](#pane-workspaces) · [Handoff](#hand-off-a-task) |
 | **Agent-Operable CLI** | Pane ships with `runpane agent-context`, `runpane repos add`, and `runpane panes create`, so a coding agent can discover Pane's command schema, register a repo, open a Pane for each new issue, and add agent tabs to existing Panes for review and fixes (one Pane per feature). Claude Code, Codex, and Cursor get the same commands as MCP tools, and Claude can also get them, with Pane's skills, from the [Pane Claude plugin](claude-plugin/README.md). | [Contract](docs/RUNPANE_CLI_CONTRACT.md) · [MCP](docs/PANE_MCP.md) |
@@ -291,7 +291,7 @@ Add this repo, create three worktree panes for the next features, start Codex in
 
 Already working in other agent tools? Settings → AI & Agents → "Bring sessions into Pane" finds your sessions from Claude Code, Codex, Conductor, Paradev (formerly Superset), Herdr, Emdash, Orca and T3 Code, and brings them in with one click, each in a Pane tab with its own agent's resume. Say "migrate to Pane" and Pane Chat also finds OpenCode and Cursor agent sessions (or anything similar), forks ones still running, and checks that each continues where it left off. On a new install, the first-run screen asks which agent you use and offers to bring your recent sessions in; Yes opens the Onboarding Session, which brings them in, groups them into Sessions, and opens a Start here page. See [Bring your existing sessions into Pane](docs/SESSIONS.md#bring-your-existing-sessions-into-pane).
 
-Pane Chat keeps the human discussion at the orchestrator level, captures work as tickets or briefs, then hands authorized implementation to Claude, Codex, Cursor, OpenCode, or Pi agents in Panes through RunPane.
+Pane Chat keeps the human discussion at the orchestrator level, captures work as tickets or briefs, then hands authorized implementation to Claude, Codex, Cursor, OpenCode, Pi, or Antigravity agents in Panes through RunPane.
 
 The prompt stays small because Pane ships its skills and installs them into the Pane data directory at startup, whenever the bundled copy has changed:
 
@@ -302,7 +302,7 @@ The prompt stays small because Pane ships its skills and installs them into the 
 
 The bundle lives in `main/src/services/paneChatBundle/`. It is built on Agent Farm's raw profile (`prepare-pr`, `create-ticket`, `tdd`, `quick-verify`, `babysit-pr`, `investigate`, and others), general primitives such as `orchestrate-sessions`, `verify-app`, `options`, and `brief`, and four Pane-specific skills, `runpane`, `pane-orchestration` (the orchestrator guide), `pane-work`, and `migrate-to-pane`. Pane generates the `pane-orchestrator` entry point at install time. Nothing is downloaded at runtime. The skills that come from Agent Farm were last refreshed from its greenfield plugin at `a903f09` (Agent Farm 0.2.33): to refresh them, three-way merge each skill from that commit to the new one (`git merge-file`), keeping Pane's adaptations, and record the new commit here.
 
-Pane Chat and named Sessions support Claude, Codex, Cursor, OpenCode, and Pi. Choose the agent when creating a Session, and set the default in AI & Agents settings. OpenCode reads the generated Session `AGENTS.md`, and OpenCode tabs Pane starts get Pane's tools for that launch through `OPENCODE_CONFIG_CONTENT`; Pane doesn't edit OpenCode's own config or install OpenCode skills.
+Pane Chat and named Sessions support Claude, Codex, Cursor, OpenCode, Pi, and Antigravity. Choose the agent when creating a Session, and set the default in AI & Agents settings. OpenCode reads the generated Session `AGENTS.md`, and OpenCode tabs Pane starts get Pane's tools for that launch through `OPENCODE_CONFIG_CONTENT`; Pane doesn't edit OpenCode's own config or install OpenCode skills.
 
 ## Phone simulators
 
@@ -446,6 +446,7 @@ The shell installers and the other one-shot commands are at the top of this READ
   - [Cursor Agent](https://cursor.com/docs/cli/installation) — `curl https://cursor.com/install -fsS | bash` (macOS/Linux, or inside WSL on Windows), then `cursor-agent login`
   - [OpenCode](https://opencode.ai/docs) — `curl -fsSL https://opencode.ai/install | bash` (on Windows, `npm install -g opencode-ai`), then `opencode auth login`
   - [Pi](https://pi.dev) — `npm install -g @earendil-works/pi-coding-agent` (0.76.0 or newer), then `/login` inside `pi`
+  - [Antigravity CLI](https://antigravity.google/docs/getting-started) — `curl -fsSL https://antigravity.google/cli/install.sh | bash` (on Windows, `irm https://antigravity.google/cli/install.ps1 | iex`), then sign in inside `agy`
   - [Aider](https://aider.chat/) — `pip install aider-chat`
   - [Goose](https://github.com/block/goose) — or any other CLI agent
 
@@ -455,7 +456,7 @@ The shell installers and the other one-shot commands are at the top of this READ
 
 1. **Open Pane** and create or select a project (any git repository)
 2. **Create a pane** — enter a prompt and pick your agent
-3. **Add tabs** — launch a Claude, Codex, Cursor, OpenCode, or Pi terminal, diff viewer, file explorer, or any CLI tool
+3. **Add tabs** — launch a Claude, Codex, Cursor, OpenCode, Pi, or Antigravity terminal, diff viewer, file explorer, or any CLI tool
 4. **Work in parallel** — create multiple panes for different approaches
 5. **Review diffs** — see what changed with the built-in diff viewer
 6. **Ship** — commit, rebase, and merge from keyboard shortcuts

@@ -1,6 +1,6 @@
 import { createElement, type ReactElement } from 'react';
 import { MessageSquare } from 'lucide-react';
-import { AiderIcon, ClaudeIcon, CursorIcon, GeminiIcon, OpenAIIcon, OpenCodeIcon, PiIcon } from './BrandIcons';
+import { AiderIcon, AntigravityIcon, ClaudeIcon, CursorIcon, GeminiIcon, OpenAIIcon, OpenCodeIcon, PiIcon } from './BrandIcons';
 import { agentConfig } from '../../../../shared/agents';
 
 /** Brand icons by icon key: the agents config's and the chat catalog's `icon`. */
@@ -9,6 +9,7 @@ const CLI_BRAND_ICONS = {
   codex: OpenAIIcon,
   cursor: CursorIcon,
   opencode: OpenCodeIcon,
+  antigravity: AntigravityIcon,
   gemini: GeminiIcon,
   aider: AiderIcon,
 };
@@ -19,6 +20,7 @@ const CLI_BRAND_ICONS = {
  */
 const CLI_BRAND_WORD_ICONS = {
   pi: PiIcon,
+  agy: AntigravityIcon,
 };
 
 const BRAND_ICONS_BY_KEY = new Map(Object.entries({ ...CLI_BRAND_ICONS, ...CLI_BRAND_WORD_ICONS }));

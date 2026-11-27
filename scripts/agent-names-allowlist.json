@@ -81,7 +81,7 @@
   },
   "main/src/ipc/runpaneComposerEvidence.ts": {
     "reason": "Deferred terminal composer delivery evidence per agent.",
-    "count": 2
+    "count": 3
   },
   "main/src/ipc/session.ts": {
     "reason": "Persisted record shape: the legacy toolType column and Claude Code panel type store the literal.",
@@ -89,7 +89,7 @@
   },
   "main/src/services/agentStatus/manifests.ts": {
     "reason": "Deferred terminal status detection manifests, one per agent.",
-    "count": 5
+    "count": 6
   },
   "main/src/services/agentTranscript/index.ts": {
     "reason": "Vendor file format: reads this agent's own files, which Pane does not own.",

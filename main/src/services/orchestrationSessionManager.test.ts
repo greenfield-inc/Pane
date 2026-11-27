@@ -250,6 +250,7 @@ function orchestrationRecord(id: string, name: string): OrchestrationSessionReco
       cursor: `${id}-cursor`,
       opencode: `${id}-opencode`,
       pi: `${id}-pi`,
+      agy: `${id}-agy`,
     },
     goal: 'Existing goal',
     context: 'Existing context',
@@ -1516,6 +1517,7 @@ describe('OrchestrationSessionManager', () => {
       cursor: '__pane_chat_terminal_cursor__',
       opencode: '__pane_chat_terminal_opencode__',
       pi: '__pane_chat_terminal_pi__',
+      agy: '__pane_chat_terminal_agy__',
     });
     expect(first.paneChatManager.getOrCreate).toHaveBeenCalledTimes(1);
 
@@ -1584,6 +1586,7 @@ describe('OrchestrationSessionManager', () => {
         cursor: getPaneChatPanelId('cursor'),
         opencode: getPaneChatPanelId('opencode'),
         pi: getPaneChatPanelId('pi'),
+        agy: getPaneChatPanelId('agy'),
       },
     } satisfies OrchestrationSessionRecord;
     const persisted = orchestrationRecord('windows-session', 'Windows Session');
@@ -1645,12 +1648,12 @@ describe('OrchestrationSessionManager', () => {
     const primary: OrchestrationSessionRecord = {
       ...orchestrationRecord(LEGACY_ORCHESTRATION_SESSION_ID, 'Pane Chat'),
       internalSessionId: PANE_CHAT_SESSION_ID, agent: 'claude', archived: false, isPinned: false,
-      panelIds: { claude: getPaneChatPanelId('claude'), codex: 'primary-new-codex', cursor: getPaneChatPanelId('cursor'), opencode: getPaneChatPanelId('opencode'), pi: getPaneChatPanelId('pi') },
+      panelIds: { claude: getPaneChatPanelId('claude'), codex: 'primary-new-codex', cursor: getPaneChatPanelId('cursor'), opencode: getPaneChatPanelId('opencode'), pi: getPaneChatPanelId('pi'), agy: getPaneChatPanelId('agy') },
     };
     const supplemental: OrchestrationSessionRecord = {
       ...orchestrationRecord(`${LEGACY_ORCHESTRATION_SESSION_ID}-codex`, 'Pane Chat · Codex'),
       internalSessionId: PANE_CHAT_SESSION_ID, agent: 'codex', archived: false, isPinned: false,
-      panelIds: { claude: 'supplemental-new-claude', codex: getPaneChatPanelId('codex'), cursor: 'supplemental-new-cursor', opencode: `__orchestration_panel_${LEGACY_ORCHESTRATION_SESSION_ID}-codex_opencode`, pi: `__orchestration_panel_${LEGACY_ORCHESTRATION_SESSION_ID}-codex_pi` },
+      panelIds: { claude: 'supplemental-new-claude', codex: getPaneChatPanelId('codex'), cursor: 'supplemental-new-cursor', opencode: `__orchestration_panel_${LEGACY_ORCHESTRATION_SESSION_ID}-codex_opencode`, pi: `__orchestration_panel_${LEGACY_ORCHESTRATION_SESSION_ID}-codex_pi`, agy: `__orchestration_panel_${LEGACY_ORCHESTRATION_SESSION_ID}-codex_agy` },
       revision: 1, goal: '', context: '', nextAction: '', decisions: [], blockers: [], evidence: [], outputs: [],
       report: undefined, reportActivityId: undefined, reportAcceptedAt: undefined,
     };
@@ -1852,6 +1855,7 @@ describe('OrchestrationSessionManager', () => {
         cursor: getPaneChatPanelId('cursor'),
         opencode: getPaneChatPanelId('opencode'),
         pi: getPaneChatPanelId('pi'),
+        agy: getPaneChatPanelId('agy'),
       },
     } satisfies OrchestrationSessionRecord;
     const orphan = orchestrationRecord('orphan-session', 'Recovered Session');
@@ -2379,6 +2383,7 @@ describe('OrchestrationSessionManager', () => {
         cursor: getPaneChatPanelId('cursor'),
         opencode: getPaneChatPanelId('opencode'),
         pi: getPaneChatPanelId('pi'),
+        agy: getPaneChatPanelId('agy'),
       },
     } satisfies OrchestrationSessionRecord;
     const fixture = createFixture('codex', {

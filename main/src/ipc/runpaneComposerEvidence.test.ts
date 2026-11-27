@@ -90,6 +90,48 @@ describe('assessComposerEvidence', () => {
     })).toBe('cleared');
   });
 
+  const agyFrame = (prompt: string, below: string[] = ['? for shortcuts'], above: string[] = []) =>
+    [...above, '─'.repeat(40), prompt, '─'.repeat(40), ...below].join('\n');
+
+  it('tracks Antigravity staged text, paste badges, and mode placeholders', () => {
+    expect(assessComposerEvidence({
+      beforeText: agyFrame('> Fix the login test'),
+      afterText: agyFrame('> Fix the login test'),
+      stagedText: 'Fix the login test',
+      agentType: 'agy',
+    })).toBe('staged');
+
+    expect(assessComposerEvidence({
+      beforeText: agyFrame('> Fix the login test'),
+      afterText: agyFrame('>', ['  ● Generating · 1s', '─'.repeat(40), '? for shortcuts'], ['> Fix the login test']),
+      stagedText: 'Fix the login test',
+      agentType: 'agy',
+    })).toBe('cleared');
+
+    expect(assessComposerEvidence({
+      beforeText: agyFrame('> [Pasted text #1 +18 lines]'),
+      afterText: agyFrame('>'),
+      stagedText: 'Line 1\nLine 2\nLine 3',
+      agentType: 'agy',
+    })).toBe('cleared');
+
+    const placeholderOnly = agyFrame('> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)', ['auto · gemini-4-neon-high']);
+    expect(assessComposerEvidence({
+      beforeText: placeholderOnly,
+      afterText: placeholderOnly,
+      stagedText: 'Auto',
+      agentType: 'agy',
+    })).toBe('unknown');
+
+    const overlay = agyFrame('> Fix the login test', ['Keyboard: ↑/↓ Navigate · enter Select · esc Cancel', '? for shortcuts']);
+    expect(assessComposerEvidence({
+      beforeText: agyFrame('> Fix the login test'),
+      afterText: overlay,
+      stagedText: 'Fix the login test',
+      agentType: 'agy',
+    })).toBe('unknown');
+  });
+
   const cases: Array<{
     name: string;
     beforeText: string;

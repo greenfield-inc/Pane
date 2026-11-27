@@ -36,6 +36,13 @@ describe('resolveResumeId', () => {
     expect(resolveResumeId('pi', PANEL_ID, { agentSessionId: '-not-a-pi-id' })).toBeUndefined();
   });
 
+  it('resumes Antigravity only with a captured conversation UUID', () => {
+    expect(resolveResumeId('agy', PANEL_ID, { agentSessionId: CAPTURED_ID })).toBe(CAPTURED_ID);
+    expect(resolveResumeId('agy', PANEL_ID, {})).toBeUndefined();
+    expect(resolveResumeId('agy', PANEL_ID, { agentSessionId: 'latest' })).toBeUndefined();
+    expect(resolveResumeId('agy', PANEL_ID, { agentSessionId: 'not-a-uuid' })).toBeUndefined();
+  });
+
   it('resumes custom CLIs only with a recorded ID', () => {
     const customResume = { mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} --resume {sessionId}' } as const;
     expect(resolveResumeId(undefined, PANEL_ID, { customResume, agentSessionId: CAPTURED_ID })).toBe(CAPTURED_ID);

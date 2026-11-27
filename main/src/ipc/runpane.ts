@@ -64,7 +64,7 @@ import { checkNotifyOptions } from './notify';
 import { agentReportOptionFields } from '../services/workspaceJournalSchema';
 import { isCliAgentType, resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
 import { assertDirectOpenCodeLaunchCommand } from '../services/agents/opencodeLaunch';
-import { takesChosenSession } from '../services/agents/chosenSessionLaunch';
+import { takesSessionFlag } from '../services/agents/chosenSessionLaunch';
 import {
   bracketedPaste,
   claudePromptWarnings,
@@ -4722,7 +4722,7 @@ async function runAgentDoctor(
   }
 
   if (!executablePath && environment !== 'windows') {
-    const fallbackPaths = agent === 'cursor' ? AGENT_FALLBACK_BIN_PATHS.cursor : [];
+    const fallbackPaths = configuredAgent(agent).install.fallbackPaths ?? (agent === 'cursor' ? AGENT_FALLBACK_BIN_PATHS.cursor : []);
     for (const fallback of fallbackPaths) {
       try {
         const result = await context.commandRunner.execAsync(`command -v "${fallback}"`, repo.path, {
@@ -6816,14 +6816,15 @@ function assertResumableTool(tool: RunpaneResolvedTool, resume: string | undefin
   if (tool.launchMode === 'wrapped') {
     throw new Error('--resume needs a built-in agent command; a wrapper command resumes its own way.');
   }
-  const session = tool.agent ? agentConfig(tool.agent)?.terminal.session : undefined;
-  if (!tool.agent || !session) return;
-  const label = configuredAgent(tool.agent).label;
-  if (!isAgentSessionId(tool.agent, resume)) {
+  const agent = tool.agent ?? resolveAgentTypeFromCommand(tool.command);
+  const session = agent ? agentConfig(agent)?.terminal.session : undefined;
+  if (!agent || !session) return;
+  const label = configuredAgent(agent).label;
+  if (!isAgentSessionId(agent, resume)) {
     throw new PaneError('ERR_RESUME_ID', `${label} --resume must be a session id matching ${session.idPattern}. Nothing was created.`, `Pass the id ${label} shows for the conversation, or leave out --resume to start a new one.`);
   }
-  if (session.paneChoosesId && !takesChosenSession(tool.command, tool.agent)) {
-    throw new PaneError('ERR_RESUME_COMMAND', `--resume needs a plain ${label} command; this one picks its own conversation, runs a subcommand or uses shell syntax. Nothing was created.`, `Use \`--agent ${tool.agent}\` without a custom command, or resume inside ${label} itself.`);
+  if ((session.paneChoosesId || session.selectors !== undefined) && !takesSessionFlag(tool.command, agent)) {
+    throw new PaneError('ERR_RESUME_COMMAND', `--resume needs a plain ${label} command; this one picks its own conversation, runs a subcommand or uses shell syntax. Nothing was created.`, `Use \`--agent ${agent}\` without a custom command, or resume inside ${label} itself.`);
   }
 }
 

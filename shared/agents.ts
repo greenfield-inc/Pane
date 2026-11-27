@@ -31,6 +31,10 @@ export interface AgentSessionConfig {
   flag: string;
   minimumVersion: string;
   idPattern: string;
+  /** Other flags that open a conversation by id, such as aliases for `flag`. */
+  idFlags?: readonly string[];
+  /** Multiline pattern whose first capture group reads the conversation id printed when the TUI exits. */
+  exitIdPattern?: string;
   /** The flag also creates the conversation, so Pane picks the id and every launch runs the same command. */
   paneChoosesId?: boolean;
   /** Flags with which a command picks its own conversation; Pane runs that command unchanged. */
@@ -57,7 +61,7 @@ interface AgentConfigBase {
     configDir?: string;
     session?: AgentSessionConfig;
   };
-  install: { url: string; command: string };
+  install: { url: string; command: string; fallbackPaths?: readonly string[] };
   /** Transcript folders, relative to the home the CLI runs with. */
   transcriptDirs?: readonly string[];
   /** Per-session temp folders: `{tmp}` is /tmp on macOS and Linux, the OS temp folder on Windows; `{uid}` the user id. */

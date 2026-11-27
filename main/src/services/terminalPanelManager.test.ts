@@ -1323,6 +1323,47 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(result.customState).toMatchObject({ agentSessionId: sessionId, initialInput: undefined, updateResumeId: undefined });
   });
 
+  it('starts a fresh Antigravity launch bare, then reopens the captured conversation on restart and update recovery', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const fresh = manager.resolveCliLaunchCommand('panel-agy', 'agy --dangerously-skip-permissions', {});
+    expect(fresh.commandToRun).toBe('agy --dangerously-skip-permissions');
+    expect(fresh.isCliCommand).toBe(true);
+    expect(fresh.customState).toMatchObject({
+      agentType: 'agy',
+      agentDetection: 'command',
+      isCliPanel: true,
+      launchCommand: 'agy --dangerously-skip-permissions',
+    });
+    expect(fresh.customState.agentSessionId).toBeUndefined();
+
+    const conversationId = '9185c7d9-2fb6-4d7c-b961-60653809aee6';
+    const resumed = manager.resolveCliLaunchCommand('panel-agy', 'agy --dangerously-skip-permissions', {
+      agentSessionId: conversationId,
+      wasInterrupted: true,
+    });
+    expect(resumed.commandToRun).toBe(`agy --dangerously-skip-permissions --conversation ${conversationId}`);
+    expect(resumed.customState).toMatchObject({
+      agentType: 'agy',
+      agentSessionId: conversationId,
+      wasInterrupted: undefined,
+    });
+
+    const updated = manager.resolveCliLaunchCommand('panel-agy', 'agy --dangerously-skip-permissions', {
+      agentType: 'agy',
+      agentSessionId: conversationId,
+      updateResumeId: conversationId,
+      wasInterrupted: true,
+      initialInput: 'Do not replay this prompt',
+      initialInputMode: 'stdin',
+    });
+    expect(updated.commandToRun).toBe(`agy --dangerously-skip-permissions --conversation ${conversationId}`);
+    expect(updated.customState).toMatchObject({
+      agentSessionId: conversationId,
+      initialInput: undefined,
+      updateResumeId: undefined,
+    });
+  });
+
   it('starts a fresh native OpenCode launch without a session selector', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
 
@@ -2225,6 +2266,40 @@ describe('TerminalPanelManager agent session capture', () => {
         customState: expect.objectContaining({ agentType: 'cursor', agentSessionId: CURSOR_CHAT_ID }),
       }),
     });
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it('captures the Antigravity conversation id from its exit resume block and ignores indented TUI output', () => {
+    const manager = testAccess<AgentSessionCaptureAccess>(new TerminalPanelManager());
+    const terminal = createTerminal({ agentType: 'agy' });
+    const conversationId = 'e99fd591-681e-4d96-9191-4b7a786d5e25';
+    const quotedId = '11111111-2222-3333-4444-555555555555';
+    mockPanel('agy', 'agy --dangerously-skip-permissions');
+
+    manager.captureAgentSessionId(
+      terminal,
+      `  Resume with -c (or command below):\r\n  agy --conversation=${quotedId}\r\n`,
+    );
+    expect(terminal.capturedAgentSessionId).toBeUndefined();
+    expect(panelManager.updatePanel).not.toHaveBeenCalled();
+
+    manager.captureAgentSessionId(
+      terminal,
+      `\x1b[J\x1b[?2004l\x1b[0 q\x1b]7501;state=idle:app=antigravity\x07\r\nResume with -c (or command below):\r\nagy --conversation=${conversationId}\r\n`,
+    );
+
+    expect(terminal.capturedAgentSessionId).toBe(conversationId);
+    expect(panelManager.updatePanel).toHaveBeenCalledWith(
+      'panel-1',
+      expect.objectContaining({
+        state: expect.objectContaining({
+          customState: expect.objectContaining({
+            agentType: 'agy',
+            agentSessionId: conversationId,
+          }),
+        }),
+      }),
+    );
     disposeFlowControlRecord(terminal.flowControl);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { detectAgentState } from './manifestEngine';
 import {
+  AGY_MANIFEST,
   CLAUDE_MANIFEST,
   CODEX_MANIFEST,
   CURSOR_MANIFEST,
@@ -20,6 +21,7 @@ describe('getManifestForAgent', () => {
     expect(getManifestForAgent('cursor')).toBe(CURSOR_MANIFEST);
     expect(getManifestForAgent('opencode')).toBe(OPENCODE_MANIFEST);
     expect(getManifestForAgent('pi')).toBe(PI_MANIFEST);
+    expect(getManifestForAgent('agy')).toBe(AGY_MANIFEST);
     expect(getManifestForAgent('aider')).toBe(GENERIC_MANIFEST);
     expect(getManifestForAgent(undefined)).toBe(GENERIC_MANIFEST);
     expect(getManifestForAgent(null)).toBe(GENERIC_MANIFEST);
@@ -907,5 +909,113 @@ describe('PI_MANIFEST', () => {
   it('does not block on a trust prompt answered earlier in the transcript', () => {
     const answered = piScreen(rule(), [], undefined, [' Trust project folder?', ' → Trust', '   Do not trust', ' ↑↓ navigate  enter select  escape/ctrl+c cancel']);
     expect(detectAgentState(PI_MANIFEST, screen(answered)).state).not.toBe('blocked');
+  });
+});
+
+describe('AGY_MANIFEST', () => {
+  const rule = (width = 120) => '─'.repeat(width);
+  const header = [
+    '    ▄▀▀▄        Antigravity CLI 1.5.18',
+    '   ▀▀▀▀▀▀       dev@example.com',
+    '  ▀▀▀▀▀▀▀▀      ~/repo',
+    '   ▄▀▀    ▀▀▄',
+    '  ▄▀▀      ▀▀▄',
+    '',
+  ];
+  const agyIdle = (prompt = '>', footer = '? for shortcuts', transcript: string[] = []) =>
+    [...header, ...transcript, rule(), prompt, rule(), footer].join('\n');
+
+  it('leaves a blank startup frame unconfirmed for held starting messages', () => {
+    expect(detectAgentState(AGY_MANIFEST, screen(''))).toMatchObject({
+      state: 'idle',
+      visibleIdle: false,
+      matchedRuleId: null,
+    });
+  });
+
+  it.each([
+    ['startup composer', agyIdle('>', '? for shortcuts')],
+    ['draft input', agyIdle('> fix the tests', '? for shortcuts')],
+    ['paste badge', agyIdle('> [Pasted text #1 +24 lines]', '? for shortcuts')],
+    ['mode footer', agyIdle('>\n  Auto (shift+tab to cycle)', 'auto · gemini-4-neon-high')],
+    ['exit confirmation hint', agyIdle('>', 'press ctrl+d again to exit')],
+  ])('classifies %s as visibleIdle', (_label, text) => {
+    expect(detectAgentState(AGY_MANIFEST, screen(text))).toMatchObject({
+      state: 'idle',
+      visibleIdle: true,
+      matchedRuleId: 'idle_composer',
+    });
+  });
+
+  it('stays idle when slash-command autocomplete shows tab Complete below the composer', () => {
+    const autocomplete = [
+      ...header,
+      rule(),
+      '> /res',
+      rule(),
+      '  /resume    Resume an earlier conversation',
+      '  ↑↓ Navigate · tab Complete · esc Dismiss',
+      '? for shortcuts',
+    ].join('\n');
+    expect(detectAgentState(AGY_MANIFEST, screen(autocomplete))).toMatchObject({
+      state: 'idle',
+      visibleIdle: true,
+    });
+  });
+
+  it.each([
+    ['double-bordered working tray', [...header, '> ping', '', '  ● Generating · 3s (esc to interrupt)', rule(), '>', rule(), '  ⎿  Running tests', rule(), '? for shortcuts'].join('\n')],
+    ['spinner status line', [...header, ' ⠋ Thinking · 12s', rule(), '>', rule(), '? for shortcuts'].join('\n')],
+    ['esc to interrupt hint', [...header, ' Working on changes (esc to interrupt)', rule(), '>', rule(), '? for shortcuts'].join('\n')],
+  ])('classifies %s as working', (_label, text) => {
+    expect(detectAgentState(AGY_MANIFEST, screen(text))).toMatchObject({
+      state: 'working',
+      visibleWorking: true,
+      matchedRuleId: 'working_tray',
+    });
+  });
+
+  it('blocks on the untrusted workspace prompt and clears once the composer appears below it', () => {
+    const trustPrompt = [
+      'Do you trust the contents of this project?',
+      '  /tmp/untrusted-repo',
+      '',
+      '  ❯ 1. Yes, I trust this folder',
+      '    2. No, exit',
+    ].join('\n');
+    expect(detectAgentState(AGY_MANIFEST, screen(trustPrompt))).toMatchObject({
+      state: 'blocked',
+      visibleBlocker: true,
+      matchedRuleId: 'workspace_trust_prompt',
+    });
+    expect(detectAgentState(AGY_MANIFEST, screen(agyIdle('>', '? for shortcuts', [trustPrompt])))).toMatchObject({
+      state: 'idle',
+      visibleIdle: true,
+    });
+  });
+
+  it('blocks on the sign-in prompt and clears once signed in', () => {
+    const signIn = ' Welcome to the Antigravity CLI. You are currently not signed in.\n\n ⣷  Signing in...';
+    expect(detectAgentState(AGY_MANIFEST, screen(signIn))).toMatchObject({
+      state: 'blocked',
+      visibleBlocker: true,
+      matchedRuleId: 'sign_in_prompt',
+    });
+    expect(detectAgentState(AGY_MANIFEST, screen(agyIdle('>', '? for shortcuts', [signIn])))).toMatchObject({
+      state: 'idle',
+      visibleIdle: true,
+    });
+  });
+
+  it.each([
+    ['/model picker overlay', [...header, ' Select Model', ' ❯ Gemini 4 Neon (High)', ' Keyboard: ↑/↓ Navigate · enter Select · esc Cancel'].join('\n')],
+    ['/resume picker overlay', [...header, ' Resume Conversation', ' ❯ Fix tests', ' Keyboard: ↑/↓ Navigate · enter Confirm · esc Close'].join('\n')],
+    ['tool approval prompt', [...header, ' Run command: rm -rf build', ' Allow once   Always allow   Reject (esc)'].join('\n')],
+  ])('blocks on %s', (_label, text) => {
+    expect(detectAgentState(AGY_MANIFEST, screen(text))).toMatchObject({
+      state: 'blocked',
+      visibleBlocker: true,
+      matchedRuleId: 'live_overlay',
+    });
   });
 });

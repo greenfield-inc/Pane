@@ -113,9 +113,9 @@ function createServicesStub(projects: Project[]): AppServices {
 
 describe('config IPC handlers', () => {
   it.each([
-    { platform: 'darwin', agents: ['claude', 'codex', 'cursor', 'opencode', 'pi'] },
-    { platform: 'linux', agents: ['claude', 'codex', 'cursor', 'opencode', 'pi'] },
-    { platform: 'win32', agents: ['claude', 'codex', 'opencode', 'pi'] },
+    { platform: 'darwin', agents: ['claude', 'codex', 'cursor', 'opencode', 'pi', 'agy'] },
+    { platform: 'linux', agents: ['claude', 'codex', 'cursor', 'opencode', 'pi', 'agy'] },
+    { platform: 'win32', agents: ['claude', 'codex', 'opencode', 'pi', 'agy'] },
   ])('includes OpenCode in remote Session agents on $platform', async ({ platform, agents }) => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue(platform);
     try {
