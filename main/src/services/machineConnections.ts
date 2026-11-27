@@ -22,6 +22,7 @@ import {
   MACHINE_EVENT_CHANNELS,
   MACHINE_HEALTH_ACTIONS,
   MACHINE_READ_CHANNELS,
+  OWNER_ONLY_MACHINE_READS,
   type MachineHealthAction,
   type MachineConnectionsEvent,
   type MachineEventChannel,
@@ -297,7 +298,13 @@ export class MachineConnections {
         `Pane can't read "${channel}" from another machine: only its lists can be read this way. Nothing was read.`,
         `Use one of ${MACHINE_READ_CHANNELS.join(', ')}.`);
     }
-    const answer = this.machines.get(machineId)?.state.access === 'read' ? READ_ONLY_HOST_ANSWERS.get(channel) : undefined;
+    const saved = this.machines.get(machineId);
+    if (saved && OWNER_ONLY_MACHINE_READS.has(channel) && saved.state.mine !== true) {
+      throw new PaneError('MACHINE_READ_OWNER_ONLY',
+        `Pane reads "${channel}" only from your own computers, and ${saved.state.label} isn't marked as yours. Nothing was read.`,
+        'Open the Session there with Enter, or turn on "This is my computer" for it in Settings › Remote Access › Computers.');
+    }
+    const answer = saved?.state.access === 'read' ? READ_ONLY_HOST_ANSWERS.get(channel) : undefined;
     return { machineId, data: answer !== undefined ? answer : await this.invoke(machineId, { channel, args }) };
   }
 

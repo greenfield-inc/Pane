@@ -66,6 +66,8 @@ export const MACHINE_READ_CHANNELS = [
   // One Session's view, tabs, layout and newest 200 messages, read-only (T-87): the arrow keys show a
   // Session the mirror lacks, and fill a mirrored one's full window behind its first paint (T-116 PR 6).
   'orchestration-sessions:peek',
+  // A chat's earlier messages, read only (D-19): "Earlier messages" on another machine's shown chat.
+  'chat-tab:history',
   'projects:get-all',
   'projects:list-branches',
   'projects:detect-branch',
@@ -81,6 +83,12 @@ export const MACHINE_READ_CHANNELS = [
   'usage:get-report',
 ] as const;
 export type MachineReadChannel = typeof MACHINE_READ_CHANNELS[number];
+
+/**
+ * Reads that copy a chat's content ahead of opening it (T-116 PR 6): served only from the person's own
+ * machines (`MachineState.mine`), as the mirror is. A teammate's machine is refused before anything is sent.
+ */
+export const OWNER_ONLY_MACHINE_READS: ReadonlySet<string> = new Set<MachineReadChannel>(['orchestration-sessions:peek', 'chat-tab:history']);
 
 /** The events forwarded on `machines:event`: lists, statuses, permissions, Notify and settings, never terminal output. */
 export const MACHINE_EVENT_CHANNELS = [

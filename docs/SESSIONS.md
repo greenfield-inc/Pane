@@ -278,8 +278,13 @@ at once too, read-only and without switching the window: the header says
 messages); once the cursor stays about 150 ms, one read of that machine
 (`orchestration-sessions:peek`, which starts nothing) brings its newest 200
 messages, and while it is shown the chat follows that machine's chat events for
-it alone. A Session the mirror doesn't hold (just created, or one whose agent
-runs in a terminal) shows its name at once and fills from that same one read.
+it alone. If its live events skip ahead of what is held (a gap, or its agent
+starting a new run there), one more read of that machine catches it up, with the
+events that arrive meanwhile applied on top. **Earlier messages** reads older
+messages from that machine (`chat-tab:history`, which starts nothing). These
+reads (`peek` and `chat-tab:history`) are served only for your own machines.
+A Session the mirror doesn't hold (just created, or one whose agent runs in a
+terminal) shows its name at once and fills from that same one read.
 An offline machine's Session shows what it last sent, with an **Offline · last
 seen** *time* chip and a note in place of the message box; while the mirror
 catches up after a reconnect, the header says **Updating from** *machine*; and

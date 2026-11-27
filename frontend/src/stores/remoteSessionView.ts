@@ -4,7 +4,8 @@ import { useAllMachinesStore } from './allMachinesStore';
 import { switchMark } from '../../../shared/switchMarks';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { ChatTabClient, ChatTabView } from '../../../shared/types/chatTab';
-import { decodeChatTabEvent, decodeChatTabView } from '../../../shared/types/chatTabDecoders';
+import { decodeChatMessages, decodeChatTabEvent, decodeChatTabView } from '../../../shared/types/chatTabDecoders';
+import type { AgentChatMessage } from '../../../shared/types/agentChat';
 import type { OrchestrationSessionOpenResult } from '../../../shared/types/orchestrationSession';
 import type { SessionSnapshot } from '../../../shared/types/sessionSnapshot';
 import { firstPaintWindow } from '../../../shared/chatTabViewer';
@@ -263,6 +264,8 @@ function refused(machineName: string): Promise<never> {
 }
 
 const clients = new Map<string, ChatTabClient>();
+/** Earlier-message reads under way, by machine, panel and page: a second ask for the same page shares the first. */
+const historyReads = new Map<string, Promise<AgentChatMessage[]>>();
 /** Remote chats the cursor has stayed on, keyed by machine and panel: their reads answer every message held. */
 const fullChats = new Set<string>();
 
@@ -318,8 +321,19 @@ export function remoteChatClient(machineId: string, machineName: string): ChatTa
         if (changed && chat && !behindLive(chat.panelId, chat)) callback();
       });
     },
-    // Scroll-back reads the host once the window has switched to it.
-    history: async () => [],
+    // "Earlier messages" (D-19): the host's own `chat-tab:history`, which reads saved messages and starts
+    // nothing, served only for your own machines (OWNER_ONLY_MACHINE_READS). One read per chat at a time.
+    history(panelId, before, limit) {
+      if (!machineOnline(machineId)) return Promise.reject(new Error(`${machineName} is offline: its earlier messages load once it is back.`));
+      const key = `${remoteSessionKey(machineId, panelId)}\u0000${before}:${limit}`;
+      const pending = historyReads.get(key);
+      if (pending) return pending;
+      const read = window.electronAPI.machines.read(machineId, 'chat-tab:history', [panelId, before, limit])
+        .then(result => decodeChatMessages(result.data))
+        .finally(() => { historyReads.delete(key); });
+      historyReads.set(key, read);
+      return read;
+    },
     send: no, receipt: async () => undefined, unqueue: no, sendNow: no, editQueued: no, clear: no, stopTask: no,
     configure: no, cancel: no, permission: no, answer: no, restart: no, conversations: async () => [], resume: no,
     dismissBanner: no, files: async () => [], signIn: no,

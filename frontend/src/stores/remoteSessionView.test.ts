@@ -154,4 +154,26 @@ describe('a shown remote chat stays current (T-116 PR 6)', () => {
     expect(machineRead.mock.calls.length).toBe(during);
     expect(viewer.snapshot().transcript?.revision).toBe(5);
   });
+
+  it("'Earlier messages' reads the host's earlier messages, one read at a time, and nothing from an offline machine (D-19)", async () => {
+    const { remote } = await shown(5, 3);
+    const earlier = [msg(0), msg(1)].map(message => ({ ...message, role: 'user' as const }));
+    let answer: (value: { machineId: string; data: typeof earlier }) => void = () => undefined;
+    machineRead.mockImplementation(() => new Promise(resolve => { answer = resolve; }));
+    const client = remote.remoteChatClient('build', 'Build');
+
+    const first = client.history('rp', 2, 100);
+    const second = client.history('rp', 2, 100);
+    expect(machineRead).toHaveBeenCalledTimes(1);
+    expect(machineRead).toHaveBeenCalledWith('build', 'chat-tab:history', ['rp', 2, 100]);
+    answer({ machineId: 'build', data: earlier });
+    expect((await first).map(message => message.id)).toEqual(['m0', 'm1']);
+    expect((await second).map(message => message.id)).toEqual(['m0', 'm1']);
+
+    const { useAllMachinesStore } = await import('./allMachinesStore');
+    useAllMachinesStore.setState({ machines: [{ id: 'build', label: 'Build', kind: 'remote', status: 'offline', offlineSince: '2026-11-27T00:00:00.000Z', mine: true }] });
+    machineRead.mockClear();
+    await expect(client.history('rp', 2, 100)).rejects.toThrow(/offline/);
+    expect(machineRead).not.toHaveBeenCalled();
+  });
 });
