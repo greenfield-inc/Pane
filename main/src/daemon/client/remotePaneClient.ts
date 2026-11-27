@@ -1342,6 +1342,8 @@ export class RemotePaneClientController extends EventEmitter {
   private analyticsManager: Pick<AnalyticsManager, 'track'> | undefined;
   private resolveTailnetMachineUrl: ((machine: TailnetMachineRef) => Promise<string>) | undefined;
   private tailnetRelayKey: RemotePaneClientControllerOptions['tailnetRelayKey'];
+  /** Failed Tailscale name checks, by name and key, until they may run again (review S-11). */
+  private readonly tailnetNameFailures = new Map<string, number>();
   private prepareSshRoute: ((route: ComputerRoute) => Promise<string>) | undefined;
   private activeClient: RemotePaneClient | null = null;
   private rendererIds: () => number[] = () => [];
@@ -1753,7 +1755,7 @@ export class RemotePaneClientController extends EventEmitter {
       const before = normalizeRemoteDaemonConfig(this.configManager.getConfig().remoteDaemon).client.computers;
       const savedVia = before.find((candidate) => candidate.id === computerId)?.routes.find((route) => route.id === routeId);
       const tailnetRelayKey = this.tailnetRelayKey;
-      const verifiedTailnet = savedVia && tailnetRelayKey ? await verifiedTailnetName(before, computerId, savedVia, report, tailnetRelayKey) : false;
+      const verifiedTailnet = savedVia && tailnetRelayKey ? await verifiedTailnetName(before, computerId, savedVia, report, tailnetRelayKey, { failures: this.tailnetNameFailures, now: Date.now() }) : false;
       await this.configManager.updateConfigWith((current) => {
         const remote = normalizeRemoteDaemonConfig(current.remoteDaemon);
         const computer = remote.client.computers.find((candidate) => candidate.id === computerId);

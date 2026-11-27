@@ -547,7 +547,8 @@ function tailnetKey(machine: string, domain: string): string {
 /**
  * Whether a report's Tailscale name, taken by another saved record, is this computer's own (review
  * S-9): the report names the key its route is pinned to, and the machine at that name, read over
- * Tailscale (`relayKeyAt`), holds the same key. Asks nothing when the name isn't taken.
+ * Tailscale (`relayKeyAt`), holds the same key. Asks nothing when the name isn't taken. With `memory`,
+ * a check that failed for a name and key isn't asked again for a day (review S-11).
  */
 export async function verifiedTailnetName(
   computers: readonly RemoteComputer[],
@@ -555,6 +556,7 @@ export async function verifiedTailnetName(
   via: ComputerRoute,
   report: ComputerRoutesReport,
   relayKeyAt: (tailnet: { name: string; domain: string }, secret: string) => Promise<{ computerId: string; fingerprint: string } | null | undefined>,
+  memory?: { failures: Map<string, number>; now: number },
 ): Promise<boolean> {
   const tailnet = report.tailnet;
   const pin = via.relay;
@@ -563,9 +565,17 @@ export async function verifiedTailnetName(
   const taken = computers.some((candidate) => candidate.id !== computerId
     && candidate.routes.some((route) => route.tailnetMachine && route.tailnetDomain && tailnetKey(route.tailnetMachine, route.tailnetDomain) === name));
   if (!taken) return false;
+  const remembered = `${name}\n${pin.computerId}\n${pin.fingerprint}`;
+  if (memory && (memory.failures.get(remembered) ?? 0) > memory.now) return false;
   const held = await relayKeyAt({ name: tailnet.machine, domain: tailnet.domain }, via.token);
-  return held?.computerId === pin.computerId && held.fingerprint === pin.fingerprint;
+  const verified = held?.computerId === pin.computerId && held.fingerprint === pin.fingerprint;
+  if (memory && verified) memory.failures.delete(remembered);
+  else if (memory) memory.failures.set(remembered, memory.now + NAME_CHECK_AGAIN_MS);
+  return verified;
 }
+
+/** A Tailscale name check that failed is asked again after this long (review S-11). */
+const NAME_CHECK_AGAIN_MS = 24 * 60 * 60 * 1000;
 
 /** Whether a report's relay id and key fingerprint are the ones a saved record pins. */
 function reportNamesKeyOf(computer: RemoteComputer, report: ComputerRoutesReport): boolean {

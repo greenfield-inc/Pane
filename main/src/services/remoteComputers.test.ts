@@ -265,6 +265,29 @@ describe('merging computers', () => {
     expect(unproven.find((computer) => computer.id === 'mallory')?.routes.map((route) => route.kind)).toEqual(['tailscale', 'relay']);
   });
 
+  it('remembers a failed Tailscale name check for a day, so it doesn\'t run on every connect (review S-11)', async () => {
+    const claimed: RemoteComputer = { id: 'mallory', label: 'mallory', routes: [{ id: 'tailscale:https://devbox.tail1.ts.net:8443', kind: 'tailscale', source: 'found', baseUrl: 'https://devbox.tail1.ts.net:8443', token: '', tailnetMachine: 'devbox', tailnetDomain: 'tail1.ts.net' }] };
+    const report = {
+      machineId: 'devbox-install', name: 'devbox',
+      relay: { id: 'k7xq2m4n8p3r5t6v', address: 'https://k7xq2m4n8p3r5t6v.runpane.net', fingerprint: 'fp', local: [] },
+      tailnet: { dnsName: 'devbox.tail1.ts.net.', machine: 'devbox', domain: 'tail1.ts.net', port: 8443 },
+    };
+    let held: { computerId: string; fingerprint: string } | undefined;
+    let asks = 0;
+    const relayKeyAt = async () => { asks += 1; return held; };
+    const failures = new Map<string, number>();
+    const at = (iso: string) => ({ failures, now: Date.parse(iso) });
+
+    expect(await verifiedTailnetName([claimed, devbox], devbox.id, relayRoute, report, relayKeyAt, at('2026-11-26T12:00:00Z'))).toBe(false);
+    expect(await verifiedTailnetName([claimed, devbox], devbox.id, relayRoute, report, relayKeyAt, at('2026-11-26T18:00:00Z'))).toBe(false);
+    expect(asks).toBe(1);
+
+    held = { computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'fp' };
+    expect(await verifiedTailnetName([claimed, devbox], devbox.id, relayRoute, report, relayKeyAt, at('2026-11-27T12:01:00Z'))).toBe(true);
+    expect(asks).toBe(2);
+    expect(failures.size).toBe(0);
+  });
+
   it('saves only https addresses a computer reports, so its token never goes out in the clear', () => {
     const { computers } = applyRoutesReport([devbox], devbox.id, relayRoute, {
       machineId: 'devbox-install',
