@@ -1,14 +1,20 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { AgentMessageRecord } from '../../../../shared/types/agentMessages';
-import { checkedChatLine, classifyChatLine, shownRefs, type ChatAgentLine, type ChatMessageRecords } from '../../../../shared/agentMessagePresentation';
+import { checkedChatLine, classifyChatLine, retriedAttempts, shownRefs, type ChatAgentLine, type ChatMessageRecords } from '../../../../shared/agentMessagePresentation';
+import { paneApprovalLine } from '../../../../shared/notifyTabLines';
+import type { NotifyItem } from '../../../../shared/types/notify';
 
 /** This tab's messages (T-105), sent and received, by ref; and the ones it sent, by the turn that sent them. */
 export interface AgentMessagesView extends ChatMessageRecords {
   sentByTurn: ReadonlyMap<string, AgentMessageRecord[]>;
   /** Messages this tab received whose cards are in the loaded chat, so a reply line can point up to them. */
   shownHere: ReadonlySet<string>;
+  /** Failed sends this tab sent again, under the message that retried them (T-133). */
+  attempts: ReadonlyMap<string, AgentMessageRecord[]>;
+  /** The approvals whose lines Pane types into this tab, to tell Pane's `answer:` lines from the person's (T-133). */
+  approvals: readonly NotifyItem[];
 }
-export const AgentMessagesContext = createContext<AgentMessagesView>({ available: false, byRef: new Map(), sentByTurn: new Map(), shownHere: new Set() });
+export const AgentMessagesContext = createContext<AgentMessagesView>({ available: false, byRef: new Map(), sentByTurn: new Map(), shownHere: new Set(), attempts: new Map(), approvals: [] });
 
 /** A tab's message records, read again whenever any message changes. */
 export interface PanelMessageRecords {
@@ -69,6 +75,8 @@ export function useAgentMessageRecords(panelId: string, since?: string): PanelMe
   return state.panelId === panelId ? state : NONE;
 }
 
+const NO_APPROVALS: readonly NotifyItem[] = [];
+
 /** Which turn each sent message sits in, as one string: equal while the placement is. */
 function placementKey(sentByTurn: ReadonlyMap<string, AgentMessageRecord[]>): string {
   return [...sentByTurn].map(([turn, sent]) => `${turn}:${sent.map(record => record.ref).join(',')}`).join(';');
@@ -78,17 +86,17 @@ function placementKey(sentByTurn: ReadonlyMap<string, AgentMessageRecord[]>): st
  * The view the chat's cards read. It changes only when the records or the placement do, not on
  * every streamed token (turns change with each one), so a turn's cards don't re-render while an agent writes.
  */
-export function useAgentMessagesView(panelId: string, loaded: PanelMessageRecords, sentByTurn: ReadonlyMap<string, AgentMessageRecord[]>, routed: readonly string[]): AgentMessagesView {
+export function useAgentMessagesView(panelId: string, loaded: PanelMessageRecords, sentByTurn: ReadonlyMap<string, AgentMessageRecord[]>, routed: readonly string[], approvals: readonly NotifyItem[] = NO_APPROVALS): AgentMessagesView {
   // Each routed text by its length and its end, which holds the reply line's id: cheap to build on every token.
   const key = `${placementKey(sentByTurn)}|${routed.map(text => `${text.length}:${text.slice(-120)}`).join('\u0000')}`;
   const build = (): AgentMessagesView => {
     const records = { panelId, available: loaded.available, coveredFrom: loaded.coveredFrom, byRef: new Map(loaded.records.map(record => [record.ref, record])) };
-    return { ...records, sentByTurn, shownHere: shownRefs(routed, records) };
+    return { ...records, sentByTurn, shownHere: shownRefs(routed, records), attempts: retriedAttempts(loaded.records, panelId).attempts, approvals };
   };
-  const [held, setHeld] = useState(() => ({ panelId, loaded, key, view: build() }));
-  if (held.panelId === panelId && held.loaded === loaded && held.key === key) return held.view;
+  const [held, setHeld] = useState(() => ({ panelId, loaded, key, approvals, view: build() }));
+  if (held.panelId === panelId && held.loaded === loaded && held.key === key && held.approvals === approvals) return held.view;
   // Adjusting state while rendering (react.dev "storing information from previous renders"): the new view is used now.
-  const next = { panelId, loaded, key, view: build() };
+  const next = { panelId, loaded, key, approvals, view: build() };
   setHeld(next);
   return next.view;
 }
@@ -96,5 +104,11 @@ export function useAgentMessagesView(panelId: string, loaded: PanelMessageRecord
 /** How a message typed into this tab reads: an agent's, Pane's, a reply, the person's relayed words, or (undefined) the person's own. */
 export function useChatLine(text: string): ChatAgentLine | undefined {
   const records = useContext(AgentMessagesContext);
-  return useMemo(() => checkedChatLine(classifyChatLine(text), records), [text, records]);
+  return useMemo(() => {
+    const line = checkedChatLine(classifyChatLine(text), records);
+    if (line || !records.panelId) return line;
+    // Not an agent's: perhaps Pane's own line about an approval, which its record must vouch for (T-133).
+    const pane = paneApprovalLine(text, records.panelId, records.approvals);
+    return pane ? { type: 'pane', ...pane } : undefined;
+  }, [text, records]);
 }

@@ -382,3 +382,25 @@ a.chat-status-item:hover,button.chat-status-item:hover:not(:disabled),.chat-stat
 @media (hover:hover) { .chat-agent-row:hover .chat-copy { opacity:1; } }
 .chat-agent-reply .chat-markdown :not(pre)>code { background:var(--chat-background); }
 .chat-agent-unverified { border-style:dashed; box-shadow:none; }
+/* T-133: an own worker's message, collapsed to one line; the toggle that collapses it again; failed sends folded into their retry. */
+.chat-agent-row:has(.chat-agent-card[data-collapsed=true]) { width:min(92%, 40rem); }
+.chat-agent-compact { display:flex; align-items:center; gap:6px; width:100%; min-width:0; padding:6px 10px 6px 12px; font-size:13px; line-height:1.4; text-align:left; color:var(--chat-foreground); }
+.chat-agent-compact:hover { background:var(--chat-muted); }
+.chat-agent-compact:focus-visible,.chat-agent-toggle:focus-visible { outline:2px solid var(--chat-primary); outline-offset:-2px; }
+.chat-agent-compact .chat-agent-name { flex-shrink:0; max-width:40%; }
+.chat-agent-preview { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--chat-muted-foreground); }
+.chat-agent-compact .chat-agent-ref,.chat-agent-compact .chat-agent-time,.chat-agent-compact .chat-agent-pill { flex-shrink:0; }
+.chat-agent-chevron,.chat-agent-toggle svg { width:14px; height:14px; flex-shrink:0; color:var(--chat-muted-foreground); }
+.chat-agent-toggle { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:6px; }
+.chat-agent-toggle:hover { background:var(--chat-muted); }
+.chat-agent-attempts { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:var(--chat-muted-foreground); }
+.chat-agent-attempts svg { width:12px; height:12px; color:var(--chat-destructive); }
+@media (max-width:480px) { .chat-agent-compact .chat-agent-time { display:none; } }
+/* T-133: Pane's own approval line (answer:, reply:, closed:, correction:) as a quiet system line, not the person's bubble. */
+.chat-pane-line { align-self:stretch; display:flex; align-items:baseline; gap:6px; min-width:0; padding:2px 4px; font-size:12px; line-height:1.5; color:var(--chat-muted-foreground); }
+.chat-pane-line-icon { display:inline-flex; width:14px; height:14px; flex-shrink:0; align-self:center; }
+.chat-pane-line-icon svg { width:14px; height:14px; }
+.chat-pane-line-who { font-weight:600; flex-shrink:0; }
+.chat-pane-line-text { min-width:0; overflow-wrap:anywhere; }
+.chat-pane-line .chat-message-actions { align-self:center; margin-left:auto; }
+@media (hover:hover) { .chat-pane-line:hover .chat-copy { opacity:1; } }
