@@ -301,7 +301,9 @@ export class MachineConnections {
   }
 
   /** An event raised on this computer; list events are forwarded as `LOCAL_MACHINE_ID`'s. */
-  forwardLocal(channel: string, args: unknown[]): void {
+  forwardLocal(channel: string, args: PaneEventArgument[]): void {
+    // This computer's followed chat, shown read-only in a window on another machine (T-116 D-20).
+    if (this.followedChats.size > 0) this.passOnChat(LOCAL_MACHINE_ID, channel, args[0]);
     if (isMachineEventChannel(channel)) this.emit({ type: 'event', machineId: LOCAL_MACHINE_ID, channel, args });
   }
 

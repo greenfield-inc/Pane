@@ -125,6 +125,20 @@ describe('MachineConnections', () => {
     expect(events).toEqual([]);
   });
 
+  it('passes on this computer\'s followed chat too, for its rows in a window showing another machine (T-116 D-20)', () => {
+    const { machines } = setup(['build-box']);
+    const heard: Array<{ channel: string; payload: unknown }> = [];
+    const stop = machines.followChat('local', 'chat-1', (channel, payload) => heard.push({ channel, payload }));
+    const shown = { panelId: 'chat-1', generation: 2, revision: 7, index: 0, change: { type: 'append' } };
+
+    machines.forwardLocal('chat-tab:event', [shown]);
+    machines.forwardLocal('chat-tab:event', [{ ...shown, panelId: 'chat-2' }]);
+    stop();
+    machines.forwardLocal('chat-tab:event', [shown]);
+
+    expect(heard).toEqual([{ channel: 'chat-tab:event', payload: shown }]);
+  });
+
   it('runs a rename on the named machine only', async () => {
     const { machines, client, connect } = setup(['studio-mac', 'build-box']);
     connect('build-box');
