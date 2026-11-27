@@ -144,7 +144,7 @@ import { readTailscaleStatus, tailnetLoginMatches, tailnetRelayKey } from './ser
 import { MACHINE_MIRROR_FOLDER } from '../../shared/types/machineMirror';
 import { RemoteMemberEvents } from './services/remoteMemberEvents';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
-import { registerMachineMirrorHandlers } from './ipc/machineMirror';
+import { registerMachineMirrorHandlers, type MachineMirrorHandlers } from './ipc/machineMirror';
 import { followSavedMachines, prepareNotifyForQuit } from './ipc/notify';
 import { LeaderboardService } from './services/leaderboardService';
 import { registerLeaderboardHandlers } from './ipc/leaderboard';
@@ -292,7 +292,7 @@ let sharedCredentialSync: SharedCredentialSync | null = null;
 /** This computer's copy of the chat Sessions on the owner's other machines (T-116 PR 5). */
 let machineMirror: MachineMirror | null = null;
 /** Told once the mirror exists, so windows that subscribed earlier hear it (review SF-2). */
-let machineMirrorHandlers: { mirrorReady: () => void } | null = null;
+let machineMirrorHandlers: MachineMirrorHandlers | null = null;
 let machineConnections: MachineConnections | null = null;
 let logger: Logger;
 export let sessionManager: SessionManager;

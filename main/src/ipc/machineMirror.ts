@@ -6,6 +6,12 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { MACHINE_MIRROR_CHANNELS, type MachineChatEvent, type MachineMirrorListing } from '../../../shared/types/machineMirror';
 import type { SessionSnapshot } from '../../../shared/types/sessionSnapshot';
 
+/** What main tells the mirror's handlers. */
+export interface MachineMirrorHandlers {
+  /** The mirror exists now: follow it, and have windows that listed before list again. */
+  mirrorReady(): void;
+}
+
 const followSchema = boundary.nullable(boundary.object({ machineId: boundary.nonEmptyString, panelId: boundary.nonEmptyString }));
 
 /**
@@ -18,7 +24,7 @@ const followSchema = boundary.nullable(boundary.object({ machineId: boundary.non
  * list is empty and every Session missing. Main calls the returned `mirrorReady` once it exists, so
  * a window that subscribed before then hears its changes, and lists again (review SF-2).
  */
-export function registerMachineMirrorHandlers(ipcMain: IpcMain, mirror: () => MachineMirror | null, machines: MachineConnections): { mirrorReady: () => void } {
+export function registerMachineMirrorHandlers(ipcMain: IpcMain, mirror: () => MachineMirror | null, machines: MachineConnections): MachineMirrorHandlers {
   const subscribers = new Set<WebContents>();
   let unsubscribe: (() => void) | undefined;
   const follow = () => {
