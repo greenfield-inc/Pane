@@ -13,6 +13,7 @@ import {
   bundledAgentFarmProcess,
   installBundledAgentFarm,
   paneAgentFarmHarness,
+  listPaneAgentFarmProfiles,
   paneAgentFarmProcess,
   reinstallBundledPlugin,
   writeAgentFarmTelemetry,
@@ -20,6 +21,7 @@ import {
   type BundledAgentFarm,
 } from './bundledAgentFarm';
 import { parseProfileList } from './agentFarmProfiles';
+import { writeProfileSync } from './profileSyncFile';
 import { configuredAgent } from '../../../../shared/agents';
 
 const temporary: string[] = [];
@@ -52,6 +54,7 @@ function recordingRunner(calls: AgentFarmProcess[], fail?: string, failUninstall
       rmSync(path.join(root, '.plugins', `${name}.json`), { force: true });
       return `{\n  "name": "${name}",\n  "removed": ["a.md", "b.md"],\n  "stayed": [{ "file": "c.md", "reason": "modified" }]\n}\n`;
     }
+    if (process.args[2] === 'validate') return '{}\n';
     if (fail) throw Object.assign(new Error('Command failed'), { stderr: `warning\n${fail}\n` });
     // No name installs greenfield; a path installs the plugin in that folder (Pane's own).
     const name = process.args[3] === '--config-root' ? 'greenfield' : path.basename(process.args[3]);
@@ -62,12 +65,18 @@ function recordingRunner(calls: AgentFarmProcess[], fail?: string, failUninstall
   };
 }
 
-/** What an older Pane left in its config root: a retired plugin's files and Agent Farm's receipt for them. */
-function installRetired(paneDir: string, name: string): void {
+/** Where an older packaged Pane installed its bundled plugins from (a real receipt's `source.path`). */
+const OLD_BUNDLE = '/Applications/Pane.app/Contents/Resources/app.asar/node_modules/@greenfieldco/agent-farm/plugins';
+
+/**
+ * A retired plugin's files and Agent Farm's receipt for them. By default what an older Pane left:
+ * installed from its bundled package's plugins folder.
+ */
+function installRetired(paneDir: string, name: string, source: Record<string, string> = { path: `${OLD_BUNDLE}/${name}` }): void {
   const configRoot = agentFarmConfigRoot(paneDir);
   mkdirSync(path.join(configRoot, 'plugins', name), { recursive: true });
   mkdirSync(path.join(configRoot, '.plugins'), { recursive: true });
-  writeFileSync(path.join(configRoot, '.plugins', `${name}.json`), '{"layout":2}');
+  writeFileSync(path.join(configRoot, '.plugins', `${name}.json`), JSON.stringify({ layout: 2, source }));
 }
 
 describe('installBundledAgentFarm', () => {
@@ -172,6 +181,48 @@ describe('installBundledAgentFarm', () => {
     expect(calls.map((call) => call.args.slice(1, 3))).toEqual([['plugin', 'uninstall'], ['plugin', 'install'], ['plugin', 'install']]);
     expect(logs).toContainEqual(expect.stringContaining("Pane couldn't uninstall the retired Agent Farm plugin dcouple"));
     expect(logs).toContainEqual(expect.stringContaining('error: permission denied'));
+  });
+
+  it('uninstalls a retired plugin an older Pane installed from its pack, whose plugin.yaml names the stock repository', async () => {
+    const paneDir = tempDir();
+    installRetired(paneDir, 'dcouple', { repository: 'https://github.com/greenfield-inc/skills.git' });
+    installRetired(paneDir, 'bigbrain', { repository: 'https://github.com/greenfield-inc/agent-farm' });
+    const calls: AgentFarmProcess[] = [];
+    await installBundledAgentFarm({ paneDir, bundle: fakeBundle(), run: recordingRunner(calls), log: () => undefined });
+    expect(calls.filter((call) => call.args[2] === 'uninstall').map((call) => call.args[3])).toEqual(['dcouple', 'bigbrain']);
+  });
+
+  // Review F-1: Pane no longer ships dcouple, so the Profiles editor accepts the name, and a save can arrive by sync.
+  it('keeps a plugin with a retired name that was made or synced here, with its files and receipt', async () => {
+    const paneDir = tempDir();
+    const configRoot = agentFarmConfigRoot(paneDir);
+    // Made in the Profiles editor: installed from its staging folder.
+    installRetired(paneDir, 'dcouple', { path: path.join(configRoot, 'drafts', '.new-dcouple-1a2b3c4d', 'dcouple') });
+    writeFileSync(path.join(configRoot, 'plugins', 'dcouple', 'plugin.yaml'), 'name: dcouple\n');
+    // An edited stock copy that arrived from another computer: its receipt names the stock repository.
+    installRetired(paneDir, 'bigbrain', { repository: 'https://github.com/greenfield-inc/agent-farm' });
+    await writeProfileSync(configRoot, { version: 1, plugins: { bigbrain: { state: 'saved', hash: 'abc', savedAt: 1, machine: 'other' } }, computers: {} });
+    const calls: AgentFarmProcess[] = [];
+    const logs: string[] = [];
+    await installBundledAgentFarm({ paneDir, bundle: fakeBundle(), run: recordingRunner(calls), log: (line) => logs.push(line) });
+    expect(calls.filter((call) => call.args[2] === 'uninstall')).toEqual([]);
+    expect(readFileSync(path.join(configRoot, 'plugins', 'dcouple', 'plugin.yaml'), 'utf8')).toBe('name: dcouple\n');
+    expect(existsSync(path.join(configRoot, '.plugins', 'dcouple.json'))).toBe(true);
+    expect(existsSync(path.join(configRoot, '.plugins', 'bigbrain.json'))).toBe(true);
+    expect(logs).toContainEqual(expect.stringContaining('Kept the Agent Farm plugin dcouple'));
+    expect(logs).toContainEqual(expect.stringContaining('Kept the Agent Farm plugin bigbrain'));
+  });
+
+  it('keeps a retired name whose receipt names no source or another repository, since Pane can\'t tell it is the stock copy', async () => {
+    const paneDir = tempDir();
+    const configRoot = agentFarmConfigRoot(paneDir);
+    installRetired(paneDir, 'dcouple', {});
+    installRetired(paneDir, 'bigbrain', { repository: 'https://github.com/someone/bigbrain.git' });
+    const calls: AgentFarmProcess[] = [];
+    await installBundledAgentFarm({ paneDir, bundle: fakeBundle(), run: recordingRunner(calls), log: () => undefined });
+    expect(calls.filter((call) => call.args[2] === 'uninstall')).toEqual([]);
+    expect(existsSync(path.join(configRoot, '.plugins', 'dcouple.json'))).toBe(true);
+    expect(existsSync(path.join(configRoot, '.plugins', 'bigbrain.json'))).toBe(true);
   });
 
   it('reinstalls nothing when the bundle is unchanged, and says so', async () => {
@@ -404,6 +455,38 @@ describe('installBundledAgentFarm with the pinned package', () => {
     const status = await installBundledAgentFarm({ paneDir, bundle: { ...bundle, version: '9.9.8' }, log: () => undefined });
     expect(status.error).toBeUndefined();
     expect(status).toMatchObject({ state: 'ready', edited: ['greenfield'] });
+  }, 180_000);
+
+  // Review F-3: an edited greenfield from Agent Farm 0.2 can name a variant 0.3 refuses (opus), and
+  // then `profiles list` fails for every plugin, so New Session shows no named profiles.
+  it('saves an edited greenfield this Agent Farm rejects, unchanged, and installs the shipped one so profiles still list', async () => {
+    const paneDir = tempDir();
+    const configRoot = agentFarmConfigRoot(paneDir);
+    await installBundledAgentFarm({ paneDir, log: () => undefined });
+    const bundle = bundledAgentFarm()!;
+    const seo = path.join(configRoot, 'plugins', 'greenfield', 'profiles', 'seo.yaml');
+    const stock = readFileSync(seo, 'utf8');
+    const legacy = stock.replace('default: claude', '  opus:\n    agent: seo\ndefault: claude');
+    writeFileSync(seo, legacy);
+    const receipt = readFileSync(path.join(configRoot, '.plugins', 'greenfield.json'), 'utf8');
+    const logs: string[] = [];
+    const status = await installBundledAgentFarm({ paneDir, bundle: { ...bundle, version: '9.9.7' }, log: (line) => logs.push(line) });
+    expect(status.error).toBeUndefined();
+    expect(status).toMatchObject({ state: 'ready', edited: [] });
+    expect(status.recovered).toHaveLength(1);
+    const { folder, reason } = status.recovered![0];
+    expect(reason).toContain('opus');
+    // The recovery copy is the edited plugin and its receipt, byte for byte, with a note.
+    expect(readFileSync(path.join(folder, 'plugin', 'profiles', 'seo.yaml'), 'utf8')).toBe(legacy);
+    expect(readFileSync(path.join(folder, 'receipt.json'), 'utf8')).toBe(receipt);
+    expect(readFileSync(path.join(folder, 'README.txt'), 'utf8')).toContain('rejects it');
+    expect(path.dirname(folder)).toBe(path.join(configRoot, 'recovered'));
+    expect(readFileSync(seo, 'utf8')).toBe(stock);
+    expect(existsSync(path.join(configRoot, 'drafts'))).toBe(false);
+    expect(logs.join('\n')).toContain(`Pane saved it unchanged in ${folder}`);
+    const listed = await listPaneAgentFarmProfiles(paneDir);
+    expect(listed.error).toBeUndefined();
+    expect(listed.profiles.map((entry) => entry.ref)).toEqual(expect.arrayContaining(['greenfield/seo', 'greenfield/business', 'greenfield/orchestrator']));
   }, 180_000);
 });
 

@@ -591,7 +591,12 @@ records; an unchanged bundle installs nothing and the log says so. Plugins older
 installed there (dcouple and bigbrain) are removed at each start with Agent
 Farm's `plugin uninstall`, which deletes only files unchanged since the install
 and leaves (and logs) any the person edited; a failed removal is logged and
-tried again on the next start. A retired plugin's receipt that isn't valid JSON
+tried again on the next start. Pane removes one only when its receipt shows an
+older Pane installed it: from the bundled package's `plugins/<name>` folder, or
+from the pack whose source is the stock `greenfield-inc` repository. A plugin of
+the same name made in the Profiles editor, one that arrived through profile sync
+(`sync.json` records it as a save), or one whose receipt doesn't say where it
+came from is kept, and the log says so. A retired plugin's receipt that isn't valid JSON
 would make every Agent Farm install there fail, so Pane renames it to
 `<name>.json.unreadable-<time>` (keeping its bytes and the plugin's files) and
 logs where it went. When an unchanged bundle's manifest still lists a retired
@@ -599,7 +604,15 @@ plugin, Pane rewrites only the manifest and leaves greenfield's files alone. A
 bundled plugin whose files no longer match Agent Farm's install receipt
 (`.plugins/<name>.json`), because someone edited, added or removed a file, is
 kept as it is: Pane updates no longer replace it, the log names it, and the
-manifest lists it under `edited`. This holds with Profiles on or off, so
+manifest lists it under `edited`. When a new bundle arrives, Pane first checks
+such a kept plugin with the new Agent Farm's `plugin validate` (on a copy
+without the pack's checksums, as the Profiles editor does). One it rejects (an
+edited greenfield from Agent Farm 0.2 can name a variant 0.3 refuses, and then
+`profiles list` fails for every plugin, leaving New Session with no named
+profiles) is saved unchanged, its files and receipt, with a `README.txt` on what
+happened, in `<PANE_DIR>/agent-farm/recovered/<name>-<version>-<time>/`, and the
+copy this Pane ships is installed in its place; the log names the folder. If
+that copy can't be saved, the edit is kept as it is. This holds with Profiles on or off, so
 turning Profiles off never lets an update overwrite a plugin edited while it
 was on. An install that never finished (its lock, a
 plugin Pane was installing then, recorded in `pane-installing.json`, or one with

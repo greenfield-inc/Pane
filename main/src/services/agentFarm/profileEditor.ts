@@ -31,6 +31,7 @@ import {
   runAgentFarm,
   type AgentFarmRunner,
   type BundledAgentFarm,
+  withoutPackChecksums,
 } from './bundledAgentFarm';
 import { parseProfileList } from './agentFarmProfiles';
 import { forgetSyncedEdit, syncedPluginEdits } from './profileSyncFile';
@@ -805,22 +806,6 @@ export class ProfileEditor {
     }
     return result;
   }
-}
-
-/**
- * A plugin installed from a pack (greenfield) lists its files' checksums in plugin.yaml,
- * which `plugin validate` checks but launches don't. Any edit changes a file, so the staged copy
- * Pane validates leaves them out; the installed plugin.yaml keeps them.
- */
-async function withoutPackChecksums(manifestFile: string): Promise<void> {
-  const content = await fs.readFile(manifestFile, 'utf8').catch(() => undefined);
-  if (content === undefined) return;
-  let data: JsonObject | undefined;
-  try { data = decodeOptionalBoundary(yaml.load(content), boundary.jsonObject); }
-  catch { return; }
-  if (!data || !('checksums' in data)) return;
-  const { checksums: _packed, ...rest } = data;
-  await fs.writeFile(manifestFile, yaml.dump(rest, { lineWidth: -1 }));
 }
 
 /**
