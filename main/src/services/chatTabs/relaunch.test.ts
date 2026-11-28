@@ -72,10 +72,9 @@ async function idle(manager: ChatTabManager) {
   await expect.poll(() => manager.relaunchPending('p1') || manager.view('p1').status !== 'idle', { timeout: 15_000 }).toBe(false);
 }
 
-/** Files left in Pane's private chat-tabs folder for the tab (the fallback transcript among them). */
+/** Markdown files left in Pane's private chat-tabs folder (the fallback transcript among them). */
 function privateFiles(spool: string): string[] {
-  const directory = path.join(spool, 'p1');
-  return existsSync(directory) ? readdirSync(directory).filter(name => name.endsWith('.md')) : [];
+  return existsSync(spool) ? readdirSync(spool, { recursive: true, encoding: 'utf8' }).filter(name => name.endsWith('.md')) : [];
 }
 
 const transcriptSent = (store: MemoryStore) => store.state('p1')?.receipts?.some(receipt => receipt.operationId.startsWith('transcript:') && receipt.state === 'completed');
@@ -235,6 +234,8 @@ describe('chat tab relaunch (T-63 Reload and Switch profile)', () => {
     await expect.poll(() => manager.receipt('p1', 'a')?.state).toBe('completed');
     // The Switch away stops the tab; the stop times out before the slow agent has ended.
     const stopping = manager.stop('p1', { message: 'The Session now runs Codex, in its Codex tab.', next: 'Switch back to use this tab.' });
+    // The switch back comes while the old agent is still shutting down.
+    await new Promise(resolve => setTimeout(resolve, 100));
     manager.relaunch('p1', { launch: { kind: 'profile', profile: 'lab/two' }, divider: 'Switched to Lab two · conversation kept' });
     await stopping;
     await idle(manager);
@@ -245,6 +246,8 @@ describe('chat tab relaunch (T-63 Reload and Switch profile)', () => {
     expect(store.state('p1')?.problem).toBeUndefined();
     manager.send('p1', { operationId: 'b', text: 'still here' });
     await expect.poll(() => manager.receipt('p1', 'b')?.state, { timeout: 10_000 }).toBe('completed');
+    // The same agent answered: the late stop didn't end it, so nothing started it again.
+    expect(launched).toEqual(['lab/one', 'lab/two']);
   });
 
   // Review F-5: Profiles turned off while a Reload or Switch waited for the reply.
