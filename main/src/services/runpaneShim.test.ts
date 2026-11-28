@@ -239,6 +239,29 @@ describe('the agent-farm shim', () => {
     expect(fs.readFileSync(path.join(state.binDir, 'agent-farm.cjs'), 'utf8')).toContain(JSON.stringify(path.join(state.binDir, 'agent-farm-launch', 'agent-farm')));
   });
 
+  // Review F-7: a link or a file named like the Windows folder is the person's; cleanup leaves it and what it points at.
+  it.skipIf(process.platform === 'win32')('cleans the Windows folder only when it is a real folder in Pane\'s bin', () => {
+    const state = installWithAgentFarm('win32', 'C:\\Program Files\\Pane\\Pane.exe');
+    const folder = path.join(state.binDir, 'agent-farm-launch');
+    const marked = fs.readFileSync(path.join(folder, 'agent-farm.cmd'), 'utf8');
+    syncAgentFarmShim(undefined, state, 'win32');
+    expect(fs.existsSync(folder)).toBe(false);
+
+    const elsewhere = path.join(root, 'elsewhere');
+    fs.mkdirSync(elsewhere, { recursive: true });
+    fs.writeFileSync(path.join(elsewhere, 'agent-farm.cmd'), marked);
+    fs.symlinkSync(elsewhere, folder, 'dir');
+    syncAgentFarmShim(undefined, state, 'win32');
+    expect(fs.readFileSync(path.join(elsewhere, 'agent-farm.cmd'), 'utf8')).toBe(marked);
+    expect(fs.lstatSync(folder).isSymbolicLink()).toBe(true);
+    fs.unlinkSync(folder);
+
+    fs.writeFileSync(folder, 'mine');
+    expect(() => syncAgentFarmShim(undefined, state, 'win32')).not.toThrow();
+    expect(() => installWithAgentFarm('win32', 'C:\\Program Files\\Pane\\Pane.exe')).not.toThrow();
+    expect(fs.readFileSync(folder, 'utf8')).toBe('mine');
+  });
+
   it.skipIf(process.platform === 'win32' || fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop'))('explains in WSL when interop is off', () => {
     const state = installWithAgentFarm('win32', 'C:\\Program Files\\Pane\\Pane.exe');
     const result = spawnSync(path.join(state.binDir, 'agent-farm'), ['profiles', 'list'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', WSL_DISTRO_NAME: 'Ubuntu-24.04' } });

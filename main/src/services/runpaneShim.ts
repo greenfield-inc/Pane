@@ -347,7 +347,8 @@ function writeAgentFarmShim(binDir: string, execPath: string, target: AgentFarmS
   if (platform === 'win32') {
     writeManagedFile(path.join(binDir, 'agent-farm.cmd'), windowsAgentFarmShim(execPath, launcher), PANE_MANAGED_SHIM_MARKER, 0o755);
     const folder = path.join(binDir, AGENT_FARM_WINDOWS_FOLDER);
-    if (!isSymlink(folder)) {
+    // Only a real folder of Pane's, or none yet: a link or a file of that name is the person's (review F-7).
+    if (!fs.existsSync(folder) || isRealDirectory(folder)) {
       fs.mkdirSync(folder, { recursive: true });
       writeManagedFile(path.join(folder, 'agent-farm.cmd'), windowsAgentFarmShim(execPath, launcher), PANE_MANAGED_SHIM_MARKER, 0o755);
     }
@@ -357,7 +358,16 @@ function writeAgentFarmShim(binDir: string, execPath: string, target: AgentFarmS
 const AGENT_FARM_LAUNCHER = 'agent-farm.cjs';
 /** On Windows, the folder whose only command is agent-farm.cmd, which Agent Farm's printed child launches name (agentFarmLauncher). */
 const AGENT_FARM_WINDOWS_FOLDER = 'agent-farm-launch';
-const AGENT_FARM_SHIM_FILES = ['agent-farm', 'agent-farm.cmd', AGENT_FARM_LAUNCHER, path.join(AGENT_FARM_WINDOWS_FOLDER, 'agent-farm.cmd')];
+const AGENT_FARM_SHIM_FILES = ['agent-farm', 'agent-farm.cmd', AGENT_FARM_LAUNCHER];
+
+/** A directory itself, not a link to one, nor a file. */
+function isRealDirectory(filePath: string): boolean {
+  try {
+    return fs.lstatSync(filePath).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Whether `cli` names one of Pane's own agent-farm shims in `binDir` (`<PANE_DIR>/bin`), as a launch
@@ -392,15 +402,20 @@ export function agentFarmLauncherPath(state: RunpaneShimState | null = currentSt
   }
 }
 
-/** Removes Pane's agent-farm shim files; a user's own file of that name (no marker) or a link stays. */
+/**
+ * Removes Pane's agent-farm shim files; a user's own file of that name (no marker) or a link stays.
+ * The Windows folder is cleaned only when it is a real folder in Pane's bin: a link or a file of
+ * that name is left alone with everything it points at (review F-7).
+ */
 function removeAgentFarmShim(binDir: string): void {
-  for (const name of AGENT_FARM_SHIM_FILES) {
+  const folder = path.join(binDir, AGENT_FARM_WINDOWS_FOLDER);
+  const nested = isRealDirectory(folder) ? [path.join(AGENT_FARM_WINDOWS_FOLDER, 'agent-farm.cmd')] : [];
+  for (const name of [...AGENT_FARM_SHIM_FILES, ...nested]) {
     const file = path.join(binDir, name);
-    if (isSymlink(file) || !fs.existsSync(file)) continue;
+    if (isSymlink(file) || !fs.lstatSync(file, { throwIfNoEntry: false })?.isFile()) continue;
     if (fs.readFileSync(file, 'utf8').includes(PANE_MANAGED_SHIM_MARKER)) fs.rmSync(file, { force: true });
   }
-  const folder = path.join(binDir, AGENT_FARM_WINDOWS_FOLDER);
-  if (!isSymlink(folder) && fs.existsSync(folder) && fs.readdirSync(folder).length === 0) fs.rmdirSync(folder);
+  if (nested.length && fs.readdirSync(folder).length === 0) fs.rmdirSync(folder);
 }
 
 /**
