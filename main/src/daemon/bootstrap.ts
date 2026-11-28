@@ -1,6 +1,6 @@
 import { prepareNotifyForQuit } from '../ipc/notify';
 import { getChatTabManager } from '../services/chatTabs';
-import { getRunpaneShimState, installRunpaneShimBestEffort, writeBrowserShim } from '../services/runpaneShim';
+import { getRunpaneShimState, installRunpaneShimBestEffort, syncAgentFarmShim, writeBrowserShim } from '../services/runpaneShim';
 import { DEFAULT_BROWSER_SETTINGS } from '../../../shared/types/browser';
 import { BUNDLED_MCP_HTTP_MODULE, PaneMcpEndpoint, setPaneMcpEndpoint, type PaneMcpHttpModule } from '../services/paneMcpEndpoint';
 import { tabListener } from '../services/tabListener';
@@ -31,7 +31,8 @@ import { WorktreeNameGenerator } from '../services/worktreeNameGenerator';
 import { RunCommandManager } from '../services/runCommandManager';
 import { VersionChecker } from '../services/versionChecker';
 import { SkillCacheManager } from '../services/skillCacheManager';
-import { installBundledAgentFarm } from '../services/agentFarm/bundledAgentFarm';
+import { agentFarmConfigRoot, agentFarmTelemetrySync, bundledAgentFarm, installBundledAgentFarm } from '../services/agentFarm/bundledAgentFarm';
+import { profilesEnabled, readProfilesSwitchFrom } from '../services/agentFarm/profilesFeature';
 import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
 import type { AppConfig } from '../types/config';
 import { PaneChatManager } from '../services/paneChatManager';
@@ -310,7 +311,22 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   // Terminals launched below find this build's runpane first on PATH.
   // Their BROWSER follows Settings > Links (pane-browser).
   const openLinksIn = () => ({ ...DEFAULT_BROWSER_SETTINGS, ...configManager.getConfig().browser }).openLinksIn;
-  installRunpaneShimBestEffort(getAppDirectory(), openLinksIn());
+  // While Profiles is on (T-63), their `agent-farm` is the Agent Farm bundled with this build, on
+  // Pane's own config root; while it is off, whatever is on PATH, as before.
+  readProfilesSwitchFrom(() => configManager.getConfig());
+  const agentFarmBundle = bundledAgentFarm();
+  const agentFarmShim = (config: AppConfig) => profilesEnabled(config) && agentFarmBundle ? { entry: agentFarmBundle.entry, configRoot: agentFarmConfigRoot(getAppDirectory()) } : undefined;
+  installRunpaneShimBestEffort(getAppDirectory(), openLinksIn(), agentFarmShim(configManager.getConfig()));
+  let shimHadProfiles = profilesEnabled(configManager.getConfig());
+  configManager.on('config-updated', (config: AppConfig) => {
+    if (profilesEnabled(config) === shimHadProfiles) return;
+    try {
+      syncAgentFarmShim(agentFarmShim(config));
+      shimHadProfiles = profilesEnabled(config);
+    } catch (error) {
+      logger.warn(`[runpane] Could not ${profilesEnabled(config) ? 'add' : 'remove'} the agent-farm command in Pane's terminals after Profiles was turned ${profilesEnabled(config) ? 'on' : 'off'}; Pane tries again at the next settings change and the next start.`, error instanceof Error ? error : undefined);
+    }
+  });
   configManager.on('config-updated', () => {
     // A shim Pane can't write keeps the last choice; the setting still saves and other listeners still run.
     try {
@@ -356,7 +372,23 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   });
   // Bundled Agent Farm: set up greenfield and the other bundled plugins in Pane's own Agent Farm
   // config root, without delaying startup. It never touches the person's own Agent Farm.
-  void installBundledAgentFarm({ paneDir: getAppDirectory(), log: message => logger.info(message) });
+  // While Profiles is on, Agent Farm telemetry stays off unless Settings › AI & Agents turns it on for
+  // this computer; while it is off (undefined), Agent Farm's own default decides, as before T-63.
+  // Startup and every settings change write through one queue that ends on the latest config
+  // (review F-6). Launches decide from the saved switches too, so an off that settings.json missed
+  // still holds; a failed write is retried at the next config change and the next start.
+  const telemetrySync = agentFarmTelemetrySync(getAppDirectory(), () => {
+    const config = configManager.getConfig();
+    return profilesEnabled(config) ? config.agentFarmTelemetry === true : undefined;
+  }, {
+    onError: (error, wanted) => {
+      const what = wanted === undefined ? 'hand Agent Farm telemetry back to what it was before Profiles' : `turn Agent Farm telemetry ${wanted ? 'on' : 'off'}`;
+      const launches = wanted === true ? 'Launches stay unrecorded' : wanted === false ? 'Launches still stay unrecorded, since they follow the saved switch' : 'Launches follow Agent Farm\'s own setting';
+      logger.warn(`[AgentFarm] Could not ${what} in its settings.json. ${launches}; Pane tries again at the next settings change and the next start.`, error instanceof Error ? error : undefined);
+    },
+  });
+  void installBundledAgentFarm({ paneDir: getAppDirectory(), syncTelemetry: () => telemetrySync.sync(), log: message => logger.info(message) });
+  configManager.on('config-updated', () => { void telemetrySync.sync(); });
   if (configManager.getConfig().agentContext?.cleanupPending && configManager.getConfig().agentContext?.managedAgentsMd !== true) {
     // Retry until all saved repositories are available, without delaying startup.
     const migrationConfig = configManager.getConfig();

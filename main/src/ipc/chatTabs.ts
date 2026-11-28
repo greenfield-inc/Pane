@@ -16,7 +16,8 @@ import { configureChatTabs, getChatAgentCatalog, getChatTabManager } from '../se
 import { chatAgentName, getAgentRegistry } from '../services/agentRegistry';
 import { chatTabSecrets } from '../services/chatTabs/secrets';
 import { AgentFarmProfiles, printedCli } from '../services/chatTabs/agentFarm';
-import { agentFarmConfigRoot, bundledAgentFarm, bundledAgentFarmProcess } from '../services/agentFarm/bundledAgentFarm';
+import { bundledAgentFarm, paneAgentFarmProcess } from '../services/agentFarm/bundledAgentFarm';
+import { profilesOn } from '../services/agentFarm/profilesFeature';
 import { worktreePaneFolder } from '../services/worktreePaneFolder';
 import { chatTabEnv } from '../services/chatTabs/launch';
 import { adapterEntry, adapterFileForPlainNode, checkAgentCli } from '../services/agentChat/adapterSetup';
@@ -60,13 +61,14 @@ const panelId = (value: PaneCommandValue) => decodeBoundary(value, boundary.nonE
 
 /** Agent Farm profiles (package 2's run --print-acp) with Pane's bundled adapters. */
 const agentFarmProfiles = new AgentFarmProfiles({
+  profilesOn,
   executable: () => findExecutableInPath('agent-farm') ?? undefined,
   bundled: async (args, cwd, env) => {
-    const bundle = bundledAgentFarm();
-    if (!bundle) return undefined;
+    if (!bundledAgentFarm()) return undefined;
     // `run` writes its launch bundle to <worktree>/.agent-farm/generated; hide that from git like .pane/ (workspace.yaml beside it is meant to be committed).
     await worktreePaneFolder(cwd, '.agent-farm/generated', candidate => new PaneError('CHAT_PROFILE_FOLDER_LINK', `${candidate} is a symbolic link, so Pane won't let Agent Farm write through it. Nothing was started.`, 'Remove the link, then start the profile again.'));
-    return bundledAgentFarmProcess(bundle, args, agentFarmConfigRoot(getAppDirectory()), env);
+    // The live Profiles state, so a config.json that can't be read keeps telemetry held off (review F-7).
+    return paneAgentFarmProcess(getAppDirectory(), args, { env, profiles: profilesOn() });
   },
   adapter: async agent => {
     const packageName = agentConfig(agent)?.chat?.adapter?.package;

@@ -551,16 +551,43 @@ The profile's model, effort, instructions with LAUNCH CONTEXT, skills,
 subagents, MCP servers and telemetry come with it. The contract is Agent Farm's
 CONFIGURATION.md, *ACP sessions*.
 
-Which `agent-farm` runs: the person's own when one is on PATH, with their own
-config root, exactly as before. Without one, Pane runs the Agent Farm it ships
-(`@greenfieldco/agent-farm`, pinned in `package.json` and `main/package.json`)
-with its Electron as Node and `--config-root <PANE_DIR>/agent-farm`, so a
-profile works on a fresh install. At each start
-(`main/src/services/agentFarm/bundledAgentFarm.ts`, called from
-`main/src/daemon/bootstrap.ts` without waiting) Pane installs one plugin from
-that package, greenfield, into that folder, when the package's version or plugin
-files differ from what `<PANE_DIR>/agent-farm/pane-manifest.json` records; an
-unchanged bundle installs nothing and the log says so. Plugins older Pane builds
+### Profiles switch
+
+Settings › Advanced › Experimental › *Profiles* (`sessionProfilesEnabled` in
+`<PANE_DIR>/config.json`, off by default, T-63) decides which `agent-farm` runs
+and who decides telemetry. Main reads it only through
+`main/src/services/agentFarm/profilesFeature.ts` (`profilesEnabled`,
+`profilesOn`), and the renderer through `isProfilesEnabled` in
+`frontend/src/stores/configStore.ts`; later Profiles work gates itself with the
+same helpers. The removed Profiles engine's `profilesEnabled` key, still saved
+on some computers, is never read, so it cannot turn this on. A change applies
+without a restart: to new commands in Pane's terminals, new chat launches and
+new Session moves.
+
+Which `agent-farm` runs with Profiles **off**, as before T-63: the person's own
+when one is on PATH, with their own config root. Without one, chat launches
+run the bundled copy described below. Pane puts no `agent-farm` in its
+terminals, and Session move's checks run `agent-farm` from PATH.
+
+With Profiles **on**: always the one Pane ships (`@greenfieldco/agent-farm`,
+pinned in `package.json` and `main/package.json`), with its Electron as Node and
+`--config-root <PANE_DIR>/agent-farm`. An agent-farm the person installed
+themselves is not used, and Pane never reads or writes their
+`~/.config/agent-farm`. Chat launches and Session move's checks run it directly
+(`paneAgentFarmProcess` in `main/src/services/agentFarm/bundledAgentFarm.ts`).
+Pane's terminals get it as `agent-farm` from `<PANE_DIR>/bin` (see
+[RUNPANE_BUNDLED_CLI.md](RUNPANE_BUNDLED_CLI.md)), which adds the config root
+before any `--` unless the command names its own. The bare `agent-farm` menu,
+`init` and `doctor` only ever use `~/.config/agent-farm`, so the shim refuses them
+and says why. Turning Profiles off removes that shim.
+
+### The bundled copy and its telemetry
+
+At each start, whatever the switch (`installBundledAgentFarm`, called from
+`main/src/daemon/bootstrap.ts` without waiting), Pane installs one plugin from
+the bundled package, greenfield, into `<PANE_DIR>/agent-farm`, when the package's
+version or plugin files differ from what `<PANE_DIR>/agent-farm/pane-manifest.json`
+records; an unchanged bundle installs nothing and the log says so. Plugins older Pane builds
 installed there (dcouple and bigbrain) are removed at each start with Agent
 Farm's `plugin uninstall`, which deletes only files unchanged since the install
 and leaves (and logs) any the person edited; a failed removal is logged and
@@ -568,15 +595,48 @@ tried again on the next start. A retired plugin's receipt that isn't valid JSON
 would make every Agent Farm install there fail, so Pane renames it to
 `<name>.json.unreadable-<time>` (keeping its bytes and the plugin's files) and
 logs where it went. When an unchanged bundle's manifest still lists a retired
-plugin, Pane rewrites only the manifest and leaves greenfield's files alone. An install that never finished (its lock or
-half-copied plugin files) is cleared before the next one, and a failed install
-is logged and never blocks startup. Pane never writes to the person's
-`~/.config/agent-farm`. With the bundled copy, `run` writes its launch bundle to
+plugin, Pane rewrites only the manifest and leaves greenfield's files alone. A
+bundled plugin whose files no longer match Agent Farm's install receipt
+(`.plugins/<name>.json`), because someone edited, added or removed a file, is
+kept as it is: Pane updates no longer replace it, the log names it, and the
+manifest lists it under `edited`. This holds with Profiles on or off, so
+turning Profiles off never lets an update overwrite a plugin edited while it
+was on. An install that never finished (its lock, a
+plugin Pane was installing then, recorded in `pane-installing.json`, or one with
+no receipt) is cleared before the next one, and a failed install is logged and
+never blocks startup. `run` writes its launch bundle to
 `<worktree>/.agent-farm/generated`, which Pane hides from git through
-`info/exclude` as it does `.pane/`, and launch telemetry goes to
-`<PANE_DIR>/agent-farm/telemetry` (set in that folder's `settings.json`). Agent
-Farm still keeps small state of its own (workspace trust, launch records, MCP
-logins) under `~/.local/state/agent-farm` and `~/.cache/agent-farm`. `scripts/verify-chat-adapters.js` (run by
+`info/exclude` as it does `.pane/`.
+
+Telemetry with Profiles off is Agent Farm's own default, as before T-63: Pane
+writes only `telemetry.directory` as `<PANE_DIR>/agent-farm/telemetry` into that
+folder's `settings.json`, sets no `AGENT_FARM_TELEMETRY`, and shows no switch.
+When Profiles first comes on, Pane records the `telemetry.enabled` that was there
+(or that there was none) in `pane-telemetry.json` beside it, before writing its
+own. Turning Profiles off puts that back, so an opt-out you set earlier survives;
+a value changed by hand while Profiles was on is left as it is. Startup and every
+settings change write through one queue (`agentFarmTelemetrySync`) that ends on
+the latest switches, so quick toggles never leave a stale value.
+
+With Profiles on, telemetry is off unless Settings › AI & Agents › *Save Agent Farm telemetry on
+this computer* (`agentFarmTelemetry` in `<PANE_DIR>/config.json`) is on: Pane writes
+`telemetry.enabled` from that switch, and `telemetry.directory` as
+`<PANE_DIR>/agent-farm/telemetry`, into that folder's `settings.json` at start and
+whenever the switch changes. Each computer keeps its own switch. A repository's
+`.agent-farm/workspace.yaml` outranks `settings.json` in Agent Farm, so every
+Agent Farm Pane runs (chat launches, Session move, the terminal shim) also gets
+`AGENT_FARM_TELEMETRY=off`, the one setting that outranks a workspace, unless the
+saved switch and `settings.json` both say on. Chat launches pass Pane's live
+Profiles state, so a `config.json` that can't be read never lifts that hold;
+without a caller's state, an unreadable `config.json` counts as telemetry off. The saved switch is what Settings
+shows, so turning it off holds even if writing `settings.json` failed; Pane retries
+that write at the next settings change and the next start. While the switch is
+on, a repository's settings can still turn telemetry off or name another folder;
+the files stay local (an accepted exception, D-T63-1). An
+`AGENT_FARM_TELEMETRY` already in the environment overrides the switch either way,
+and Settings says to remove it there to let the switch decide. Agent Farm still keeps
+small state of its own (workspace trust, launch records, MCP logins) under
+`~/.local/state/agent-farm` and `~/.cache/agent-farm`. `scripts/verify-chat-adapters.js` (run by
 `scripts/after-pack.js`) fails a packaged build unless Agent Farm is inside
 `app.asar`, carries no native binaries, and answers `--version` under Electron
 as Node.

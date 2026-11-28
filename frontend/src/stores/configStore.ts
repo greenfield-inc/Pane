@@ -47,6 +47,15 @@ export function isTodosEnabled(config: AppConfig | null): boolean {
   return config?.todosEnabled === true;
 }
 
+/**
+ * Profiles is experimental (T-63): Pane's own Agent Farm everywhere, its telemetry switch, and the
+ * Profiles screens later PRs add wait for this opt-in. Saved as `sessionProfilesEnabled`; the
+ * removed Profiles engine's `profilesEnabled`, still saved on some computers, never turns it on.
+ */
+export function isProfilesEnabled(config: AppConfig | null): boolean {
+  return config?.sessionProfilesEnabled === true;
+}
+
 /** The computer this window shows: this one (`local`), or the saved machine it was switched to (All machines, T-37). */
 export function shownHostId(config: AppConfig | null): string {
   return getActiveRemoteHostId(config?.remoteDaemon) ?? LOCAL_MACHINE_ID;

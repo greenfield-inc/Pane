@@ -79,7 +79,7 @@ const PREFERENCE_CONFIG_KEYS = [
   'htmlFileOpenMode', 'enableCommitFooter', 'gitAttributionEnabled', 'autoCheckUpdates',
   'keepAwakeWhileSessionsActive', 'keepAwakeWhilePluggedIn', 'keepAwakeOnBattery', 'backgroundActivity', 'terminalPowerMode',
   'resumePausedOnOpen', 'autoPauseEnabled', 'autoPauseAfterHours', 'chatIdleReleaseMinutes',
-  'retention', 'voiceTranscriptionMode', 'missionControlEnabled', 'notesEnabled', 'todosEnabled',
+  'retention', 'voiceTranscriptionMode', 'missionControlEnabled', 'notesEnabled', 'todosEnabled', 'sessionProfilesEnabled',
   'sessionCreationPreferences',
 ] as const satisfies readonly (keyof SetupPreferences)[];
 
@@ -142,6 +142,7 @@ const FIELD_LABELS = {
   missionControlEnabled: 'Mission Control',
   notesEnabled: 'Notes',
   todosEnabled: 'To-dos',
+  sessionProfilesEnabled: 'Profiles',
   sessionCreationPreferences: 'New Pane defaults',
   auto_rename_sessions_to_pr: 'Rename Panes to their PR',
   sidebar_pane_row_layout: 'Sidebar Pane rows',
@@ -515,6 +516,7 @@ const sectionSchemas = {
     missionControlEnabled: booleanField,
     notesEnabled: booleanField,
     todosEnabled: booleanField,
+    sessionProfilesEnabled: booleanField,
     sessionCreationPreferences: boundary.optional(boundary.object({
       sessionCount: boundary.optional(boundary.number),
       toolType: boundary.optional(boundary.enumeration('claude', 'none')),

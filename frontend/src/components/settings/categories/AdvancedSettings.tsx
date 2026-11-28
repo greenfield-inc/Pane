@@ -6,7 +6,7 @@ import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
-import { isChatTabsEnabled, isMissionControlEnabled, isNotesEnabled, isTodosEnabled } from '../../../stores/configStore';
+import { isChatTabsEnabled, isMissionControlEnabled, isNotesEnabled, isProfilesEnabled, isTodosEnabled } from '../../../stores/configStore';
 import type { Journey, JourneyTimingSummary } from '../../../../../shared/types/journeyTimings';
 import type { IPCResponse } from '../../../utils/api';
 import { useAutopilotStore } from '../../../stores/autopilotStore';
@@ -230,6 +230,18 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
             label="To-dos"
             value={isTodosEnabled(config)}
             onSave={(value) => persistence.saveConfig('todos', { todosEnabled: value })}
+          />
+        </SettingRow>
+        <SettingRow
+          settingId="profiles"
+          label="Profiles"
+          description="Run agents through Pane's own Agent Farm: the agent-farm command in Pane's terminals, chat tab profiles and Session moves use the copy bundled with Pane, with its own profiles. Its telemetry stays off until you turn it on in AI & Agents. Turning it off puts back the agent-farm on your PATH and Agent Farm's own telemetry setting; your profiles and settings are kept, and so is a telemetry setting you made before. The next command in an open terminal, and new tabs and Sessions, pick up the change; in a login Bash or Git Bash terminal that already ran agent-farm, run hash -r or open a new terminal."
+          saveState={persistence.saveStates.profiles}
+        >
+          <ImmediateToggle
+            label="Profiles"
+            value={isProfilesEnabled(config)}
+            onSave={(value) => persistence.saveConfig('profiles', { sessionProfilesEnabled: value })}
           />
         </SettingRow>
         <SettingRow

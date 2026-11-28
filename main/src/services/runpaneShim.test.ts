@@ -9,6 +9,7 @@ import {
   addRunpaneToUserPath,
   installRunpaneShim,
   PANE_MANAGED_SHIM_MARKER,
+  syncAgentFarmShim,
   withRunpaneBinOnPath,
   withRunpaneOnPath,
   writeBrowserShim,
@@ -142,6 +143,134 @@ describe('installRunpaneShim', () => {
     expect(cmd).toContain('set ELECTRON_RUN_AS_NODE=1');
     expect(cmd).toContain('"C:\\Program Files\\Pane\\Pane.exe"');
     expect(fs.existsSync(path.join(appDirectory, 'bin', 'runpane'))).toBe(true);
+  });
+});
+
+describe('the agent-farm shim', () => {
+  let entry: string;
+  let configRoot: string;
+  beforeEach(() => {
+    entry = path.join(root, 'app.asar', 'agent-farm', 'dist', 'cli.js');
+    fs.mkdirSync(path.dirname(entry), { recursive: true });
+    // The real entry is an ES module (the package is "type": "module"); this one prints what it got.
+    fs.writeFileSync(path.join(path.dirname(entry), '..', 'package.json'), '{"type":"module"}');
+    fs.writeFileSync(entry, "console.log(`AF ${process.argv.slice(2).join('|')} NODE=${process.env.ELECTRON_RUN_AS_NODE}`); console.error(`TELEMETRY=${process.env.AGENT_FARM_TELEMETRY}`);\n");
+    configRoot = path.join(appDirectory, 'agent-farm');
+  });
+
+  function installWithAgentFarm(platform: NodeJS.Platform = 'darwin', execPath = process.execPath): RunpaneShimState {
+    const state = installRunpaneShim({ appDirectory, bundledCliPath, execPath, platform, agentFarm: { entry, configRoot } });
+    if (!state) throw new Error('Expected the shim to install');
+    return state;
+  }
+
+  function agentFarm(state: RunpaneShimState, args: string[]) {
+    return spawnSync(path.join(state.binDir, 'agent-farm'), args, { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } });
+  }
+
+  it.skipIf(process.platform === 'win32')('runs the bundled Agent Farm with Pane\'s config root, before any -- passthrough', () => {
+    const state = installWithAgentFarm();
+    expect(agentFarm(state, ['profiles', 'list']).stdout.trim()).toBe(`AF profiles|list|--config-root|${configRoot} NODE=1`);
+    expect(agentFarm(state, ['run', 'greenfield/planner', '--', '--resume', 'x']).stdout.trim()).toBe(`AF run|greenfield/planner|--config-root|${configRoot}|--|--resume|x NODE=1`);
+  });
+
+  it.skipIf(process.platform === 'win32')('turns Agent Farm telemetry off unless Pane\'s switch is on, keeping a value already set', () => {
+    const state = installWithAgentFarm();
+    const telemetry = (env: Record<string, string> = {}) => spawnSync(path.join(state.binDir, 'agent-farm'), ['profiles', 'list'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', ...env } }).stderr.trim();
+    expect(telemetry()).toBe('TELEMETRY=off');
+    fs.mkdirSync(configRoot, { recursive: true });
+    fs.writeFileSync(path.join(configRoot, 'settings.json'), JSON.stringify({ telemetry: { enabled: true } }));
+    // Review F-2: Pane's saved switch (config.json) decides; settings.json alone doesn't turn it on.
+    expect(telemetry()).toBe('TELEMETRY=off');
+    fs.writeFileSync(path.join(appDirectory, 'config.json'), JSON.stringify({ agentFarmTelemetry: true }));
+    expect(telemetry()).toBe('TELEMETRY=undefined');
+    fs.writeFileSync(path.join(appDirectory, 'config.json'), JSON.stringify({ agentFarmTelemetry: false }));
+    expect(telemetry()).toBe('TELEMETRY=off');
+    fs.writeFileSync(path.join(appDirectory, 'config.json'), JSON.stringify({ agentFarmTelemetry: true }));
+    fs.writeFileSync(path.join(configRoot, 'settings.json'), JSON.stringify({ telemetry: { enabled: false } }));
+    expect(telemetry()).toBe('TELEMETRY=off');
+    expect(telemetry({ AGENT_FARM_TELEMETRY: 'on' })).toBe('TELEMETRY=on');
+  });
+
+  it.skipIf(process.platform === 'win32')('passes a command through unchanged when it names its own config root, or needs none', () => {
+    const state = installWithAgentFarm();
+    expect(agentFarm(state, ['plugin', 'list', '--config-root', '/mine']).stdout.trim()).toBe('AF plugin|list|--config-root|/mine NODE=1');
+    expect(agentFarm(state, ['--version']).stdout.trim()).toBe('AF --version NODE=1');
+    expect(agentFarm(state, ['help', 'run']).stdout.trim()).toBe('AF help|run NODE=1');
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses the commands that only work on ~/.config/agent-farm, saying why', () => {
+    const state = installWithAgentFarm();
+    for (const args of [[], ['init'], ['doctor']]) {
+      const result = agentFarm(state, args);
+      expect(result.status).toBe(2);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain(configRoot);
+      expect(result.stderr).toContain('Nothing was run');
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('explains when the Pane binary is gone', () => {
+    const state = installWithAgentFarm('darwin', path.join(root, 'moved', 'Pane'));
+    const result = agentFarm(state, ['profiles', 'list']);
+    expect(result.status).toBe(127);
+    expect(result.stderr).toContain('Reinstall Pane');
+  });
+
+  it('writes a Windows command shim that runs the same launcher with Pane\'s binary', () => {
+    const state = installWithAgentFarm('win32', 'C:\\Program Files\\Pane\\Pane.exe');
+    const cmd = fs.readFileSync(path.join(state.binDir, 'agent-farm.cmd'), 'utf8');
+    expect(cmd).toContain(PANE_MANAGED_SHIM_MARKER);
+    expect(cmd).toContain('set ELECTRON_RUN_AS_NODE=1');
+    expect(cmd).toContain(`"C:\\Program Files\\Pane\\Pane.exe" "${path.join(state.binDir, 'agent-farm.cjs')}" %*`);
+    expect(fs.readFileSync(path.join(state.binDir, 'agent-farm'), 'utf8')).toContain('WSL_DISTRO_NAME');
+  });
+
+  it.skipIf(process.platform === 'win32' || fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop'))('explains in WSL when interop is off', () => {
+    const state = installWithAgentFarm('win32', 'C:\\Program Files\\Pane\\Pane.exe');
+    const result = spawnSync(path.join(state.binDir, 'agent-farm'), ['profiles', 'list'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', WSL_DISTRO_NAME: 'Ubuntu-24.04' } });
+    expect(result.status).toBe(126);
+    expect(result.stderr).toContain('WSL interop is off in Ubuntu-24.04');
+  });
+
+  it('writes no agent-farm without a bundled Agent Farm, and never replaces one Pane did not write', () => {
+    const state = install();
+    expect(fs.existsSync(path.join(state.binDir, 'agent-farm'))).toBe(false);
+    fs.writeFileSync(path.join(state.binDir, 'agent-farm'), '#!/bin/sh\necho mine\n');
+    installWithAgentFarm();
+    expect(fs.readFileSync(path.join(state.binDir, 'agent-farm'), 'utf8')).toBe('#!/bin/sh\necho mine\n');
+  });
+
+  // Review F-8: an open bash that ran Pane's shim finds the PATH one once Profiles is turned off.
+  it.skipIf(process.platform === 'win32')('lets an open bash terminal find agent-farm on PATH again after the shim is removed', () => {
+    const state = installWithAgentFarm();
+    const own = path.join(root, 'own-bin');
+    fs.mkdirSync(own, { recursive: true });
+    fs.writeFileSync(path.join(own, 'agent-farm'), '#!/bin/sh\necho own-agent-farm\n', { mode: 0o755 });
+    const home = path.join(root, 'bash-home');
+    fs.mkdirSync(home, { recursive: true });
+    const script = `agent-farm --version >/dev/null 2>&1; rm -f ${JSON.stringify(path.join(state.binDir, 'agent-farm'))}; agent-farm`;
+    const result = spawnSync('/bin/bash', ['--rcfile', state.bashRcFile, '-i', '-c', script], { encoding: 'utf8', env: { PATH: `${own}:/usr/bin:/bin`, HOME: home, TERM: 'dumb' } });
+    expect(result.stdout.trim()).toBe('own-agent-farm');
+  });
+
+  // Profiles off (T-63): `agent-farm` in Pane's terminals is whatever is on PATH, as on main.
+  it('follows the Profiles switch: removed with it off, at start and on a change, back with it on', () => {
+    const files = (state: RunpaneShimState) => ['agent-farm', 'agent-farm.cmd', 'agent-farm.cjs'].filter(name => fs.existsSync(path.join(state.binDir, name)));
+    const on = installWithAgentFarm('win32', 'C:\\Program Files\\Pane\\Pane.exe');
+    expect(files(on)).toEqual(['agent-farm', 'agent-farm.cmd', 'agent-farm.cjs']);
+    // A start with Profiles off removes what an earlier start wrote.
+    const off = install();
+    expect(files(off)).toEqual([]);
+    syncAgentFarmShim({ entry, configRoot }, off, 'darwin');
+    expect(files(off)).toEqual(['agent-farm', 'agent-farm.cjs']);
+    expect(fs.readFileSync(path.join(off.binDir, 'agent-farm'), 'utf8')).toContain(off.electronExecPath);
+    syncAgentFarmShim(undefined, off, 'darwin');
+    expect(files(off)).toEqual([]);
+    // A file of that name Pane didn't write stays.
+    fs.writeFileSync(path.join(off.binDir, 'agent-farm'), '#!/bin/sh\necho mine\n');
+    syncAgentFarmShim(undefined, off, 'darwin');
+    expect(fs.readFileSync(path.join(off.binDir, 'agent-farm'), 'utf8')).toBe('#!/bin/sh\necho mine\n');
   });
 });
 

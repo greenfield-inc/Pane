@@ -8,7 +8,7 @@ import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle, SegmentedControl } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import { API } from '../../../utils/api';
-import { isChatTabsEnabled } from '../../../stores/configStore';
+import { isChatTabsEnabled, isProfilesEnabled } from '../../../stores/configStore';
 import { ChatTabKeys } from '../ChatTabKeys';
 import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../../../shared/types/paneChat';
 import { SessionLaunchFields } from '../../SessionLaunchFields';
@@ -132,6 +132,19 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
             onSave={(value) => persistence.saveConfig('answer-prompts-from-pane', { answerPromptsFromPane: value })}
           />
         </SettingRow>
+        {/* Profiles off (T-63): Agent Farm's own telemetry setting decides, as before, so there is no switch. */}
+        {isProfilesEnabled(config) && <SettingRow
+          settingId="agent-farm-telemetry"
+          label="Save Agent Farm telemetry on this computer"
+          description="Agent Farm, which runs agent profiles for Pane, can record each agent it starts: the agent's own traces, logs and metrics, with its profile, model, folder, branch, username and hostname. They stay as local files, in Pane's agent-farm/telemetry folder unless a repository's own Agent Farm settings name another folder, and are never sent anywhere. Conversation text is recorded only if Agent Farm's capture_content setting is on. Off by default, and off means off even in a repository whose settings turn it on. Each computer keeps its own setting; agents started after a change follow it. An AGENT_FARM_TELEMETRY variable in your shell or a project's environment overrides this switch: remove it there to let this switch decide."
+          saveState={persistence.saveStates['agent-farm-telemetry']}
+        >
+          <ImmediateToggle
+            label="Save Agent Farm telemetry on this computer"
+            value={config.agentFarmTelemetry === true}
+            onSave={(value) => persistence.saveConfig('agent-farm-telemetry', { agentFarmTelemetry: value })}
+          />
+        </SettingRow>}
         <SettingRow
           settingId="agent-skill"
           label="Install Pane skill for agents"

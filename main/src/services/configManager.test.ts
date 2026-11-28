@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_CONTEXT_DEFAULTS_VERSION, ConfigManager } from './configManager';
 import { collectActiveBindings, findChordConflicts } from '../../../shared/utils/keyboardBindings';
 import { todosEnabled } from './todos/todosFeature';
+import { profilesEnabled } from './agentFarm/profilesFeature';
 
 describe('ConfigManager appearance persistence', () => {
   let paneDir: string;
@@ -73,6 +74,22 @@ describe('ConfigManager appearance persistence', () => {
 
     await existing.updateConfig({ todosEnabled: true });
     expect(todosEnabled(existing.getConfig())).toBe(true);
+  });
+
+  it('keeps Profiles off for a fresh install, an older config, and one the removed Profiles engine turned on (T-63)', async () => {
+    const fresh = new ConfigManager();
+    await fresh.initialize();
+    expect(fresh.getConfig().sessionProfilesEnabled).toBe(false);
+    expect(profilesEnabled(fresh.getConfig())).toBe(false);
+
+    // #1687 left the old engine's switch saved; it must not turn the new Profiles on.
+    await fs.writeFile(configPath, JSON.stringify({ theme: 'folio', profilesEnabled: true }));
+    const existing = new ConfigManager();
+    await existing.initialize();
+    expect(profilesEnabled(existing.getConfig())).toBe(false);
+
+    await existing.updateConfig({ sessionProfilesEnabled: true });
+    expect(profilesEnabled(existing.getConfig())).toBe(true);
   });
 
   it('turns chat tabs on for a fresh install, and leaves an existing config as it was (D-329)', async () => {

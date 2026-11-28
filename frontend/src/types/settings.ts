@@ -75,6 +75,7 @@ export type SettingsSettingId =
   | 'mcp-registration'
   | 'mcp-toolsets'
   | 'answer-prompts-from-pane'
+  | 'agent-farm-telemetry'
   | 'agent-skill'
   | 'agent-context'
   | 'session-defaults'
@@ -138,6 +139,7 @@ export type SettingsSettingId =
   | 'autopilot-instructions'
   | 'notes'
   | 'todos'
+  | 'profiles'
   | 'usage-leaderboard';
 
 export interface SettingsTarget {
