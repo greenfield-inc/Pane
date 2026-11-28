@@ -116,7 +116,7 @@ dialog.chat-confirm { position:static; inset:auto; width:auto; max-width:none; m
 .chat-command-description { flex:0 9999 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--chat-muted-foreground); }
 /* The composer: the input, then one row that never wraps (attach, mode | model menu, send). */
 .chat-tab .chat-composer { gap:4px; padding:10px 10px 8px; border-radius:20px; background:var(--chat-background); box-shadow:0 1px 2px color-mix(in oklab,var(--chat-foreground) 6%,transparent); }
-.chat-tab .chat-input { min-height:24px; padding:2px 6px; font-size:15px; }
+.chat-tab .chat-input { min-height:24px; max-height:max(192px, calc(var(--chat-height, 0px) * .4)); padding:2px 6px; font-size:15px; }
 .chat-tab .chat-composer-actions { justify-content:flex-start; flex-wrap:nowrap; gap:2px; min-width:0; }
 .chat-composer-end { display:flex; flex:0 1 auto; justify-content:flex-end; align-items:center; gap:4px; min-width:0; margin-left:auto; }
 /* The row never overflows (D-120): each menu's anchor may shrink, the mode chip first, and labels
@@ -222,7 +222,19 @@ dialog.chat-confirm { position:static; inset:auto; width:auto; max-width:none; m
 @media (prefers-reduced-motion:reduce) { .chat-spin { animation:none; } }
 /* The end of the conversation sits a small gap above the composer (D-365). Scroll to latest only shows
    when scrolled up, where covering a message is expected, so no room is kept for it at the bottom. */
-.chat-tab .chat-column { padding-bottom:16px; }
+.chat-tab .chat-column { padding-bottom:calc(var(--chat-dock-height, 0px) + 16px); }
+/* The dock floats over the conversation (T-137): only its cards, rows and input cover it, and
+   the gaps around them show the conversation and let clicks and scrolling through. */
+.chat-tab .chat-composer-footer { position:absolute; left:0; right:0; bottom:0; z-index:10; background:transparent; pointer-events:none; }
+.chat-tab .chat-composer-footer > :not(.chat-queue,[data-testid=session-approval-cards]),
+.chat-tab .chat-composer-footer :is(.chat-queue,[data-testid=session-approval-cards]) > * { pointer-events:auto; }
+.chat-tab .chat-composer-footer :is(.chat-queue li,.chat-notice) { background:var(--chat-background); border-radius:8px; }
+/* The status row is one component: its own pill keeps its text readable over the conversation. */
+.chat-tab .chat-composer-footer .chat-statusline { position:relative; }
+.chat-tab .chat-composer-footer .chat-statusline::before { content:''; position:absolute; inset:-4px 0; z-index:-1; border-radius:10px; background:var(--chat-background); box-shadow:0 0 8px 4px var(--chat-background); pointer-events:none; }
+.chat-tab .chat-composer-footer .chat-notice { width:fit-content; max-width:100%; margin:0; padding:2px 8px; }
+.chat-tab .chat-composer-footer .chat-dock { padding:8px 12px; border:1px solid var(--chat-border); border-radius:12px; background:var(--chat-background); }
+.chat-tab .chat-question { background:color-mix(in oklab,var(--chat-muted) 40%,var(--chat-background)); }
 /* Copying (D-140). The app's chrome is not selectable (index.css); the conversation is. */
 .chat-tab .chat-viewport { user-select:text; }
 .chat-tab .chat-viewport :is(button,[role=button],.chat-step-icon,.chat-message-actions) { user-select:none; }
@@ -230,7 +242,8 @@ dialog.chat-confirm { position:static; inset:auto; width:auto; max-width:none; m
 .chat-user-row .chat-user { align-self:auto; max-width:100%; }
 .chat-message-actions { display:flex; min-height:28px; }
 .chat-response-actions { margin-top:-4px; align-items:center; gap:4px; }
-.chat-turn-time { font-size:13px; color:var(--chat-muted-foreground); }
+.chat-turn-time { margin-left:auto; padding:0 6px; font-size:12px; color:var(--chat-muted-foreground); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.chat-turn-time[data-pinned=true] { margin-left:0; font-size:13px; }
 .chat-copy { display:inline-flex; align-items:center; gap:6px; height:28px; min-width:28px; padding:0 6px; border-radius:8px; font-size:12px; color:var(--chat-muted-foreground); }
 .chat-copy:hover { background:var(--chat-muted); color:var(--chat-foreground); }
 .chat-copy[data-state=copied] { color:var(--color-status-success, var(--chat-foreground)); }
@@ -239,7 +252,8 @@ dialog.chat-confirm { position:static; inset:auto; width:auto; max-width:none; m
 .chat-copy-icon svg { width:15px; height:15px; }
 /* Per-message buttons appear on hover or focus with a mouse, and stay visible on touch screens. */
 @media (hover:hover) {
-  .chat-message-actions .chat-copy { opacity:0; transition:opacity 150ms; }
+  .chat-message-actions .chat-copy,.chat-turn-time[data-pinned=false] { opacity:0; transition:opacity 150ms; }
+  .chat-turn:hover .chat-turn-time,.chat-response-actions:focus-within .chat-turn-time,
   .chat-user-row:hover .chat-copy,.chat-turn:hover .chat-response-actions .chat-copy,.chat-message-actions .chat-copy:focus-visible,.chat-message-actions .chat-copy[data-state=copied],.chat-message-actions .chat-copy[data-state=failed] { opacity:1; }
 }
 .chat-header-bar { display:flex; flex-shrink:0; justify-content:flex-end; padding:4px 12px 0; }
@@ -249,7 +263,7 @@ dialog.chat-confirm { position:static; inset:auto; width:auto; max-width:none; m
   .chat-code .chat-code-copy { opacity:0; transition:opacity 150ms; }
   .chat-code:hover .chat-code-copy,.chat-code .chat-code-copy:focus-visible,.chat-code .chat-code-copy[data-state=copied] { opacity:1; }
 }
-@media (prefers-reduced-motion:reduce) { .chat-message-actions .chat-copy,.chat-code .chat-code-copy { transition:none; } }
+@media (prefers-reduced-motion:reduce) { .chat-message-actions .chat-copy,.chat-turn-time,.chat-code .chat-code-copy { transition:none; } }
 @media (hover:none) { .chat-message-actions .chat-copy,.chat-code .chat-code-copy { min-width:44px; height:44px; justify-content:center; } }
 
 /* Switch to chat's banner and notes (D-282, D-278 style 3): warning for a guess, quiet for a new chat. */

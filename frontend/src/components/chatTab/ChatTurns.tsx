@@ -223,7 +223,7 @@ export function WorkerNoteLine({ note, onOpen }: { note: WorkerNote; onOpen?: (p
  */
 export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions, latest = false }: { turn: ChatTurn; waiting: ReadonlySet<string>; actions: ChatTurnActions; latest?: boolean }) {
   const [open, setOpen] = useState(false);
-  // D-202: the latest turn says when it finished; every message shows its time on hover.
+  // D-202, T-138: each finished turn shows when it finished on hover; the latest one keeps it in view.
   const { before, after, activity, fold: row, ended } = turnDisplay(turn, { latest, waiting });
   // The icon box stays after the turn ends, so the label never shifts.
   const icon = <span className="chat-step-icon" data-state={row?.waiting ? 'waiting' : turn.running ? 'running' : 'done'}>
@@ -245,9 +245,11 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions,
     {fold}
     {!open && actions.device && pinnedMarkers(activity, latest ? actions.device.openedHere : []).map(marker => <PinnedDeviceCard key={marker.panelId} marker={marker} device={actions.device!} />)}
     <div className="contents" title={ended?.full}>{after.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
-    {!turn.running && (responseText(turn) || (latest && !activity.length && ended)) && <div className="chat-message-actions chat-response-actions">
+    {!turn.running && (responseText(turn) || (ended && !(latest && activity.length))) && <div className="chat-message-actions chat-response-actions">
       {responseText(turn) && <ChatCopyButton label="Copy response" text={() => responseText(turn)} />}
-      {latest && !activity.length && ended && <span className="chat-turn-time" title={ended.full}>{ended.short}</span>}
+      {/* T-138: every finished agent turn shows its time at the row's end on hover; the latest
+          turn keeps it in view (D-202), here or in its fold row ("Worked for 27s · 2:04 PM"). */}
+      {ended && !(latest && activity.length) && <span className="chat-turn-time" data-pinned={latest} title={ended.full}>{ended.short}</span>}
     </div>}
     {stoppedText(turn) && <p className="chat-turn-stopped">{stoppedText(turn)}</p>}
   </div>;
