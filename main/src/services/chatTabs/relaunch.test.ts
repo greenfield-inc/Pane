@@ -35,7 +35,8 @@ interface HarnessOptions {
  */
 function harness(options: HarnessOptions = {}) {
   const directory = mkdtempSync(path.join(tmpdir(), 'pane-chat-relaunch-'));
-  cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
+  // Windows holds the folder while a slow-stopping agent (SCRIPTED_AGENT_SLOW_CLOSE_MS) is still exiting.
+  cleanup.push(() => rmSync(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }));
   const store = new MemoryStore();
   const launched: string[] = [];
   const launcher: ChatTabLauncher = {
