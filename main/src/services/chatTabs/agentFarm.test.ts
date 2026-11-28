@@ -130,7 +130,7 @@ describe('Agent Farm profiles in chat tabs', () => {
   });
 
   // T-83 P3: a linked agent's tab passes its parent token at every start.
-  it('passes a launch link\'s parent as --parent, only with Profiles on', async () => {
+  it('passes a launch link\'s parent as --parent with Profiles on, and refuses to start it with Profiles off (review F-5)', async () => {
     const directory = scratch();
     const calls: string[][] = [];
     const recording = async (args: string[], cwd: string, env: Record<string, string>) => { calls.push(args); return bundled(args, cwd, env); };
@@ -138,7 +138,8 @@ describe('Agent Farm profiles in chat tabs', () => {
     const on = new AgentFarmProfiles({ ...PROFILES_ON, sessionProfile: async () => undefined, bundled: recording, adapter: async () => '/adapter.js', checkCli: async () => undefined });
     await on.print('greenfield/planner', { docs: 'grain' }, 'claude', directory, env, 'greenfield/orchestrator:claude@af-1');
     const off = new AgentFarmProfiles({ profilesOn: () => false, sessionProfile: async () => undefined, executable: () => undefined, bundled: recording, adapter: async () => '/adapter.js', checkCli: async () => undefined });
-    await off.print('greenfield/planner', {}, 'claude', directory, env, 'greenfield/orchestrator:claude@af-1');
+    await expect(off.print('greenfield/planner', {}, 'claude', directory, env, 'greenfield/orchestrator:claude@af-1')).rejects.toMatchObject({ code: 'CHAT_PROFILE_PARENT_OFF' });
+    await off.print('greenfield/planner', {}, 'claude', directory, env);
     expect(calls).toEqual([
       ['run', 'greenfield/planner', '--print-acp', '--acp-adapter', '/adapter.js', '--arg', 'docs=grain', '--parent', 'greenfield/orchestrator:claude@af-1'],
       ['run', 'greenfield/planner', '--print-acp', '--acp-adapter', '/adapter.js'],

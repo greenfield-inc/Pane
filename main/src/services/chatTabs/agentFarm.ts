@@ -166,14 +166,18 @@ export class AgentFarmProfiles implements ChatProfileResolver {
 
   /**
    * Prints a profile's launch. `agent` picks the adapter to pass; the printed harness is the truth.
-   * `parent` (a launch link's parent token) goes to Agent Farm as `--parent` while Profiles is on.
+   * `parent` (a launch link's parent token) goes to Agent Farm as `--parent` while Profiles is on;
+   * with it off, a linked agent's tab doesn't start without its parent (review F-5).
    */
   async print(profile: string, args: Record<string, string>, agent: ChatAgent, cwd: string, env: ChatAgentEnv, parent?: string): Promise<PrintedAcpLaunch> {
     const adapter = await this.options.adapter(agent);
     // Profiles on: Pane's bundled copy only. Off: the person's own agent-farm when one is on PATH,
     // otherwise the bundled copy, as before T-63.
     const profilesOn = this.options.profilesOn();
-    const argv = ['run', profile, '--print-acp', '--acp-adapter', adapter, ...Object.entries(args).flatMap(([key, value]) => ['--arg', `${key}=${value}`]), ...(profilesOn && parent ? ['--parent', parent] : [])];
+    if (parent && !profilesOn) {
+      throw new PaneError('CHAT_PROFILE_PARENT_OFF', `Profiles is off on this computer, so Pane can't start ${profile} as a linked agent of ${parent}. Nothing was run.`, 'Turn on Profiles in Settings > Advanced > Experimental, then press Retry.');
+    }
+    const argv = ['run', profile, '--print-acp', '--acp-adapter', adapter, ...Object.entries(args).flatMap(([key, value]) => ['--arg', `${key}=${value}`]), ...(parent ? ['--parent', parent] : [])];
     const cli = profilesOn ? undefined : this.options.executable();
     const bundled = cli ? undefined : await this.options.bundled(argv, cwd, env);
     if (!cli && !bundled) {

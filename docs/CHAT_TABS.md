@@ -555,8 +555,11 @@ parent, and refuses a name the parent doesn't list. With Profiles on, a terminal
 launch command copied from those links (`<PANE_DIR>/bin/agent-farm run <name>
 --config-root <PANE_DIR>/agent-farm --parent <token>`) also runs as a chat tab
 when a Session or Switch to chat converts it: Pane reads the shim's path,
-`--parent`, and a `--config-root` naming its own root. `--parent` needs Profiles
-on (`CHAT_PROFILE_PARENT_OFF` otherwise). While Profiles is on, chat tabs run
+`--parent`, and a `--config-root` naming its own root. Any other path to an
+`agent-farm` is the person's own executable and keeps its terminal. `--parent`
+needs Profiles on (`CHAT_PROFILE_PARENT_OFF` otherwise), and a linked agent's
+chat tab started while Profiles was on doesn't start again once it is off: it
+stops with `CHAT_PROFILE_PARENT_OFF` instead of running without its parent. While Profiles is on, chat tabs run
 Agent Farm through the shim's launcher ([RUNPANE_BUNDLED_CLI.md](RUNPANE_BUNDLED_CLI.md)), so the commands Agent Farm writes
 into a profile's Launch links name `<PANE_DIR>/bin/agent-farm`, which runs in
 any terminal, rather than Pane's Electron binary.
