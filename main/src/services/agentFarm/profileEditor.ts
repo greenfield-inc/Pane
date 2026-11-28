@@ -324,10 +324,10 @@ export class ProfileEditor {
 
   /**
    * The identity file in `root` of an agent ref of `plugin` (`plugin/agent`): `agents/<agent>.md`,
-   * or for a variant set (`agents/<agent>.yaml`) its default member's file. Undefined for another
-   * plugin's agent or one whose file isn't there.
+   * or for a variant set (`agents/<agent>.yaml`) the member of `variant` when a link pins one, else
+   * the default member's file. Undefined for another plugin's agent or one whose file isn't there.
    */
-  private async identityOf(root: string, files: string[], plugin: string, ref: string | undefined): Promise<string | undefined> {
+  private async identityOf(root: string, files: string[], plugin: string, ref: string | undefined, variant?: string): Promise<string | undefined> {
     const [owner, agent, extra] = (ref ?? '').split('/');
     if (owner !== plugin || !agent || extra !== undefined) return undefined;
     if (files.includes(`agents/${agent}.md`)) return `agents/${agent}.md`;
@@ -336,7 +336,7 @@ export class ProfileEditor {
     try { data = decodeOptionalBoundary(yaml.load(await readUnlinked(root, `agents/${agent}.yaml`)), boundary.jsonObject); }
     catch { return undefined; }
     const variants = decodeOptionalBoundary(data?.variants, boundary.jsonObject) ?? {};
-    const chosen = text(data?.default) ?? Object.keys(variants)[0];
+    const chosen = (variant && variant in variants ? variant : undefined) ?? text(data?.default) ?? Object.keys(variants)[0];
     const member = chosen ? text(decodeOptionalBoundary(variants[chosen], boundary.jsonObject)?.agent) : undefined;
     return member && !member.includes('/') && files.includes(`agents/${member}.md`) ? `agents/${member}.md` : undefined;
   }
@@ -375,7 +375,7 @@ export class ProfileEditor {
   /** One linked agent of Agent Farm's tree, with its own files and links nested (none for a cycle, an `any` link or an error). */
   private async linkNode(root: string, files: string[], link: AgentFarmListedLink, id: string, context: { plugin: string; profileOfAgent: Map<string, AgentFarmListedProfile> }): Promise<ProfileSubagentNode> {
     const agentRef = link.agent ?? link.plugin ?? '';
-    const identity = link.any ? undefined : await this.identityOf(root, files, context.plugin, link.agent);
+    const identity = link.any ? undefined : await this.identityOf(root, files, context.plugin, link.agent, link.variant);
     const front = identity ? parseFrontmatter(await readUnlinked(root, identity)) : undefined;
     const profile = link.agent ? context.profileOfAgent.get(link.agent) : undefined;
     const node: ProfileSubagentNode = {
@@ -671,8 +671,9 @@ export class ProfileEditor {
     const args: string[] = [];
     const title = details.title.trim();
     const description = details.description.trim();
-    if (title !== (summary.title ?? '')) args.push('--title', title);
-    if (description !== (summary.description ?? '')) args.push('--description', description);
+    // One argv element each (`--title=value`), so text starting with a dash isn't read as an option.
+    if (title !== (summary.title ?? '')) args.push(`--title=${title}`);
+    if (description !== (summary.description ?? '')) args.push(`--description=${description}`);
     if (args.length) await this.setDisplay(summary.ref, args);
     return { plugin: await this.readPlugin(plugin), path: summary.entry };
   }
@@ -759,6 +760,9 @@ export class ProfileEditor {
    * Every profile's photo here, as an SVG data URL, and whether it is yours or the plugin's, and its
    * title (Agent Farm's listing). A photo file that is gone or larger than Agent Farm allows is left out.
    */
+  /** Photo files read, by path, with the mtime and size they were read at. */
+  private readonly photoCache = new Map<string, { stamp: string; url: string }>();
+
   async photos(): Promise<ProfilePhotos> {
     const result: ProfilePhotos = { profiles: {}, sources: {}, titles: {} };
     let listed: AgentFarmListedProfile[];
@@ -769,9 +773,16 @@ export class ProfileEditor {
       if (!entry.photo || entry.error) continue;
       const stat = await fs.stat(entry.photo).catch(() => undefined);
       if (!stat?.isFile() || stat.size > MAX_PROFILE_PHOTO_BYTES) continue;
-      const bytes = await fs.readFile(entry.photo).catch(() => undefined);
-      if (!bytes) continue;
-      result.profiles[entry.ref] = `data:image/svg+xml;base64,${bytes.toString('base64')}`;
+      // The tab asks every few seconds (F-6): a photo is read again only when its file changed.
+      const stamp = `${stat.mtimeMs}:${stat.size}`;
+      let url = this.photoCache.get(entry.photo)?.stamp === stamp ? this.photoCache.get(entry.photo)?.url : undefined;
+      if (!url) {
+        const bytes = await fs.readFile(entry.photo).catch(() => undefined);
+        if (!bytes) continue;
+        url = `data:image/svg+xml;base64,${bytes.toString('base64')}`;
+        this.photoCache.set(entry.photo, { stamp, url });
+      }
+      result.profiles[entry.ref] = url;
       // A local profile's own file (`file`) is yours as much as an override is.
       result.sources[entry.ref] = entry.sources?.photo === 'plugin' ? 'plugin' : 'yours';
     }

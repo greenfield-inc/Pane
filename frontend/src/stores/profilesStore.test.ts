@@ -111,4 +111,24 @@ describe('profilesStore refresh', () => {
     await refreshing;
     expect(useProfilesStore.getState().overview?.plugins.map(entry => entry.name)).toEqual(['writer', 'labtest']);
   });
+
+  it('picks up a title or photo set outside the tab, and keeps unchanged photos as they were (F-6)', async () => {
+    const overview: ProfilesOverview = { machine: 'studio', plugins: [plugin('writer')] };
+    let photos = { profiles: {}, sources: {}, titles: { 'writer/writer': 'Writer' } };
+    vi.stubGlobal('window', { electronAPI: {
+      profiles: {
+        list: async () => ({ success: true, data: overview }),
+        photos: async () => ({ success: true, data: photos }),
+      },
+    } });
+    useProfilesStore.setState({ overview, photos, photosLoaded: true });
+    // `agent-farm profiles set` in a terminal: a new title and photo, and the overview reads the same.
+    photos = { profiles: { 'writer/writer': 'data:image/svg+xml;base64,AA==' }, sources: { 'writer/writer': 'yours' }, titles: { 'writer/writer': 'Ghostwriter' } };
+    await useProfilesStore.getState().refresh();
+    expect(useProfilesStore.getState().photos).toEqual(photos);
+    const shown = useProfilesStore.getState().photos;
+    photos = JSON.parse(JSON.stringify(photos));
+    await useProfilesStore.getState().refresh();
+    expect(useProfilesStore.getState().photos).toBe(shown);
+  });
 });

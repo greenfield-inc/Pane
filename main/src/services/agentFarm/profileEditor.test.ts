@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -222,6 +222,27 @@ describe('ProfileEditor: photos (SVG only, through Agent Farm, T-83)', () => {
     expect((await profiles.photos()).profiles['labtest/writer']).toBeUndefined();
   }, 60_000);
 
+  it('reads a photo file again only once it changed, since the tab asks every few seconds (review F-6)', async () => {
+    const paneDir = tempDir();
+    await installFixture(paneDir);
+    const profiles = editor(paneDir);
+    await profiles.setPhoto('labtest/writer', SVG);
+    const file = path.join(agentFarmConfigRoot(paneDir), 'profile-overrides', 'labtest', 'writer.svg');
+    const asSaved = `data:image/svg+xml;base64,${Buffer.from(SVG).toString('base64')}`;
+    // A whole-second time, so it can be set back exactly.
+    const mtime = new Date(Math.floor(statSync(file).mtimeMs / 1000) * 1000);
+    utimesSync(file, mtime, mtime);
+    expect((await profiles.photos()).profiles['labtest/writer']).toBe(asSaved);
+    // The same size and time, other bytes: the photo read before is reused.
+    const recolored = SVG.replace('#e3735e', '#4b7bd8');
+    writeFileSync(file, recolored);
+    utimesSync(file, mtime, mtime);
+    expect((await profiles.photos()).profiles['labtest/writer']).toBe(asSaved);
+    // A newer file is read again.
+    utimesSync(file, new Date(mtime.getTime() + 5_000), new Date(mtime.getTime() + 5_000));
+    expect((await profiles.photos()).profiles['labtest/writer']).toBe(`data:image/svg+xml;base64,${Buffer.from(recolored).toString('base64')}`);
+  }, 60_000);
+
   it('refuses a PNG, an SVG Agent Farm\'s check refuses, one over 64 KB, and a bad ref, naming the reason', async () => {
     const paneDir = tempDir();
     await installFixture(paneDir);
@@ -428,6 +449,34 @@ describe('ProfileEditor: the profile page', () => {
     await expect(profiles.read('team', 'covers/../agents/lead.md')).rejects.toMatchObject({ code: 'PROFILE_PATH_INVALID' });
     await expect(profiles.read('team', 'pane.yaml')).rejects.toMatchObject({ code: 'PROFILE_PATH_INVALID' });
     await expect(profiles.setDetails('team', 'nobody', { title: 'x', description: '' })).rejects.toMatchObject({ code: 'PROFILE_NOT_FOUND' });
+  }, 60_000);
+
+  it('shows a link pinned to a variant with that variant\'s identity and skills, an unpinned one with the default\'s (review F-5)', async () => {
+    const paneDir = tempDir();
+    await installFixture(paneDir, 'pin', {
+      'profiles/lead.yaml': 'agent: lead\n',
+      'agents/lead.md': '---\nharness: claude\nmodel: claude-opus-5-5\ndescription: Leads\nsubagents:\n  builder:\n    agent: builder\n    mode: launch\n    variant: codex\n  helper:\n    agent: builder\n    mode: launch\n---\n\n# Lead\n',
+      'agents/builder.yaml': 'variants:\n  claude: { agent: builder-claude }\n  codex: { agent: builder-codex }\ndefault: claude\n',
+      'agents/builder-claude.md': '---\nharness: claude\nmodel: claude-opus-5-5\ndescription: Builds in Claude\nskills:\n  - claude-build\n---\n\n# Builder\n',
+      'agents/builder-codex.md': '---\nharness: codex\nmodel: gpt-6.2-sol\ndescription: Builds in Codex\nskills:\n  - codex-build\n---\n\n# Builder\n',
+      'skills/claude-build/SKILL.md': '---\nname: claude-build\ndescription: Build\n---\n\nBuild.\n',
+      'skills/codex-build/SKILL.md': '---\nname: codex-build\ndescription: Build\n---\n\nBuild.\n',
+    });
+    const lead = (await editor(paneDir).list()).plugins.find(plugin => plugin.name === 'pin')?.profiles.find(profile => profile.name === 'lead');
+    const pinned = findSubagent(lead!.tree, 'builder');
+    expect(pinned).toMatchObject({ identity: 'agents/builder-codex.md', harness: 'codex', variants: ['codex'] });
+    expect(outline(pinned!.children)).toContain('  codex-build/');
+    expect(findSubagent(lead!.tree, 'helper')).toMatchObject({ identity: 'agents/builder-claude.md', harness: 'claude' });
+  }, 60_000);
+
+  it('saves a title and description that start with a dash, and clears them again (review F-7)', async () => {
+    const paneDir = tempDir();
+    await installTeam(paneDir);
+    const profiles = editor(paneDir);
+    const result = await profiles.setDetails('team', 'lead', { title: '-Lead-', description: '- Review changes' });
+    expect(result.plugin.profiles.find(profile => profile.name === 'lead')).toMatchObject({ title: '-Lead-', description: '- Review changes' });
+    const cleared = await profiles.setDetails('team', 'lead', { title: '', description: '' });
+    expect(cleared.plugin.profiles.find(profile => profile.name === 'lead')).toMatchObject({ title: 'Lead', description: 'Runs the work' });
   }, 60_000);
 
   it('keeps your title, description and photo of a bundled profile un-Edited and through Pane reinstalling it (J8)', async () => {

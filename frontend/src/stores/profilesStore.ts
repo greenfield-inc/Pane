@@ -197,7 +197,9 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
     loadPhotos: async () => {
       if (!window.electronAPI?.profiles) return;
       try {
-        set({ photos: await answer(api().photos(), profilePhotosSchema), photosLoaded: true });
+        const photos = await answer(api().photos(), profilePhotosSchema);
+        // Unchanged photos keep the same object, so a poll doesn't redraw every avatar.
+        set(state => ({ photos: JSON.stringify(photos) === JSON.stringify(state.photos) ? state.photos : photos, photosLoaded: true }));
       } catch {
         // Without photos every avatar shows its initials, which is what it shows before they load.
         set({ photosLoaded: true });
@@ -223,6 +225,8 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
         const overview = await answer(api().list(), profilesOverviewSchema).catch(() => undefined);
         // A save or new profile that landed while this read was under way is newer than what it read.
         if (overview && before === changes && JSON.stringify(overview) !== JSON.stringify(get().overview)) set({ overview, error: null });
+        // Avatars' titles and photos come from the photos answer, which `agent-farm profiles set` in a terminal changes too (F-6).
+        await get().loadPhotos();
         const place = get().place;
         const shown = place.level === 'profile' ? displayedFile(get().overview, place.plugin, place.profile, place.file) : undefined;
         const openKey = place.level === 'profile' && shown ? fileKey(place.plugin, shown) : null;
