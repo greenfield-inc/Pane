@@ -78,6 +78,13 @@ function isOverride(name: string, bytes: Buffer): boolean {
   return OVERRIDE_FILE.test(name) && bytes.length <= MAX_OVERRIDE_BYTES;
 }
 
+/** Whether an override's content is one Agent Farm reads: a `.json` must hold a JSON object (review F-4). */
+function overrideReadable(name: string, bytes: Buffer): boolean {
+  if (!name.endsWith('.json')) return true;
+  try { return decodeOptionalBoundary(JSON.parse(bytes.toString('utf8')), boundary.jsonObject) !== undefined; }
+  catch { return false; }
+}
+
 /** A plugin's newest save, as it travels: its files (for `saved`) and your display overrides of its profiles, base64. */
 interface ProfilePack {
   plugin: string;
@@ -267,6 +274,8 @@ export class ProfileSyncHost {
       if (!stat.isFile() || stat.size > MAX_OVERRIDE_BYTES) continue;
       const bytes = await fs.readFile(file);
       if (!isOverride(child.name, bytes)) continue;
+      // Not skipped: leaving it out would read as a removal and delete the working copy elsewhere.
+      if (!overrideReadable(child.name, bytes)) throw new PaneError('PROFILE_OVERRIDE_INVALID', `profile-overrides/${plugin}/${child.name} isn't valid JSON, so ${plugin} wasn't synced from this computer.`, `Fix or delete that file (or set the profile's title and description again in Pane), then sync again.`);
       overrides[child.name] = bytes;
       changedAt = Math.max(changedAt, stat.mtimeMs);
     }
@@ -607,6 +616,10 @@ export class ProfileSyncHost {
     const refused = Object.entries(overrides).find(([name, bytes]) => !isOverride(name, bytes));
     if (refused) {
       throw new PaneError('PROFILE_SYNC_DAMAGED', `${plugin} arrived with a display override "${refused[0]}" that isn't a <profile>.json or <profile>.svg of 64 KB or less, so nothing was changed.`, 'Set the profile\'s title, description or photo again on the other computer, then sync again.');
+    }
+    const malformed = Object.entries(overrides).find(([name, bytes]) => !overrideReadable(name, bytes));
+    if (malformed) {
+      throw new PaneError('PROFILE_SYNC_DAMAGED', `${plugin} arrived with a display override "${malformed[0]}" that isn't valid JSON, so nothing was changed.`, 'Set the profile\'s title and description again on the other computer, then sync again.');
     }
     if (packHash(record.state, files, overrides) !== record.hash) {
       throw new PaneError('PROFILE_SYNC_DAMAGED', `${plugin} arrived with files that don't match the other computer's save, so nothing was changed.`, 'Sync profiles again.');

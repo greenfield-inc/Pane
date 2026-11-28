@@ -516,6 +516,43 @@ describe('profile sync: review fixes (fix round 2)', () => {
     expect(existsSync(path.join(agentFarmConfigRoot(c.paneDir), 'profile-overrides'))).toBe(false);
   }, 120_000);
 
+  it('never sends or takes a display override whose JSON is malformed, so a working override elsewhere is kept (review F-4)', async () => {
+    const a = computer('studio', 'a-id');
+    const b = computer('build', 'b-id');
+    await installFixture(a.paneDir);
+    await installFixture(b.paneDir);
+    await setDisplay(b, 'labtest/writer', { title: 'Mine' });
+    const bOverride = path.join(OVERRIDES(b.paneDir, 'labtest'), 'writer.json');
+    const working = readFileSync(bOverride, 'utf8');
+    const before = (await readProfileSync(agentFarmConfigRoot(b.paneDir))).plugins.labtest;
+
+    // Sending side: a hand edit on A leaves its override malformed, later than B's save.
+    await setDisplay(a, 'labtest/writer', { title: 'Scribe' });
+    const aRecord = (await readProfileSync(agentFarmConfigRoot(a.paneDir))).plugins.labtest;
+    a.clock.now = Date.now() + 3_600_000;
+    writeFileSync(path.join(OVERRIDES(a.paneDir, 'labtest'), 'writer.json'), '{"title": "Scri');
+    await a.host.recordChange();
+    expect((await readProfileSync(agentFarmConfigRoot(a.paneDir))).plugins.labtest).toEqual(aRecord);
+    await desktop(a, [b]).syncNow();
+    expect(readFileSync(bOverride, 'utf8')).toBe(working);
+
+    // Receiving side: a pack carrying a malformed override is refused, B's override and record kept.
+    writeFileSync(path.join(OVERRIDES(a.paneDir, 'labtest'), 'writer.json'), '{"title":"Scribe"}\n');
+    const exported = await a.host.export('labtest');
+    const transferId = exported.transferId ?? '';
+    const packFile = a.host.packFile(transferId);
+    const pack = decodeBoundary(JSON.parse(readFileSync(packFile, 'utf8')), boundary.object({ files: boundary.record(boundary.string), record: profileSyncRecordSchema }));
+    const files = Object.fromEntries(Object.entries(pack.files).map(([file, content]) => [file, Buffer.from(content, 'base64')]));
+    const overrides = { 'writer.json': Buffer.from('{"title": "Scri') };
+    const record = { ...pack.record, savedAt: Date.now() + 7_200_000, hash: packHash('saved', files, overrides) };
+    writeFileSync(packFile, JSON.stringify({ ...pack, plugin: 'labtest', record, overrides: { 'writer.json': overrides['writer.json'].toString('base64') } }));
+    const sender = peer(b);
+    const sent = await sendFile({ write: async write => decodeBoundary(await sender.invoke(PROFILE_SYNC_CHANNELS.write, [write], 1000), writeResultSchema) }, transferId, 'pack.json', packFile);
+    await expect(b.host.apply({ plugin: 'labtest', record, transferId, pack: sent })).rejects.toMatchObject({ code: 'PROFILE_SYNC_DAMAGED' });
+    expect(readFileSync(bOverride, 'utf8')).toBe(working);
+    expect((await readProfileSync(agentFarmConfigRoot(b.paneDir))).plugins.labtest).toEqual(before);
+  }, 120_000);
+
   it('never reads or writes a display overrides folder that is a link (F-5)', async () => {
     const a = computer('studio', 'a-id');
     await installFixture(a.paneDir);
