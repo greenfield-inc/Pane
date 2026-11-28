@@ -14,12 +14,12 @@ const PROFILES_ON = { sessionProfilesEnabled: true, chatTabsEnabled: true };
 const profile = (ref: string, harness = 'claude', extra: JsonObject = {}) => ({ ref, plugin: ref.split('/')[0], version: '1.0.0', harness, hidden: ref.startsWith('pane/'), ...extra });
 const PROFILES = { profiles: [
   profile('pane/claude'), profile('pane/codex', 'codex'),
-  profile('greenfield/orchestrator'),
-  // A subagent's own profile, which its plugin unlists: it runs, but isn't offered.
-  profile('greenfield/planner', 'claude', { listed: false }),
-  profile('greenfield/seo', 'codex'),
-  // Installed but off the TEMPORARY short list (T-83): not offered.
-  profile('dcouple/business'),
+  // greenfield 0.1.0 (T-83): three profiles, titled by Agent Farm; every listed profile is offered.
+  profile('greenfield/orchestrator', 'claude', { title: 'Orchestrator', description: 'Run one workstream from idea to merged pull request.' }),
+  profile('greenfield/business', 'claude', { title: 'Business' }),
+  profile('greenfield/seo', 'codex', { title: 'SEO' }),
+  // Another plugin's profile with no title: To shows the name Pane makes from its ref.
+  profile('acme/support'),
 ] };
 
 const createInputs = (page: Page) => page.evaluate(() => {
@@ -54,7 +54,7 @@ test('with Profiles off, New and the + beside Sessions open the dialogs they alw
   await expect(row.getByTestId('session-activity-icon')).toHaveAttribute('data-state', 'idle');
 });
 
-test('Create New by keyboard: To filters to listed profiles, Return picks and moves on through Name and the message, and Return creates', async ({ page }) => {
+test('Create New by keyboard: To filters profiles by title or ref, Return picks and moves on through Name and the message, and Return creates', async ({ page }) => {
   await openApp(page);
   await page.getByTestId('new-orchestration-session').click();
   await expect(dialog(page)).toHaveAttribute('data-mode', 'session');
@@ -67,13 +67,14 @@ test('Create New by keyboard: To filters to listed profiles, Return picks and mo
   await expect(dialog(page)).not.toContainText('↵');
   await page.keyboard.type('green');
   const options = dialog(page).getByRole('listbox', { name: 'Agents and profiles' }).getByRole('option');
-  await expect(options).toHaveText([/Greenfield orchestrator/, /Greenfield seo/]);
+  // "green" matches the refs; each shows its Agent Farm title, with its description (or its ref) beside it.
+  await expect(options).toHaveText([/Orchestrator\s*Run one workstream/, /Business\s*greenfield\/business/, /SEO\s*greenfield\/seo/]);
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Enter');
   const name = dialog(page).getByRole('textbox', { name: 'Name', exact: true });
   await expect(name).toBeFocused();
-  await expect(to(page)).toHaveValue('Greenfield orchestrator');
+  await expect(to(page)).toHaveValue('Orchestrator');
   await page.keyboard.type('Refund tickets');
   await page.keyboard.press('Enter');
   const message = dialog(page).getByRole('textbox', { name: 'Message', exact: true });
@@ -88,6 +89,18 @@ test('Create New by keyboard: To filters to listed profiles, Return picks and mo
   expect(input).toMatchObject({ agent: 'claude', agentProfile: 'greenfield/orchestrator', name: 'Refund tickets', nameFromFirstMessage: false, isPinned: false });
   // The first message goes once, as a one-time opening prompt.
   expect(input.openingPrompt).toBe('Pane sent this once, with the person\'s first message from New Session:\n\nDraft replies for the open refund tickets.\nKeep them short.');
+});
+
+test('To offers every profile Agent Farm lists, by title, and a profile with no title by its ref\'s name', async ({ page }) => {
+  await openApp(page);
+  await page.getByTestId('new-orchestration-session').click();
+  await page.keyboard.type('support');
+  const options = dialog(page).getByRole('listbox', { name: 'Agents and profiles' }).getByRole('option');
+  await expect(options).toHaveText([/Acme support\s*acme\/support/]);
+  await page.keyboard.press('Enter');
+  await expect(to(page)).toHaveValue('Acme support');
+  await to(page).fill('seo');
+  await expect(options).toHaveText([/SEO\s*greenfield\/seo/]);
 });
 
 test('Create New skips the optional name and message: the Session is named from its first message, and Esc closes the To list before the dialog', async ({ page }) => {
@@ -126,7 +139,7 @@ test('a remembered profile in To stays selected when the profiles arrive, so typ
   await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
   await expect(to(page)).toBeFocused();
-  await expect(to(page)).toHaveValue('Greenfield orchestrator');
+  await expect(to(page)).toHaveValue('Orchestrator');
   await page.keyboard.type('codex');
   await expect(to(page)).toHaveValue('codex');
   await expect(dialog(page).getByRole('listbox', { name: 'Agents and profiles' }).getByRole('option')).toHaveText([/^Codex/]);
@@ -523,4 +536,17 @@ test('a project\'s + opens Create New as a Pane in that project, on this compute
   await expect(dialog(page).getByRole('heading', { name: 'New Pane', exact: true })).toBeVisible();
   await expect(dialog(page).getByLabel('Project', { exact: true })).toHaveValue('2');
   await expect(page.getByRole('dialog', { name: 'Create Pane' })).toHaveCount(0);
+});
+
+// PANE_PROFILES_SHOTS=<dir> saves To's profile list, light and dark, for review (T-83 P2).
+test('To lists profiles by title and description, light and dark', async ({ page }) => {
+  const folder = process.env.PANE_PROFILES_SHOTS;
+  test.skip(!folder, 'Set PANE_PROFILES_SHOTS to save the screenshots.');
+  for (const theme of ['light', 'dark']) {
+    await openApp(page, { initialConfig: { theme } });
+    await page.getByTestId('new-orchestration-session').click();
+    await page.keyboard.type('green');
+    await expect(dialog(page).getByRole('listbox', { name: 'Agents and profiles' }).getByRole('option')).toHaveCount(3);
+    await page.screenshot({ path: `${folder}/create-new-to-${theme}.png` });
+  }
 });

@@ -1,10 +1,10 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { agentFarmConfigRoot, bundledAgentFarm, bundledAgentFarmProcess, installBundledAgentFarm, listPaneAgentFarmProfiles, runAgentFarm, type AgentFarmRunner } from './bundledAgentFarm';
 import { ProfileEditor, agentFarmReason, parseYaml } from './profileEditor';
-import type { ProfileTreeNode } from '../../../../shared/types/profileEditor';
+import type { ProfileSubagentNode, ProfileTreeNode } from '../../../../shared/types/profileEditor';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
@@ -24,7 +24,7 @@ const bundle = bundledAgentFarm();
 if (!bundle) throw new Error('Expected the pinned @greenfieldco/agent-farm package');
 
 /** A small plugin, as someone would write one, installed into the Pane's Agent Farm with the real CLI. */
-async function installFixture(paneDir: string, name = 'labtest'): Promise<void> {
+async function installFixture(paneDir: string, name = 'labtest', extra: Record<string, string> = {}): Promise<void> {
   const source = path.join(tempDir(), name);
   const files = {
     'plugin.yaml': `name: ${name}\nversion: 0.1.0\ncli_major: 0\n`,
@@ -33,6 +33,7 @@ async function installFixture(paneDir: string, name = 'labtest'): Promise<void> 
     'agents/editor.md': '---\nharness: claude\nmodel: claude-opus-5-5\ndescription: Edits\n---\n\n# Editor\n',
     'instructions/tone.md': '# Tone\n',
     'skills/outline/SKILL.md': '---\nname: outline\ndescription: Outline a post\n---\n\nOutline first.\n',
+    ...extra,
   };
   for (const [relative, content] of Object.entries(files)) {
     mkdirSync(path.dirname(path.join(source, relative)), { recursive: true });
@@ -47,7 +48,7 @@ function editor(paneDir: string): ProfileEditor {
 }
 
 describe('ProfileEditor: list and read', () => {
-  it('lists each installed plugin with its profiles, identity, harness and the files each profile uses', async () => {
+  it('lists each installed plugin with its profiles, identity, harness and Agent Farm\'s description', async () => {
     const paneDir = tempDir();
     await installFixture(paneDir);
     const overview = await editor(paneDir).list();
@@ -57,9 +58,9 @@ describe('ProfileEditor: list and read', () => {
     expect(plugin).toMatchObject({ version: '0.1.0', bundled: false, edited: false });
     expect(plugin?.files).toEqual(['agents/editor.md', 'agents/writer.md', 'instructions/tone.md', 'plugin.yaml', 'profiles/writer.yaml', 'skills/outline/SKILL.md']);
     expect(plugin?.profiles).toEqual([expect.objectContaining({
-      name: 'writer', ref: 'labtest/writer', entry: 'agents/writer.md', harness: 'claude', model: 'claude-opus-5-5', description: 'Drafts blog posts', listed: true,
-      uses: ['agents/writer.md', 'instructions/tone.md', 'plugin.yaml', 'profiles/writer.yaml', 'skills/outline/SKILL.md'],
+      name: 'writer', ref: 'labtest/writer', entry: 'agents/writer.md', harness: 'claude', model: 'claude-opus-5-5', description: 'Drafts blog posts',
     })]);
+    expect(plugin?.profiles[0]).not.toHaveProperty('variants');
   }, 60_000);
 
   it('reads a file, and refuses a path outside the plugin or through a link', async () => {
@@ -100,7 +101,7 @@ describe('ProfileEditor: save', () => {
     const result = await editor(paneDir).save('labtest', [{ path: 'agents/writer.md', content: '---\nharness: claude\nmodel: claude-opus-5-5\ndescription: Drafts blog posts\nskills:\n  - outline\n---\n\n# Writer\n\nMarker: KUMQUAT\n' }]);
     expect(result.path).toBe('agents/writer.md');
     expect(readFileSync(path.join(agentFarmConfigRoot(paneDir), 'plugins', 'labtest', 'agents', 'writer.md'), 'utf8')).toContain('Marker: KUMQUAT');
-    expect(result.plugin.profiles[0].uses).not.toContain('instructions/tone.md');
+    expect(JSON.stringify(result.plugin.profiles[0].tree)).not.toContain('instructions/tone.md');
   }, 60_000);
 
   it('refuses a change Agent Farm rejects, naming the reason, and changes nothing', async () => {
@@ -159,7 +160,7 @@ describe('ProfileEditor: new profile, subagent, skill and reference', () => {
     expect(listed.profiles.map(entry => entry.ref)).toContain('dcouple/dcouple');
   }, 180_000);
 
-  it('adds a subagent, a skill and a reference to a profile, and lists them as used', async () => {
+  it('adds a subagent, a skill and a reference to a profile, and shows them in its tree', async () => {
     const paneDir = tempDir();
     await installFixture(paneDir);
     const profiles = editor(paneDir);
@@ -167,7 +168,8 @@ describe('ProfileEditor: new profile, subagent, skill and reference', () => {
     expect((await profiles.newFile('labtest', 'writer', 'skill', 'weekly-recap')).path).toBe('skills/weekly-recap/SKILL.md');
     const last = await profiles.newFile('labtest', 'writer', 'reference', 'style-guide');
     expect(last.path).toBe('references/writer/style-guide.md');
-    expect(last.plugin.profiles[0].uses).toEqual(expect.arrayContaining(['agents/researcher.md', 'skills/weekly-recap/SKILL.md', 'references/writer/style-guide.md', 'skills/outline/SKILL.md']));
+    const shown = JSON.stringify(last.plugin.profiles[0].tree);
+    for (const file of ['agents/researcher.md', 'skills/weekly-recap/SKILL.md', 'references/writer/style-guide.md', 'skills/outline/SKILL.md']) expect(shown).toContain(file);
     const identity = await profiles.read('labtest', 'agents/writer.md');
     expect(identity).toContain('weekly-recap');
     expect(identity).toContain('researcher');
@@ -201,27 +203,70 @@ describe('ProfileEditor: a save that fails part-way (review F-6)', () => {
   }, 60_000);
 });
 
-describe('ProfileEditor: photos', () => {
-  const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201a5f6a3a50000000049454e44ae426082', 'hex');
+describe('ProfileEditor: photos (SVG only, through Agent Farm, T-83)', () => {
+  const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="#e3735e"/></svg>';
 
-  it('stores your photo per profile in avatars/, outside the plugin, and removes it', async () => {
+  it('keeps your SVG as Agent Farm\'s display override, outside the plugin, and removes it', async () => {
     const paneDir = tempDir();
     await installFixture(paneDir);
     const profiles = editor(paneDir);
-    await profiles.setPhoto('labtest/writer', PNG.toString('base64'));
-    expect(existsSync(path.join(agentFarmConfigRoot(paneDir), 'avatars', 'labtest--writer.png'))).toBe(true);
-    expect((await profiles.photos()).profiles['labtest/writer']).toBe(`data:image/png;base64,${PNG.toString('base64')}`);
+    await profiles.setPhoto('labtest/writer', SVG);
+    expect(existsSync(path.join(agentFarmConfigRoot(paneDir), 'profile-overrides', 'labtest', 'writer.svg'))).toBe(true);
+    const photos = await profiles.photos();
+    expect(photos.profiles['labtest/writer']).toBe(`data:image/svg+xml;base64,${Buffer.from(SVG).toString('base64')}`);
+    expect(photos.sources['labtest/writer']).toBe('yours');
+    // Nothing of Pane's own is written, and the plugin is untouched.
+    expect(existsSync(path.join(agentFarmConfigRoot(paneDir), 'avatars'))).toBe(false);
+    expect(existsSync(path.join(agentFarmConfigRoot(paneDir), 'drafts'))).toBe(false);
     await profiles.removePhoto('labtest/writer');
     expect((await profiles.photos()).profiles['labtest/writer']).toBeUndefined();
-    await expect(profiles.setPhoto('labtest/writer', Buffer.from('not an image').toString('base64'))).rejects.toMatchObject({ code: 'PROFILE_PHOTO_INVALID' });
-    await expect(profiles.setPhoto('../x/writer', PNG.toString('base64'))).rejects.toMatchObject({ code: 'PROFILE_NAME_INVALID' });
   }, 60_000);
 
-  it('reads a plugin\'s own picture from its avatar.png', async () => {
+  it('reads a photo file again only once it changed, since the tab asks every few seconds (review F-6)', async () => {
     const paneDir = tempDir();
     await installFixture(paneDir);
-    writeFileSync(path.join(agentFarmConfigRoot(paneDir), 'plugins', 'labtest', 'avatar.png'), PNG);
-    expect((await editor(paneDir).photos()).plugins.labtest).toMatch(/^data:image\/png;base64,/);
+    const profiles = editor(paneDir);
+    await profiles.setPhoto('labtest/writer', SVG);
+    const file = path.join(agentFarmConfigRoot(paneDir), 'profile-overrides', 'labtest', 'writer.svg');
+    const asSaved = `data:image/svg+xml;base64,${Buffer.from(SVG).toString('base64')}`;
+    // A whole-second time, so it can be set back exactly.
+    const mtime = new Date(Math.floor(statSync(file).mtimeMs / 1000) * 1000);
+    utimesSync(file, mtime, mtime);
+    expect((await profiles.photos()).profiles['labtest/writer']).toBe(asSaved);
+    // The same size and time, other bytes: the photo read before is reused.
+    const recolored = SVG.replace('#e3735e', '#4b7bd8');
+    writeFileSync(file, recolored);
+    utimesSync(file, mtime, mtime);
+    expect((await profiles.photos()).profiles['labtest/writer']).toBe(asSaved);
+    // A newer file is read again.
+    utimesSync(file, new Date(mtime.getTime() + 5_000), new Date(mtime.getTime() + 5_000));
+    expect((await profiles.photos()).profiles['labtest/writer']).toBe(`data:image/svg+xml;base64,${Buffer.from(recolored).toString('base64')}`);
+  }, 60_000);
+
+  it('refuses a PNG, an SVG Agent Farm\'s check refuses, one over 64 KB, and a bad ref, naming the reason', async () => {
+    const paneDir = tempDir();
+    await installFixture(paneDir);
+    const profiles = editor(paneDir);
+    await expect(profiles.setPhoto('labtest/writer', '\u0089PNG\r\n')).rejects.toMatchObject({ code: 'PROFILE_PHOTO_INVALID', message: expect.stringContaining('SVG only') });
+    await expect(profiles.setPhoto('labtest/writer', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><script>alert(1)</script></svg>'))
+      .rejects.toMatchObject({ code: 'PROFILE_DETAILS_REFUSED', message: expect.stringContaining('<script>') });
+    await expect(profiles.setPhoto('labtest/writer', `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><title>${'x'.repeat(65 * 1024)}</title></svg>`))
+      .rejects.toMatchObject({ code: 'PROFILE_PHOTO_INVALID', message: expect.stringContaining('64 KB') });
+    await expect(profiles.setPhoto('../x/writer', SVG)).rejects.toMatchObject({ code: 'PROFILE_NAME_INVALID' });
+    expect((await profiles.photos()).profiles['labtest/writer']).toBeUndefined();
+  }, 60_000);
+
+  it('shows the plugin\'s own SVG photo, and yours over it until you remove yours', async () => {
+    const paneDir = tempDir();
+    await installFixture(paneDir, 'labtest', { 'profiles/writer.yaml': 'agent: writer\ntitle: Writer\nphoto: writer.svg\n', 'profiles/writer.svg': SVG.replace('#e3735e', '#4b7bd8') });
+    const profiles = editor(paneDir);
+    expect((await profiles.photos()).sources['labtest/writer']).toBe('plugin');
+    await profiles.setPhoto('labtest/writer', SVG);
+    expect((await profiles.photos()).sources['labtest/writer']).toBe('yours');
+    await profiles.removePhoto('labtest/writer');
+    const after = await profiles.photos();
+    expect(after.sources['labtest/writer']).toBe('plugin');
+    expect(Buffer.from(after.profiles['labtest/writer'].split(',')[1], 'base64').toString()).toContain('#4b7bd8');
   }, 60_000);
 });
 
@@ -235,7 +280,7 @@ describe('ProfileEditor: Pane\'s own plugins (A-3)', () => {
     expect(before).toMatchObject({ bundled: true, edited: false });
     expect((await profiles.list()).plugins.map(plugin => plugin.name)).not.toContain('pane');
     const ref = before!.profiles[0].ref;
-    await profiles.setPhoto(ref, Buffer.from('89504e470d0a1a0a', 'hex').toString('base64') + 'AAAA');
+    await profiles.setPhoto(ref, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2"><rect width="2" height="2" fill="#40916c"/></svg>');
     expect((await profiles.list()).plugins.find(plugin => plugin.name === 'greenfield')?.edited).toBe(false);
     const entry = before!.profiles[0].entry;
     const original = await profiles.read('greenfield', entry);
@@ -248,11 +293,43 @@ describe('ProfileEditor: Pane\'s own plugins (A-3)', () => {
     const restored = await profiles.restore('greenfield');
     expect(restored.plugin.edited).toBe(false);
     expect(await profiles.read('greenfield', entry)).toBe(original);
+    // Your photo stays through the restore.
+    expect((await profiles.photos()).sources[ref]).toBe('yours');
     const manifest = JSON.parse(readFileSync(path.join(agentFarmConfigRoot(paneDir), 'pane-manifest.json'), 'utf8'));
     expect(manifest.edited ?? []).not.toContain('greenfield');
     await expect(profiles.restore('labtest')).rejects.toMatchObject({ code: 'PROFILE_NOT_BUNDLED' });
   }, 240_000);
+
+  it('lists greenfield\'s three profiles with Agent Farm\'s titles and their trees (T-83)', async () => {
+    const paneDir = tempDir();
+    await installBundledAgentFarm({ paneDir, bundle, log: () => undefined });
+    const greenfield = (await editor(paneDir).list()).plugins.find(plugin => plugin.name === 'greenfield');
+    expect(greenfield?.profiles.map(profile => [profile.ref, profile.title, profile.variants])).toEqual([
+      ['greenfield/business', 'Business', ['claude', 'codex']],
+      ['greenfield/orchestrator', 'Orchestrator', ['claude', 'codex']],
+      ['greenfield/seo', 'SEO', expect.anything()],
+    ]);
+    const orchestrator = greenfield!.profiles.find(profile => profile.name === 'orchestrator')!;
+    const subagents = orchestrator.tree.find(node => node.kind === 'folder' && node.label === 'Subagents');
+    const links = subagents?.kind === 'folder' ? subagents.children.flatMap(node => (node.kind === 'subagent' ? [node] : [])) : [];
+    // J3: 13 launch links plus advisor, and no process-cleanup.
+    expect(links.filter(link => link.mode === 'launch')).toHaveLength(13);
+    expect(links.map(link => link.alias)).toContain('advisor');
+    expect(links.map(link => link.alias)).not.toContain('process-cleanup');
+    // Reviewer links implementer, whose own reviewer link is the cycle back.
+    const reviewer = links.find(link => link.alias === 'reviewer')!;
+    const implementer = findSubagent(reviewer.children, 'implementer');
+    expect(implementer).toMatchObject({ mode: 'launch', variants: ['claude', 'codex'] });
+    expect(findSubagent(implementer!.children, 'reviewer')).toMatchObject({ cycle: true, children: [] });
+    expect(reviewer.command).toBe('agent-farm run greenfield/reviewer --agent-only');
+  }, 240_000);
 });
+
+/** A subagent node by alias among `nodes`' Subagents folder. */
+function findSubagent(nodes: ProfileTreeNode[], alias: string): ProfileSubagentNode | undefined {
+  const folder = nodes.find(node => node.kind === 'folder' && node.label === 'Subagents');
+  return folder?.kind === 'folder' ? folder.children.find((node): node is ProfileSubagentNode => node.kind === 'subagent' && node.alias === alias) : undefined;
+}
 
 describe('agentFarmReason', () => {
   it('takes the error line over a YAML snippet, and shows the staged folder as the plugin with / on Windows too', () => {
@@ -263,15 +340,18 @@ describe('agentFarmReason', () => {
   });
 });
 
-/** A team plugin: an orchestrator (lead) calling a planner that is also a profile, and a plain designer. */
+/**
+ * A team plugin: a lead that starts a planner (also a profile) as a launch link and runs a designer
+ * inside itself; the planner may start the lead again, a cycle only launch links allow.
+ */
 async function installTeam(paneDir: string): Promise<void> {
   const source = path.join(tempDir(), 'team');
   const files = {
     'plugin.yaml': 'name: team\nversion: 0.1.0\ncli_major: 0\n',
-    'profiles/lead.yaml': 'agent: lead\n',
+    'profiles/lead.yaml': 'agent: lead\ntitle: Lead\n',
     'profiles/planner.yaml': 'agent: planner\n',
-    'agents/lead.md': '---\nharness: claude\nmodel: claude-opus-5-5\ndescription: Runs the work\ninstructions_files:\n  - ../instructions/rules.md\nskills:\n  - plan\nreferences: lead\nsubagents:\n  planner:\n    agent: planner\n    mode: native\n  designer:\n    agent: designer\n    mode: native\n---\n\n# Lead\n\nRun one workstream.\n',
-    'agents/planner.md': '---\nharness: claude\nmodel: claude-opus-5-5\ndescription: Plans\nskills:\n  - plan\n---\n\n# Planner\n',
+    'agents/lead.md': '---\nharness: claude\nmodel: claude-opus-5-5\ndescription: Runs the work\ninstructions_files:\n  - ../instructions/rules.md\nskills:\n  - plan\nreferences: lead\nsubagents:\n  planner:\n    agent: planner\n    mode: launch\n    description: Writes the plan\n  designer:\n    agent: designer\n    mode: native\n---\n\n# Lead\n\nRun one workstream.\n',
+    'agents/planner.md': '---\nharness: claude\nmodel: claude-opus-5-5\ndescription: Plans\nskills:\n  - plan\nsubagents:\n  lead:\n    agent: lead\n    mode: launch\n---\n\n# Planner\n',
     'agents/designer.md': '---\nharness: claude\nmodel: claude-opus-5-5\ndescription: Draws options\nskills:\n  - mockup\n---\n\n# Designer\n',
     'instructions/rules.md': '# Rules\n',
     'skills/plan/SKILL.md': '---\nname: plan\ndescription: Plan\n---\n\nPlan.\n',
@@ -289,15 +369,20 @@ async function installTeam(paneDir: string): Promise<void> {
 
 /** A tree as indented labels, for comparing its shape. */
 function outline(nodes: ProfileTreeNode[], depth = 0): string[] {
-  return nodes.flatMap(node => [`${'  '.repeat(depth)}${node.kind === 'file' ? node.label + (node.note ? ` (${node.note})` : '') : node.kind === 'folder' ? `${node.label}/` : `@${node.label}${node.profile ? ` [${node.profile}]` : ''}`}`,
-    ...(node.kind === 'file' ? [] : outline(node.children, depth + 1))]);
+  const label = (node: ProfileTreeNode) => {
+    if (node.kind === 'file') return node.label + (node.note ? ` (${node.note})` : '');
+    if (node.kind === 'folder') return `${node.label}/`;
+    return `@${node.label} <${node.mode}>${node.profile ? ` [${node.profile}]` : ''}${node.cycle ? ' (cycle)' : ''}`;
+  };
+  return nodes.flatMap(node => [`${'  '.repeat(depth)}${label(node)}`, ...(node.kind === 'file' ? [] : outline(node.children, depth + 1))]);
 }
 
 describe('ProfileEditor: the profile page', () => {
-  it('builds each profile\'s own tree: identity, instructions, skills, references, subagents nested, settings', async () => {
+  it('builds each profile\'s own tree: identity, instructions, skills, references, its links from Agent Farm nested, settings', async () => {
     const paneDir = tempDir();
     await installTeam(paneDir);
     const lead = (await editor(paneDir).list()).plugins.find(plugin => plugin.name === 'team')?.profiles.find(profile => profile.name === 'lead');
+    expect(lead).toMatchObject({ title: 'Lead', description: 'Runs the work', entry: 'agents/lead.md', harness: 'claude' });
     expect(outline(lead!.tree)).toEqual([
       'lead.md (identity)',
       'Instructions/',
@@ -309,22 +394,28 @@ describe('ProfileEditor: the profile page', () => {
       '    SKILL.md',
       'References/',
       '  style.md',
+      // In Agent Farm's order: native links, then launch links.
       'Subagents/',
-      '  @Team planner [team/planner]',
+      '  @Designer <native>',
+      '    designer.md (identity)',
+      '    Skills/',
+      '      mockup/',
+      '        SKILL.md',
+      '  @Planner <launch> [team/planner]',
       '    planner.md (identity)',
       '    Skills/',
       '      plan/',
       '        references/',
       '          template.md',
       '        SKILL.md',
-      '  @Designer',
-      '    designer.md (identity)',
-      '    Skills/',
-      '      mockup/',
-      '        SKILL.md',
+      '    Subagents/',
+      '      @Lead <launch> [team/lead] (cycle)',
       'Settings/',
       '  lead.yaml',
     ]);
+    const planner = findSubagent(lead!.tree, 'planner');
+    // The link's own description, and the command a person runs it with.
+    expect(planner).toMatchObject({ description: 'Writes the plan', command: 'agent-farm run team/planner --agent-only', harness: 'claude', model: 'claude-opus-5-5', identity: 'agents/planner.md' });
     // Every id is unique, so folders open and close on their own.
     const ids: string[] = [];
     const walk = (nodes: ProfileTreeNode[]) => nodes.forEach(node => { ids.push(node.id); if (node.kind !== 'file') walk(node.children); });
@@ -332,83 +423,95 @@ describe('ProfileEditor: the profile page', () => {
     expect(new Set(ids).size).toBe(ids.length);
   }, 60_000);
 
-  it('writes the description into the agent\'s own identity front-matter, and the title (for now) into pane.yaml', async () => {
+  it('saves the title and description through Agent Farm, leaving the plugin\'s files as they are', async () => {
     const paneDir = tempDir();
     await installTeam(paneDir);
     const profiles = editor(paneDir);
     const identity = await profiles.read('team', 'agents/lead.md');
     const result = await profiles.setDetails('team', 'lead', { title: 'Team lead', description: 'Runs one workstream: "plan, build, review".' });
     expect(result.plugin.profiles.find(profile => profile.name === 'lead')).toMatchObject({ title: 'Team lead', description: 'Runs one workstream: "plan, build, review".' });
-    // Only the description line changed in the identity, and Agent Farm still accepts the plugin.
-    const described = await profiles.read('team', 'agents/lead.md');
-    expect(described).toBe(identity.replace('description: Runs the work\n', 'description: "Runs one workstream: \\"plan, build, review\\"."\n'));
-    const run = bundledAgentFarmProcess(bundle!, ['plugin', 'validate', path.join(agentFarmConfigRoot(paneDir), 'plugins', 'team')], agentFarmConfigRoot(paneDir));
-    await execFileAsync(run.executable, run.args, { env: run.env });
-    // pane.yaml holds the title only (a stopgap until Agent Farm has a title field, T-83).
-    const pane = await profiles.read('team', 'pane.yaml');
-    expect(pane).toContain('Team lead');
-    expect(pane).not.toContain('Runs one workstream');
-    // An identity without a description gains one; clearing it removes the line.
-    await profiles.save('team', [{ path: 'agents/planner.md', content: '---\nharness: claude\nmodel: claude-opus-5-5\nskills:\n  - plan\n---\n\n# Planner\n' }]);
-    await profiles.setDetails('team', 'planner', { title: '', description: 'Plans the work' });
-    expect(await profiles.read('team', 'agents/planner.md')).toContain('description: "Plans the work"');
-    await profiles.setDetails('team', 'planner', { title: '', description: '' });
-    expect(await profiles.read('team', 'agents/planner.md')).not.toContain('description:');
-    await profiles.setDetails('team', 'planner', { title: '', description: 'Plans' });
+    expect(await profiles.read('team', 'agents/lead.md')).toBe(identity);
+    expect(existsSync(path.join(agentFarmConfigRoot(paneDir), 'plugins', 'team', 'pane.yaml'))).toBe(false);
+    expect(existsSync(path.join(agentFarmConfigRoot(paneDir), 'profile-overrides', 'team', 'lead.json'))).toBe(true);
     // The subagent row of a profile with a title shows that title.
-    const planner = await profiles.setDetails('team', 'planner', { title: 'Planner', description: 'Plans' });
-    const lead = planner.plugin.profiles.find(profile => profile.name === 'lead');
-    expect(outline(lead!.tree)).toContain('  @Planner [team/planner]');
-    expect(planner.plugin.profiles.find(profile => profile.name === 'planner')?.description).toBe('Plans');
+    const planner = await profiles.setDetails('team', 'planner', { title: 'Plan writer', description: 'Plans' });
+    expect(outline(planner.plugin.profiles.find(profile => profile.name === 'lead')!.tree)).toContain('  @Plan writer <launch> [team/planner]');
+    // Clearing both goes back to the plugin's own.
+    const cleared = await profiles.setDetails('team', 'lead', { title: '', description: '' });
+    expect(cleared.plugin.profiles.find(profile => profile.name === 'lead')).toMatchObject({ title: 'Lead', description: 'Runs the work' });
     // A cover file is found, and can be read and saved like the profile's other files.
+    const lead = cleared.plugin.profiles.find(profile => profile.name === 'lead');
     expect(lead!.cover).toBeUndefined();
     await profiles.save('team', [{ path: 'covers/lead.html', content: '<h1>Lead</h1>' }]);
     const after = (await profiles.list()).plugins.find(plugin => plugin.name === 'team');
     expect(after?.profiles.find(profile => profile.name === 'lead')?.cover).toBe('covers/lead.html');
     expect(await profiles.read('team', 'covers/lead.html')).toBe('<h1>Lead</h1>');
     await expect(profiles.read('team', 'covers/../agents/lead.md')).rejects.toMatchObject({ code: 'PROFILE_PATH_INVALID' });
+    await expect(profiles.read('team', 'pane.yaml')).rejects.toMatchObject({ code: 'PROFILE_PATH_INVALID' });
     await expect(profiles.setDetails('team', 'nobody', { title: 'x', description: '' })).rejects.toMatchObject({ code: 'PROFILE_NOT_FOUND' });
   }, 60_000);
 
-  it('keeps a bundled plugin un-Edited when only its title changes', async () => {
+  it('shows a link pinned to a variant with that variant\'s identity and skills, an unpinned one with the default\'s (review F-5)', async () => {
+    const paneDir = tempDir();
+    await installFixture(paneDir, 'pin', {
+      'profiles/lead.yaml': 'agent: lead\n',
+      'agents/lead.md': '---\nharness: claude\nmodel: claude-opus-5-5\ndescription: Leads\nsubagents:\n  builder:\n    agent: builder\n    mode: launch\n    variant: codex\n  helper:\n    agent: builder\n    mode: launch\n---\n\n# Lead\n',
+      'agents/builder.yaml': 'variants:\n  claude: { agent: builder-claude }\n  codex: { agent: builder-codex }\ndefault: claude\n',
+      'agents/builder-claude.md': '---\nharness: claude\nmodel: claude-opus-5-5\ndescription: Builds in Claude\nskills:\n  - claude-build\n---\n\n# Builder\n',
+      'agents/builder-codex.md': '---\nharness: codex\nmodel: gpt-6.2-sol\ndescription: Builds in Codex\nskills:\n  - codex-build\n---\n\n# Builder\n',
+      'skills/claude-build/SKILL.md': '---\nname: claude-build\ndescription: Build\n---\n\nBuild.\n',
+      'skills/codex-build/SKILL.md': '---\nname: codex-build\ndescription: Build\n---\n\nBuild.\n',
+    });
+    const lead = (await editor(paneDir).list()).plugins.find(plugin => plugin.name === 'pin')?.profiles.find(profile => profile.name === 'lead');
+    const pinned = findSubagent(lead!.tree, 'builder');
+    expect(pinned).toMatchObject({ identity: 'agents/builder-codex.md', harness: 'codex', variants: ['codex'] });
+    expect(outline(pinned!.children)).toContain('  codex-build/');
+    expect(findSubagent(lead!.tree, 'helper')).toMatchObject({ identity: 'agents/builder-claude.md', harness: 'claude' });
+  }, 60_000);
+
+  it('saves a title and description that start with a dash, and clears them again (review F-7)', async () => {
+    const paneDir = tempDir();
+    await installTeam(paneDir);
+    const profiles = editor(paneDir);
+    const result = await profiles.setDetails('team', 'lead', { title: '-Lead-', description: '- Review changes' });
+    expect(result.plugin.profiles.find(profile => profile.name === 'lead')).toMatchObject({ title: '-Lead-', description: '- Review changes' });
+    const cleared = await profiles.setDetails('team', 'lead', { title: '', description: '' });
+    expect(cleared.plugin.profiles.find(profile => profile.name === 'lead')).toMatchObject({ title: 'Lead', description: 'Runs the work' });
+  }, 60_000);
+
+  it('keeps your title, description and photo of a bundled profile un-Edited and through Pane reinstalling it (J8)', async () => {
     const paneDir = tempDir();
     await installBundledAgentFarm({ paneDir, bundle, log: () => undefined });
     const profiles = editor(paneDir);
-    const first = (await profiles.list()).plugins.find(plugin => plugin.name === 'greenfield')!.profiles[0];
-    // A title alone (pane.yaml) leaves it un-Edited; a new description is an edit of the agent's own file.
-    const result = await profiles.setDetails('greenfield', first.name, { title: 'My business', description: first.description ?? '' });
+    const result = await profiles.setDetails('greenfield', 'orchestrator', { title: 'My orchestrator', description: 'Builds my features.' });
+    await profiles.setPhoto('greenfield/orchestrator', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2"><rect width="2" height="2" fill="#7c3aed"/></svg>');
     expect(result.plugin.edited).toBe(false);
-    const described = await profiles.setDetails('greenfield', first.name, { title: 'My business', description: 'Keeps the tracker current.' });
-    expect(described.plugin.edited).toBe(true);
+    // An update reinstalls greenfield (here, its restore); the edits are Agent Farm's override, which the install never sees.
+    const restored = await profiles.restore('greenfield');
+    expect(restored.plugin.profiles.find(profile => profile.name === 'orchestrator')).toMatchObject({ title: 'My orchestrator', description: 'Builds my features.' });
+    expect((await profiles.photos()).sources['greenfield/orchestrator']).toBe('yours');
+    // New Session's list shows the same title.
+    expect((await listPaneAgentFarmProfiles(paneDir)).profiles.find(entry => entry.ref === 'greenfield/orchestrator')?.title).toBe('My orchestrator');
   }, 240_000);
 
-  it('hides a profile Agent Farm marks `| unlisted`, asking again only when a profile file changes; an older Agent Farm lists everything', async () => {
+  it('asks Agent Farm for the listing again only when a plugin file or an override changed', async () => {
     const paneDir = tempDir();
     await installTeam(paneDir);
     const calls: string[][] = [];
     const run: AgentFarmRunner = async (process) => {
       calls.push(process.args);
-      if (process.args[1] === 'profiles' && process.args[2] === 'list') {
-        return [
-          'team/lead -> lead | plugin team 0.1.0 | claude | claude-opus-5-5 | native default',
-          'team/planner -> planner | plugin team 0.1.0 | claude | claude-opus-5-5 | native default | unlisted',
-        ].join('\n');
-      }
       return runAgentFarm(process);
     };
-    const withListed = new ProfileEditor({ paneDir, machine: () => 'studio-mac', bundle, run });
-    const team = (await withListed.list()).plugins.find(plugin => plugin.name === 'team');
-    expect(team?.profiles.map(profile => [profile.name, profile.listed])).toEqual([['lead', true], ['planner', false]]);
-    // Asked once; the next list reuses it until a profile file changes.
-    await withListed.list();
-    const lists = () => calls.filter(args => args[1] === 'profiles' && args[2] === 'list').length;
+    const counted = new ProfileEditor({ paneDir, machine: () => 'studio-mac', bundle, run });
+    const lists = () => calls.filter(args => args.includes('list') && args.includes('--json')).length;
+    await counted.list();
+    await counted.list();
     expect(lists()).toBe(1);
     writeFileSync(path.join(agentFarmConfigRoot(paneDir), 'plugins', 'team', 'profiles', 'extra.yaml'), 'agent: lead\n');
-    await withListed.list();
+    expect((await counted.list()).plugins.find(plugin => plugin.name === 'team')?.profiles.map(profile => profile.name)).toContain('extra');
     expect(lists()).toBe(2);
-    // The bundled Agent Farm doesn't print `unlisted` yet: every profile is listed.
-    const old = (await editor(paneDir).list()).plugins.find(plugin => plugin.name === 'team');
-    expect(old?.profiles.every(profile => profile.listed)).toBe(true);
+    await counted.setDetails('team', 'lead', { title: 'Renamed', description: 'Runs the work' });
+    expect(lists()).toBe(3);
   }, 60_000);
 });
 

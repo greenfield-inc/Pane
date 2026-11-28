@@ -6,7 +6,7 @@ import { fileKey, useProfilesStore } from '../../stores/profilesStore';
 import { profileDisplayName } from '../../utils/profileAvatar';
 import { MarkdownPreview } from '../MarkdownPreview';
 import { ProfileAvatar } from './ProfileAvatar';
-import { coverFacts, sandboxedHtml, splitFrontMatter } from './profilePreview';
+import { LINK_MODE_TEXT, coverFacts, sandboxedHtml, splitFrontMatter, subagentLabel, subagentState, variantsText } from './profilePreview';
 
 /**
  * The profile page's previews (T-63, build-6 feedback items 3 and 5): an HTML file as a page in a
@@ -21,10 +21,20 @@ function themeCss(): string {
   return `html{background:${token('--color-bg-primary')};color:${token('--color-text-primary')};font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{margin:24px 32px}a{color:${token('--color-interactive')}}`;
 }
 
-/** An HTML file as a page: no scripts (the frame's sandbox), nothing from the network (its policy). */
-export function HtmlPage({ html, title }: { html: string; title: string }) {
+/**
+ * An HTML file as a page: no scripts (the frame's sandbox), nothing from the network (its policy).
+ * A linked agent's custom cover shows how it runs above the page, as a generated cover does (F-8).
+ */
+export function HtmlPage({ html, title, subagent }: { html: string; title: string; subagent?: ProfileSubagentNode }) {
   const page = useMemo(() => sandboxedHtml(html, themeCss()), [html]);
-  return <iframe title={title} sandbox="" srcDoc={page} className="min-h-0 w-full flex-1 border-0" data-testid="profiles-html-preview" />;
+  const frame = <iframe title={title} sandbox="" srcDoc={page} className="min-h-0 w-full flex-1 border-0" data-testid="profiles-html-preview" />;
+  if (!subagent) return frame;
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="shrink-0 border-b border-border-primary px-8 pb-4 pt-2"><LinkedAgentFacts subagent={subagent} /></div>
+      {frame}
+    </div>
+  );
 }
 
 /** YAML (or front-matter) as data, parsed in main; undefined while it is read. */
@@ -149,6 +159,32 @@ function CoverSection({ title, children }: { title: string; children: ReactNode 
   );
 }
 
+/** How a linked agent runs: its link and mode, a link that doesn't resolve, loops back or is `any`, and its command. */
+function LinkedAgentFacts({ subagent }: { subagent: ProfileSubagentNode }) {
+  const state = subagentState(subagent);
+  return (
+    <>
+      <p className="mt-3 text-[12.5px] text-text-tertiary" data-testid="profiles-cover-link">
+        {subagent.any ? `${subagent.alias} · any agent in ${subagent.agent}` : `${subagent.alias} · ${subagent.agent}`} · {LINK_MODE_TEXT[subagent.mode].toLowerCase()}
+      </p>
+      {state === 'error' && (
+        <p role="alert" className="mt-3 text-[13px] text-status-warning" data-testid="profiles-cover-error">Agent Farm couldn’t resolve this link: {subagent.error}</p>
+      )}
+      {state === 'cycle' && (
+        <p className="mt-3 text-[13px] text-text-secondary" data-testid="profiles-cover-cycle">↻ This agent is already above on this path, so its files and links show there.</p>
+      )}
+      {state === 'any' && (
+        <p className="mt-3 text-[13px] text-text-secondary" data-testid="profiles-cover-any">Its parent may start any agent in {subagent.agent}.</p>
+      )}
+      {subagent.command && (
+        <CoverSection title="Run it on its own">
+          <code className="block whitespace-pre-wrap break-all rounded-md border border-border-primary bg-surface-primary px-3 py-2 font-mono text-[12.5px] text-text-primary" data-testid="profiles-cover-command">{subagent.command}</code>
+        </CoverSection>
+      )}
+    </>
+  );
+}
+
 /**
  * The cover Pane makes when a profile or subagent has no cover file: its title, description,
  * agent and model, what its identity says, and its subagents, skills and references.
@@ -160,16 +196,20 @@ export function GeneratedCover({ plugin, profile, subagent, onOpenSubagent }: {
   subagent?: ProfileSubagentNode;
   onOpenSubagent: (id: string) => void;
 }) {
-  const identity = subagent ? subagent.identity : profile.entry;
+  const identity = subagent ? subagent.identity : profile.entry || undefined;
   const text = useFileText(plugin, identity);
   const body = text === undefined ? '' : splitFrontMatter(text).body.trim();
   const tree: ProfileTreeNode[] = subagent ? subagent.children : profile.tree;
   const facts = coverFacts(tree);
-  const title = subagent ? subagent.label : profile.title ?? profileDisplayName(profile.ref);
+  const title = subagent ? subagentLabel(subagent) : profile.title ?? profileDisplayName(profile.ref);
   const description = subagent ? subagent.description : profile.description;
   const harness = subagent ? subagent.harness : profile.harness;
   const model = subagent ? subagent.model : profile.model;
-  const coverName = subagent ? (subagent.profile?.split('/')[1] ?? subagent.agent) : profile.name;
+  const variants = variantsText(subagent ? subagent.variants : profile.variants, agentLabel);
+  // A cover file belongs to an agent of this plugin (an `any` link or another plugin's agent has none here).
+  const coverName = subagent ? (subagent.profile?.split('/')[1] ?? (subagent.identity ? subagent.agent.split('/').pop() : undefined)) : profile.name;
+  const state = subagent ? subagentState(subagent) : 'agent';
+  const runs = [variants ?? (harness ? agentLabel(harness) : undefined), model].filter(Boolean).join(' · ');
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6" data-testid="profiles-generated-cover">
       <div className="flex items-center gap-4">
@@ -177,12 +217,15 @@ export function GeneratedCover({ plugin, profile, subagent, onOpenSubagent }: {
         <div className="min-w-0">
           <h2 className="text-[22px] font-semibold leading-tight text-text-primary">{title}</h2>
           {description && <p className="mt-0.5 text-[14px] text-text-secondary">{description}</p>}
-          <p className="mt-0.5 text-[12.5px] text-text-tertiary">{agentLabel(harness)}{model ? ` · ${model}` : ''}</p>
+          {runs && <p className="mt-0.5 text-[12.5px] text-text-tertiary">{runs}</p>}
         </div>
       </div>
-      <p className="mt-3 text-[12px] text-text-tertiary">
-        Generated from the {subagent ? 'subagent' : 'profile'}’s title, description, identity and subagents. Add covers/{coverName}.html to replace it.
-      </p>
+      {subagent && <LinkedAgentFacts subagent={subagent} />}
+      {state === 'agent' && (
+        <p className="mt-3 text-[12px] text-text-tertiary">
+          Generated from the {subagent ? 'agent' : 'profile'}’s title, description, identity and subagents.{coverName ? ` Add covers/${coverName}.html to replace it.` : ''}
+        </p>
+      )}
       {body && (
         <CoverSection title="What it does">
           <MarkdownPreview content={body} />

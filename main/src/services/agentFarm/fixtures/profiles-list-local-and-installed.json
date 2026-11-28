@@ -1,0 +1,556 @@
+{
+  "schema": 1,
+  "profiles": [
+    {
+      "ref": "mine",
+      "name": "mine",
+      "plugin": null,
+      "version": null,
+      "title": "mine",
+      "description": "A local one",
+      "photo": null,
+      "sources": {
+        "title": "default",
+        "description": "default",
+        "photo": "default"
+      },
+      "editable": {
+        "via": "file",
+        "file": "/config-root/profiles/mine.yaml"
+      },
+      "variants": null,
+      "default": null,
+      "agent": "mine",
+      "harness": "claude",
+      "model": {
+        "name": "claude-opus-5-5"
+      },
+      "command": "agent-farm run mine",
+      "tree": []
+    },
+    {
+      "ref": "greenfield/seo",
+      "name": "seo",
+      "plugin": "greenfield",
+      "version": "0.1.0",
+      "title": "SEO",
+      "description": "The search and AI-discovery loop for one product. Measures what shipped, ranks quick wins, writes and reviews pages through its SEO team.",
+      "photo": "<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+      "sources": {
+        "title": "plugin",
+        "description": "plugin",
+        "photo": "plugin"
+      },
+      "editable": {
+        "via": "override",
+        "file": "/config-root/plugins/greenfield/profiles/seo.yaml"
+      },
+      "variants": {
+        "claude": {
+          "agent": "greenfield/seo",
+          "harness": "claude",
+          "model": {
+            "name": "claude-opus-5-5",
+            "reasoning": "medium"
+          }
+        }
+      },
+      "default": "claude",
+      "command": "agent-farm run greenfield/seo",
+      "tree": [
+        {
+          "alias": "advisor",
+          "agent": "greenfield/advisor",
+          "mode": "process",
+          "description": "Answer one short question from an agent that is stuck, about to deviate from its plan, or about to declare risky work done.",
+          "command": "agent-farm run greenfield/advisor --agent-only",
+          "children": []
+        },
+        {
+          "alias": "seo-investigator",
+          "agent": "greenfield/seo-investigator",
+          "mode": "launch",
+          "command": "agent-farm run greenfield/seo-investigator --agent-only",
+          "description": "Investigates one unexplained drop, read-only.",
+          "children": [
+            {
+              "alias": "evidence-gatherer",
+              "agent": "greenfield/investigator",
+              "mode": "native",
+              "description": "Gather evidence for one question. Reproduce, trace code, collect logs, and name failing tests, with file references.",
+              "children": []
+            },
+            {
+              "alias": "researcher",
+              "agent": "greenfield/researcher",
+              "mode": "native",
+              "description": "Answer one question the codebase cannot, from outside sources, with citations. Never recommends a design.",
+              "children": []
+            },
+            {
+              "alias": "cold-reader",
+              "agent": "greenfield/cold-reader",
+              "mode": "native",
+              "description": "Review an artifact with fresh context and report confusion, omissions, or contradictions.",
+              "children": []
+            }
+          ]
+        },
+        {
+          "alias": "seo-measurer",
+          "agent": "greenfield/seo-measurer",
+          "mode": "launch",
+          "command": "agent-farm run greenfield/seo-measurer --agent-only",
+          "description": "Measures what shipped: read-backs, deep dives, agent discovery.",
+          "children": [
+            {
+              "alias": "evidence-gatherer",
+              "agent": "greenfield/investigator",
+              "mode": "native",
+              "description": "Gather evidence for one question. Reproduce, trace code, collect logs, and name failing tests, with file references.",
+              "children": []
+            },
+            {
+              "alias": "cold-reader",
+              "agent": "greenfield/cold-reader",
+              "mode": "native",
+              "description": "Review an artifact with fresh context and report confusion, omissions, or contradictions.",
+              "children": []
+            }
+          ]
+        },
+        {
+          "alias": "seo-strategist",
+          "agent": "greenfield/seo-strategist",
+          "mode": "launch",
+          "command": "agent-farm run greenfield/seo-strategist --agent-only",
+          "description": "The SEO planner: ranked page, briefs, cover sheets.",
+          "children": [
+            {
+              "alias": "evidence-gatherer",
+              "agent": "greenfield/investigator",
+              "mode": "native",
+              "description": "Gather evidence for one question. Reproduce, trace code, collect logs, and name failing tests, with file references.",
+              "children": []
+            },
+            {
+              "alias": "researcher",
+              "agent": "greenfield/researcher",
+              "mode": "native",
+              "description": "Answer one question the codebase cannot, from outside sources, with citations. Never recommends a design.",
+              "children": []
+            },
+            {
+              "alias": "cold-reader",
+              "agent": "greenfield/cold-reader",
+              "mode": "native",
+              "description": "Review an artifact with fresh context and report confusion, omissions, or contradictions.",
+              "children": []
+            },
+            {
+              "alias": "seo-writer",
+              "agent": "greenfield/seo-writer",
+              "mode": "launch",
+              "command": "agent-farm run greenfield/seo-writer --agent-only",
+              "description": "The SEO implementer: builds one picked brief into a draft PR.",
+              "children": [
+                {
+                  "alias": "explorer",
+                  "agent": "greenfield/codebase-explorer",
+                  "mode": "native",
+                  "description": "Inspect the repository and return facts with file references.",
+                  "children": []
+                },
+                {
+                  "alias": "cold-reader",
+                  "agent": "greenfield/cold-reader",
+                  "mode": "native",
+                  "description": "Review an artifact with fresh context and report confusion, omissions, or contradictions.",
+                  "children": []
+                },
+                {
+                  "alias": "qa-and-verify",
+                  "agent": "greenfield/pr-qa",
+                  "mode": "native",
+                  "description": "Run the authorized end-to-end PR QA and report checks, screenshots, and unresolved failures.",
+                  "children": []
+                },
+                {
+                  "alias": "second-opinion",
+                  "agent": "greenfield/pr-reviewer",
+                  "mode": "process",
+                  "description": "Review the current PR using the bundled review skill and CRITERIA.md.",
+                  "command": "agent-farm run greenfield/pr-reviewer --agent-only",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "alias": "seo-writer",
+          "agent": "greenfield/seo-writer",
+          "mode": "launch",
+          "command": "agent-farm run greenfield/seo-writer --agent-only",
+          "description": "The SEO implementer: builds one picked brief into a draft PR.",
+          "children": [
+            {
+              "alias": "explorer",
+              "agent": "greenfield/codebase-explorer",
+              "mode": "native",
+              "description": "Inspect the repository and return facts with file references.",
+              "children": []
+            },
+            {
+              "alias": "cold-reader",
+              "agent": "greenfield/cold-reader",
+              "mode": "native",
+              "description": "Review an artifact with fresh context and report confusion, omissions, or contradictions.",
+              "children": []
+            },
+            {
+              "alias": "qa-and-verify",
+              "agent": "greenfield/pr-qa",
+              "mode": "native",
+              "description": "Run the authorized end-to-end PR QA and report checks, screenshots, and unresolved failures.",
+              "children": []
+            },
+            {
+              "alias": "second-opinion",
+              "agent": "greenfield/pr-reviewer",
+              "mode": "process",
+              "description": "Review the current PR using the bundled review skill and CRITERIA.md.",
+              "command": "agent-farm run greenfield/pr-reviewer --agent-only",
+              "children": []
+            }
+          ]
+        },
+        {
+          "alias": "seo-reviewer",
+          "agent": "greenfield/seo-reviewer",
+          "mode": "launch",
+          "command": "agent-farm run greenfield/seo-reviewer --agent-only",
+          "description": "The SEO reviewer: claims check and cold read of every page and writer PR.",
+          "children": [
+            {
+              "alias": "codebase-explorer",
+              "agent": "greenfield/codebase-explorer",
+              "mode": "process",
+              "description": "Inspect the repository and return facts with file references.",
+              "command": "agent-farm run greenfield/codebase-explorer --agent-only",
+              "children": []
+            },
+            {
+              "alias": "cold-reader",
+              "agent": "greenfield/cold-reader",
+              "mode": "native",
+              "description": "Review an artifact with fresh context and report confusion, omissions, or contradictions.",
+              "children": []
+            },
+            {
+              "alias": "seo-strategist",
+              "agent": "greenfield/seo-strategist",
+              "mode": "launch",
+              "command": "agent-farm run greenfield/seo-strategist --agent-only",
+              "description": "The SEO planner: ranked page, briefs, cover sheets.",
+              "children": [
+                {
+                  "alias": "evidence-gatherer",
+                  "agent": "greenfield/investigator",
+                  "mode": "native",
+                  "description": "Gather evidence for one question. Reproduce, trace code, collect logs, and name failing tests, with file references.",
+                  "children": []
+                },
+                {
+                  "alias": "researcher",
+                  "agent": "greenfield/researcher",
+                  "mode": "native",
+                  "description": "Answer one question the codebase cannot, from outside sources, with citations. Never recommends a design.",
+                  "children": []
+                },
+                {
+                  "alias": "cold-reader",
+                  "agent": "greenfield/cold-reader",
+                  "mode": "native",
+                  "description": "Review an artifact with fresh context and report confusion, omissions, or contradictions.",
+                  "children": []
+                },
+                {
+                  "alias": "seo-writer",
+                  "agent": "greenfield/seo-writer",
+                  "mode": "launch",
+                  "command": "agent-farm run greenfield/seo-writer --agent-only",
+                  "description": "The SEO implementer: builds one picked brief into a draft PR.",
+                  "children": [
+                    {
+                      "alias": "explorer",
+                      "agent": "greenfield/codebase-explorer",
+                      "mode": "native",
+                      "description": "Inspect the repository and return facts with file references.",
+                      "children": []
+                    },
+                    {
+                      "alias": "cold-reader",
+                      "agent": "greenfield/cold-reader",
+                      "mode": "native",
+                      "description": "Review an artifact with fresh context and report confusion, omissions, or contradictions.",
+                      "children": []
+                    },
+                    {
+                      "alias": "qa-and-verify",
+                      "agent": "greenfield/pr-qa",
+                      "mode": "native",
+                      "description": "Run the authorized end-to-end PR QA and report checks, screenshots, and unresolved failures.",
+                      "children": []
+                    },
+                    {
+                      "alias": "second-opinion",
+                      "agent": "greenfield/pr-reviewer",
+                      "mode": "process",
+                      "description": "Review the current PR using the bundled review skill and CRITERIA.md.",
+                      "command": "agent-farm run greenfield/pr-reviewer --agent-only",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "alias": "seo-writer",
+              "agent": "greenfield/seo-writer",
+              "mode": "launch",
+              "command": "agent-farm run greenfield/seo-writer --agent-only",
+              "description": "The SEO implementer: builds one picked brief into a draft PR.",
+              "children": [
+                {
+                  "alias": "explorer",
+                  "agent": "greenfield/codebase-explorer",
+                  "mode": "native",
+                  "description": "Inspect the repository and return facts with file references.",
+                  "children": []
+                },
+                {
+                  "alias": "cold-reader",
+                  "agent": "greenfield/cold-reader",
+                  "mode": "native",
+                  "description": "Review an artifact with fresh context and report confusion, omissions, or contradictions.",
+                  "children": []
+                },
+                {
+                  "alias": "qa-and-verify",
+                  "agent": "greenfield/pr-qa",
+                  "mode": "native",
+                  "description": "Run the authorized end-to-end PR QA and report checks, screenshots, and unresolved failures.",
+                  "children": []
+                },
+                {
+                  "alias": "second-opinion",
+                  "agent": "greenfield/pr-reviewer",
+                  "mode": "process",
+                  "description": "Review the current PR using the bundled review skill and CRITERIA.md.",
+                  "command": "agent-farm run greenfield/pr-reviewer --agent-only",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "alias": "planner",
+          "agent": "greenfield/planner",
+          "mode": "launch",
+          "variants": [
+            "claude",
+            "codex"
+          ],
+          "default": "claude",
+          "command": "agent-farm run greenfield/planner --agent-only",
+          "description": "Plans: options, the cover sheet, investigations. Writes no code under an orchestrator.",
+          "children": [
+            {
+              "alias": "socrates",
+              "agent": "greenfield/socrates",
+              "mode": "native",
+              "description": "Challenge a brief and its options before the person picks. Argues for doing less. Review only.",
+              "children": []
+            },
+            {
+              "alias": "investigator",
+              "agent": "greenfield/investigator",
+              "mode": "native",
+              "description": "Gather evidence for one question. Reproduce, trace code, collect logs, and name failing tests, with file references.",
+              "children": []
+            },
+            {
+              "alias": "researcher",
+              "agent": "greenfield/researcher",
+              "mode": "native",
+              "description": "Answer one question the codebase cannot, from outside sources, with citations. Never recommends a design.",
+              "children": []
+            }
+          ]
+        },
+        {
+          "alias": "implementer",
+          "agent": "greenfield/implementer",
+          "mode": "launch",
+          "variants": [
+            "claude",
+            "codex"
+          ],
+          "default": "claude",
+          "command": "agent-farm run greenfield/implementer --agent-only",
+          "description": "Builds one approved plan or authorized fix into one PR, at full validation.",
+          "children": [
+            {
+              "alias": "explorer",
+              "agent": "greenfield/codebase-explorer",
+              "mode": "native",
+              "description": "Inspect the repository and return facts with file references.",
+              "children": []
+            },
+            {
+              "alias": "cold-reader",
+              "agent": "greenfield/cold-reader",
+              "mode": "native",
+              "description": "Review an artifact with fresh context and report confusion, omissions, or contradictions.",
+              "children": []
+            },
+            {
+              "alias": "qa-and-verify",
+              "agent": "greenfield/pr-qa",
+              "mode": "process",
+              "description": "Run the authorized end-to-end PR QA and report checks, screenshots, and unresolved failures.",
+              "command": "agent-farm run greenfield/pr-qa --agent-only",
+              "children": []
+            },
+            {
+              "alias": "second-opinion",
+              "agent": "greenfield/pr-reviewer",
+              "mode": "process",
+              "description": "Review the current PR using the bundled review skill and CRITERIA.md.",
+              "command": "agent-farm run greenfield/pr-reviewer --agent-only",
+              "children": []
+            },
+            {
+              "alias": "reviewer",
+              "agent": "greenfield/reviewer",
+              "mode": "launch",
+              "variants": [
+                "claude",
+                "codex"
+              ],
+              "default": "claude",
+              "command": "agent-farm run greenfield/reviewer --agent-only",
+              "description": "Reviews one PR: one COMMENT review, no fixes.",
+              "children": [
+                {
+                  "alias": "codebase-explorer",
+                  "agent": "greenfield/codebase-explorer",
+                  "mode": "process",
+                  "description": "Inspect the repository and return facts with file references.",
+                  "command": "agent-farm run greenfield/codebase-explorer --agent-only",
+                  "children": []
+                },
+                {
+                  "alias": "implementer",
+                  "agent": "greenfield/implementer",
+                  "mode": "launch",
+                  "variants": [
+                    "claude",
+                    "codex"
+                  ],
+                  "default": "claude",
+                  "command": "agent-farm run greenfield/implementer --agent-only",
+                  "description": "Builds one approved plan or authorized fix into one PR, at full validation.",
+                  "cycle": true,
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "alias": "reviewer",
+          "agent": "greenfield/reviewer",
+          "mode": "launch",
+          "variants": [
+            "claude",
+            "codex"
+          ],
+          "default": "claude",
+          "command": "agent-farm run greenfield/reviewer --agent-only",
+          "description": "Reviews one PR: one COMMENT review, no fixes.",
+          "children": [
+            {
+              "alias": "codebase-explorer",
+              "agent": "greenfield/codebase-explorer",
+              "mode": "process",
+              "description": "Inspect the repository and return facts with file references.",
+              "command": "agent-farm run greenfield/codebase-explorer --agent-only",
+              "children": []
+            },
+            {
+              "alias": "implementer",
+              "agent": "greenfield/implementer",
+              "mode": "launch",
+              "variants": [
+                "claude",
+                "codex"
+              ],
+              "default": "claude",
+              "command": "agent-farm run greenfield/implementer --agent-only",
+              "description": "Builds one approved plan or authorized fix into one PR, at full validation.",
+              "children": [
+                {
+                  "alias": "explorer",
+                  "agent": "greenfield/codebase-explorer",
+                  "mode": "native",
+                  "description": "Inspect the repository and return facts with file references.",
+                  "children": []
+                },
+                {
+                  "alias": "cold-reader",
+                  "agent": "greenfield/cold-reader",
+                  "mode": "native",
+                  "description": "Review an artifact with fresh context and report confusion, omissions, or contradictions.",
+                  "children": []
+                },
+                {
+                  "alias": "qa-and-verify",
+                  "agent": "greenfield/pr-qa",
+                  "mode": "process",
+                  "description": "Run the authorized end-to-end PR QA and report checks, screenshots, and unresolved failures.",
+                  "command": "agent-farm run greenfield/pr-qa --agent-only",
+                  "children": []
+                },
+                {
+                  "alias": "second-opinion",
+                  "agent": "greenfield/pr-reviewer",
+                  "mode": "process",
+                  "description": "Review the current PR using the bundled review skill and CRITERIA.md.",
+                  "command": "agent-farm run greenfield/pr-reviewer --agent-only",
+                  "children": []
+                },
+                {
+                  "alias": "reviewer",
+                  "agent": "greenfield/reviewer",
+                  "mode": "launch",
+                  "variants": [
+                    "claude",
+                    "codex"
+                  ],
+                  "default": "claude",
+                  "command": "agent-farm run greenfield/reviewer --agent-only",
+                  "description": "Reviews one PR: one COMMENT review, no fixes.",
+                  "cycle": true,
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProfilePlugin, ProfilesOverview } from '../../../shared/types/profileEditor';
-import { displayedFile, fileKey, useProfilesStore } from './profilesStore';
+import { displayedFile, fileKey, profilePhotoSource, profilePicture, useProfilesStore } from './profilesStore';
 
 function plugin(name: string): ProfilePlugin {
-  return { name, version: '0.1.0', bundled: false, edited: false, files: ['plugin.yaml'], profiles: [{ name, ref: `${name}/${name}`, entry: `agents/${name}.md`, harness: 'claude', listed: true, uses: [], tree: [] }] };
+  return { name, version: '0.1.0', bundled: false, edited: false, files: ['plugin.yaml'], profiles: [{ name, ref: `${name}/${name}`, entry: `agents/${name}.md`, harness: 'claude', tree: [] }] };
 }
 
 /** greenfield/orchestrator with no cover file, so the tab generates its cover; one subagent with no profile. */
@@ -20,16 +20,14 @@ const overview: ProfilesOverview = {
       ref: 'greenfield/orchestrator',
       entry: 'agents/orchestrator.md',
       harness: 'claude',
-      listed: true,
-      uses: ['agents/orchestrator.md'],
-      tree: [{ kind: 'subagent', id: 'helper', alias: 'helper', agent: 'helper', label: 'Helper', harness: 'claude', identity: 'agents/helper.md', children: [] }],
+      tree: [{ kind: 'subagent', id: 'helper', alias: 'helper', agent: 'helper', mode: 'launch', label: 'Helper', harness: 'claude', identity: 'agents/helper.md', children: [] }],
     }],
   }],
 };
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  useProfilesStore.setState({ overview: null, place: { level: 'list' }, saved: {}, drafts: {}, onDisk: {} });
+  useProfilesStore.setState({ overview: null, place: { level: 'list' }, saved: {}, drafts: {}, onDisk: {}, photos: { profiles: {}, sources: {}, titles: {} }, photosLoaded: false });
 });
 
 describe('displayedFile (review F-4)', () => {
@@ -59,6 +57,42 @@ describe('the Profiles poll on a generated cover (review F-4)', () => {
   });
 });
 
+describe('profile photos', () => {
+  const photos = {
+    profiles: { 'greenfield/orchestrator': 'data:image/svg+xml;base64,AA==', 'greenfield/seo': 'data:image/svg+xml;base64,BB==' },
+    sources: { 'greenfield/orchestrator': 'yours' as const, 'greenfield/seo': 'plugin' as const },
+    titles: { 'greenfield/orchestrator': 'Orchestrator', 'greenfield/seo': 'SEO' },
+  };
+
+  it('shows a profile\'s photo, variant or not, and says whether it is yours or the plugin\'s', () => {
+    expect(profilePicture(photos, 'greenfield/orchestrator:codex')).toBe('data:image/svg+xml;base64,AA==');
+    expect(profilePhotoSource(photos, 'greenfield/orchestrator')).toBe('yours');
+    expect(profilePhotoSource(photos, 'greenfield/seo')).toBe('plugin');
+  });
+
+  it('shows initials for a profile with no photo', () => {
+    expect(profilePicture(photos, 'greenfield/business')).toBeUndefined();
+    expect(profilePicture(photos, undefined)).toBeUndefined();
+    expect(profilePhotoSource(photos, 'greenfield/business')).toBe('default');
+  });
+
+  it('sends a photo as the SVG\'s text, then reads the photos again', async () => {
+    const sent: unknown[] = [];
+    vi.stubGlobal('window', { electronAPI: { profiles: {
+      setPhoto: async (...args: unknown[]) => { sent.push(args); return { success: true }; },
+      photos: async () => ({ success: true, data: photos }),
+    } } });
+    await useProfilesStore.getState().setPhoto('greenfield/seo', '<svg viewBox="0 0 1 1"/>');
+    expect(sent).toEqual([['greenfield/seo', '<svg viewBox="0 0 1 1"/>']]);
+    expect(useProfilesStore.getState().photos).toEqual(photos);
+  });
+
+  it('shows Agent Farm\'s reason when it refuses a photo', async () => {
+    vi.stubGlobal('window', { electronAPI: { profiles: { setPhoto: async () => ({ success: false, error: 'The photo has a <script> element. Remove it, then try again.' }) } } });
+    await expect(useProfilesStore.getState().setPhoto('greenfield/seo', '<svg><script/></svg>')).rejects.toThrow('The photo has a <script> element');
+  });
+});
+
 describe('profilesStore refresh', () => {
   it('never undoes a new profile with a list read that started before it (QA round 2)', async () => {
     const before: ProfilesOverview = { machine: 'studio', plugins: [plugin('writer')] };
@@ -76,5 +110,25 @@ describe('profilesStore refresh', () => {
     answerList({ success: true, data: before });
     await refreshing;
     expect(useProfilesStore.getState().overview?.plugins.map(entry => entry.name)).toEqual(['writer', 'labtest']);
+  });
+
+  it('picks up a title or photo set outside the tab, and keeps unchanged photos as they were (F-6)', async () => {
+    const overview: ProfilesOverview = { machine: 'studio', plugins: [plugin('writer')] };
+    let photos = { profiles: {}, sources: {}, titles: { 'writer/writer': 'Writer' } };
+    vi.stubGlobal('window', { electronAPI: {
+      profiles: {
+        list: async () => ({ success: true, data: overview }),
+        photos: async () => ({ success: true, data: photos }),
+      },
+    } });
+    useProfilesStore.setState({ overview, photos, photosLoaded: true });
+    // `agent-farm profiles set` in a terminal: a new title and photo, and the overview reads the same.
+    photos = { profiles: { 'writer/writer': 'data:image/svg+xml;base64,AA==' }, sources: { 'writer/writer': 'yours' }, titles: { 'writer/writer': 'Ghostwriter' } };
+    await useProfilesStore.getState().refresh();
+    expect(useProfilesStore.getState().photos).toEqual(photos);
+    const shown = useProfilesStore.getState().photos;
+    photos = JSON.parse(JSON.stringify(photos));
+    await useProfilesStore.getState().refresh();
+    expect(useProfilesStore.getState().photos).toBe(shown);
   });
 });

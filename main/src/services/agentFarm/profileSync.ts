@@ -46,8 +46,10 @@ const BUNDLED: readonly string[] = BUNDLED_AGENT_FARM_PLUGINS;
 const READ_CHUNK_BYTES = 2 * 1024 * 1024;
 /** An export nobody finished reading is removed after this long. */
 const STALE_TRANSFER_MS = 30 * 60_000;
-const PNG_SIGNATURE = Buffer.from('89504e470d0a1a0a', 'hex');
-const MAX_PHOTO_BYTES = 1024 * 1024;
+/** A display override file Agent Farm's `profiles set` writes: `<profile>.json`, and its photo `<profile>.svg`. */
+const OVERRIDE_FILE = /^[a-z][a-z0-9_-]*\.(json|svg)$/;
+/** Largest override file sync carries; Agent Farm takes a photo of at most 64 KB. */
+const MAX_OVERRIDE_BYTES = 64 * 1024;
 const TRANSFER_ID = /^[A-Za-z0-9-]{8,64}$/;
 /** Largest pack Pane sends or takes (review F-10); greenfield, the largest shipped plugin, packs to about 2 MB. */
 const MAX_PACK_BYTES = 64 * 1024 * 1024;
@@ -55,9 +57,9 @@ const MAX_PACK_BYTES = 64 * 1024 * 1024;
 const SECTIONS = ['profiles', 'agents', 'skills', 'instructions', 'references'];
 /**
  * Pane's own files in a plugin, which Agent Farm ignores and its install doesn't copy: the Profiles
- * tab's pane.yaml (titles) and cover pages. Sync carries them itself and writes them after the install.
+ * tab's cover pages. Sync carries them itself and writes them after the install.
  */
-const PANE_FILE = /^(pane\.yaml|covers\/[a-z][a-z0-9_-]*\.(html|md))$/;
+const PANE_FILE = /^covers\/[a-z][a-z0-9_-]*\.(html|md)$/;
 /** Written by a bundled reinstall while it runs (bundledAgentFarm.ts); a failed one is cleared on rollback. */
 const INSTALLING_FILE = 'pane-installing.json';
 const receiptSchema = boundary.object({ name: boundary.string, layout: boundary.optional(boundary.number) });
@@ -67,35 +69,36 @@ function notThere(error: NodeJS.ErrnoException | null | undefined): boolean {
   return error?.code === 'ENOENT' || error?.code === 'ENOTDIR';
 }
 
-/** `plugin--profile.png` split into its two names; undefined for any other name, or an ambiguous one (review F-9). */
-function photoNames(entry: string): [string, string] | undefined {
-  if (!entry.endsWith('.png')) return undefined;
-  const parts = entry.slice(0, -4).split('--');
-  if (parts.length !== 2 || !PROFILE_NAME_PATTERN.test(parts[0]) || !PROFILE_NAME_PATTERN.test(parts[1])) return undefined;
-  return [parts[0], parts[1]];
-}
-
 function linkRefused(what: string): PaneError {
   return new PaneError('PROFILE_PATH_INVALID', `${what} is a link, which Pane doesn't follow, so it wasn't synced.`, 'Replace the link with the folder itself, then sync again.');
 }
 
-/** A plugin's newest save, as it travels: its files (for `saved`), its photos and picture, base64. */
+/** Whether an override file is one sync carries: an Agent Farm override name, of at most 64 KiB. */
+function isOverride(name: string, bytes: Buffer): boolean {
+  return OVERRIDE_FILE.test(name) && bytes.length <= MAX_OVERRIDE_BYTES;
+}
+
+/** Whether an override's content is one Agent Farm reads: a `.json` must hold a JSON object (review F-4). */
+function overrideReadable(name: string, bytes: Buffer): boolean {
+  if (!name.endsWith('.json')) return true;
+  try { return decodeOptionalBoundary(JSON.parse(bytes.toString('utf8')), boundary.jsonObject) !== undefined; }
+  catch { return false; }
+}
+
+/** A plugin's newest save, as it travels: its files (for `saved`) and your display overrides of its profiles, base64. */
 interface ProfilePack {
   plugin: string;
   record: ProfileSyncRecord;
   files: Record<string, string>;
-  /** Your photos, by profile name. */
-  photos: Record<string, string>;
-  /** The plugin's own picture, `avatar.png` at its root. */
-  picture?: string;
+  /** The files of `profile-overrides/<plugin>/` (titles, descriptions and photos you set), by file name. */
+  overrides: Record<string, string>;
 }
 
 const packSchema = boundary.object({
   plugin: boundary.nonEmptyString,
   record: profileSyncRecordSchema,
   files: boundary.record(boundary.string),
-  photos: boundary.record(boundary.string),
-  picture: boundary.optional(boundary.string),
+  overrides: boundary.record(boundary.string),
 });
 
 const profileSyncReadRequestSchema = boundary.object({ transferId: boundary.nonEmptyString, offset: boundary.refine(boundary.number, value => Number.isInteger(value) && value >= 0, 'expected a byte offset') });
@@ -125,10 +128,10 @@ function manifestWithoutPack(content: string): JsonObject | undefined {
 
 /**
  * A plugin's sync hash: what a computer must hold for the save to be there. For `saved`, each file
- * Agent Farm reads (plugin.yaml as its data, without pack checksums), the plugin's picture and your
- * photos; for `pane`, Pane's own version is each computer's own, so only your photos.
+ * Agent Farm reads (plugin.yaml as its data, without pack checksums) and your display overrides;
+ * for `pane`, Pane's own version is each computer's own, so only your display overrides.
  */
-export function packHash(state: ProfileSyncRecordState, files: Record<string, Buffer>, photos: Record<string, Buffer>, picture: Buffer | undefined): string {
+export function packHash(state: ProfileSyncRecordState, files: Record<string, Buffer>, overrides: Record<string, Buffer>): string {
   if (state === 'deleted') return '';
   const lines: string[] = [];
   if (state === 'saved') {
@@ -136,9 +139,8 @@ export function packHash(state: ProfileSyncRecordState, files: Record<string, Bu
       const manifest = file === 'plugin.yaml' ? manifestWithoutPack(content.toString('utf8')) : undefined;
       lines.push(`file:${file}\t${manifest ? sha256(stableJson(manifest)) : sha256(content)}`);
     }
-    if (picture) lines.push(`picture\t${sha256(picture)}`);
   }
-  for (const [profile, content] of Object.entries(photos)) lines.push(`photo:${profile}\t${sha256(content)}`);
+  for (const [name, content] of Object.entries(overrides)) lines.push(`override:${name}\t${sha256(content)}`);
   return sha256(`${state}\n${lines.sort().join('\n')}`);
 }
 
@@ -147,10 +149,6 @@ function packManifest(manifest: string, files: Record<string, Buffer>): string {
   const data = manifestWithoutPack(manifest) ?? {};
   const checksums = Object.fromEntries(Object.entries(files).filter(([file]) => SECTIONS.includes(file.split('/')[0])).sort(([a], [b]) => a.localeCompare(b)).map(([file, content]) => [file, sha256(content)]));
   return yaml.dump({ ...data, checksums }, { lineWidth: -1 });
-}
-
-function isPng(bytes: Buffer): boolean {
-  return bytes.length <= MAX_PHOTO_BYTES && bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE);
 }
 
 /**
@@ -209,7 +207,7 @@ async function present(file: string): Promise<boolean> {
  * plugins; packs of its newest saves for another computer to read; and arriving packs, checked
  * (Session move's SHA-256 transfer, then `agent-farm plugin install`, which refuses a pack whose
  * files don't match its checksums) and installed. Every file it writes is inside
- * `<PANE_DIR>/agent-farm/{plugins,drafts,avatars}`, besides sync.json and Agent Farm's own receipts.
+ * `<PANE_DIR>/agent-farm/{plugins,drafts,profile-overrides}`, besides sync.json and Agent Farm's own receipts.
  */
 export class ProfileSyncHost {
   private readonly configRoot: string;
@@ -239,26 +237,58 @@ export class ProfileSyncHost {
     return path.join(this.configRoot, 'plugins', name);
   }
 
-  private avatarsFolder(): string {
-    return path.join(this.configRoot, 'avatars');
-  }
-
-  /** The photo files in avatars/, read once per refresh; throws when the folder can't be read or is a link. */
-  private async avatarEntries(): Promise<string[]> {
-    const folder = this.avatarsFolder();
-    const stat = await fs.lstat(folder).catch((error: NodeJS.ErrnoException) => { if (notThere(error)) return undefined; throw error; });
-    if (!stat) return [];
-    if (!stat.isDirectory()) throw linkRefused('The avatars folder');
-    return fs.readdir(folder);
+  /** Where Agent Farm's `profiles set` keeps your display overrides of a plugin's profiles. */
+  private overridesFolder(plugin: string): string {
+    return path.join(this.configRoot, 'profile-overrides', plugin);
   }
 
   /**
-   * The plugin's files, picture and photos here, as they would travel. Strict: any file or folder
-   * that can't be read throws, so a failed read is never taken for a missing file (review F-1); a
-   * plugin, section or avatars folder that is a link is refused, so nothing outside Pane's Agent
-   * Farm folder is read (F-5). Links inside a section are left out, as the Profiles tab leaves them out.
+   * Whether `profile-overrides/<plugin>/` is there; throws when it, or `profile-overrides` itself,
+   * is a link (review F-5) or can't be read, so a failed read is never taken for no overrides.
    */
-  private async contents(name: string, avatars?: string[]): Promise<{ files: Record<string, Buffer>; photos: Record<string, Buffer>; picture?: Buffer; changedAt: number }> {
+  private async overridesThere(plugin: string): Promise<boolean> {
+    const lstat = (folder: string) => fs.lstat(folder).catch((error: NodeJS.ErrnoException) => { if (notThere(error)) return undefined; throw error; });
+    const parent = await lstat(path.dirname(this.overridesFolder(plugin)));
+    if (!parent) return false;
+    if (!parent.isDirectory()) throw linkRefused('The profile-overrides folder');
+    const folder = await lstat(this.overridesFolder(plugin));
+    if (!folder) return false;
+    if (!folder.isDirectory()) throw linkRefused(`profile-overrides/${plugin}`);
+    return true;
+  }
+
+  /**
+   * Your display overrides of a plugin here, by file name, with the newest one's time. Only regular
+   * files with an override name of at most 64 KiB are read; anything else (a link, a folder, another
+   * name, a larger file) is left out and not synced.
+   */
+  private async readOverrides(plugin: string): Promise<{ overrides: Record<string, Buffer>; changedAt: number }> {
+    const overrides: Record<string, Buffer> = {};
+    let changedAt = 0;
+    if (!await this.overridesThere(plugin)) return { overrides, changedAt };
+    const folder = this.overridesFolder(plugin);
+    for (const child of await fs.readdir(folder, { withFileTypes: true })) {
+      if (!child.isFile() || !OVERRIDE_FILE.test(child.name)) continue;
+      const file = path.join(folder, child.name);
+      const stat = await fs.lstat(file);
+      if (!stat.isFile() || stat.size > MAX_OVERRIDE_BYTES) continue;
+      const bytes = await fs.readFile(file);
+      if (!isOverride(child.name, bytes)) continue;
+      // Not skipped: leaving it out would read as a removal and delete the working copy elsewhere.
+      if (!overrideReadable(child.name, bytes)) throw new PaneError('PROFILE_OVERRIDE_INVALID', `profile-overrides/${plugin}/${child.name} isn't valid JSON, so ${plugin} wasn't synced from this computer.`, `Fix or delete that file (or set the profile's title and description again in Pane), then sync again.`);
+      overrides[child.name] = bytes;
+      changedAt = Math.max(changedAt, stat.mtimeMs);
+    }
+    return { overrides, changedAt };
+  }
+
+  /**
+   * The plugin's files and your display overrides here, as they would travel. Strict: any file or
+   * folder that can't be read throws, so a failed read is never taken for a missing file (review
+   * F-1); a plugin, section or overrides folder that is a link is refused, so nothing outside Pane's
+   * Agent Farm folder is read (F-5). Links inside a section are left out, as the Profiles tab leaves them out.
+   */
+  private async contents(name: string): Promise<{ files: Record<string, Buffer>; overrides: Record<string, Buffer>; changedAt: number }> {
     this.options.onRead?.('files', name);
     const root = this.pluginRoot(name);
     if (!(await fs.lstat(root)).isDirectory()) throw linkRefused(`plugins/${name}`);
@@ -282,11 +312,9 @@ export class ProfileSyncHost {
       if (!stat.isDirectory()) throw linkRefused(`plugins/${name}/${section}`);
       await visit(folder);
     }
-    for (const file of ['plugin.yaml', 'pane.yaml']) {
-      const full = path.join(root, file);
-      const stat = await fs.lstat(full).catch((error: NodeJS.ErrnoException) => { if (notThere(error)) return undefined; throw error; });
-      if (stat?.isFile()) await read(full, file);
-    }
+    const manifest = path.join(root, 'plugin.yaml');
+    const manifestStat = await fs.lstat(manifest).catch((error: NodeJS.ErrnoException) => { if (notThere(error)) return undefined; throw error; });
+    if (manifestStat?.isFile()) await read(manifest, 'plugin.yaml');
     const covers = path.join(root, 'covers');
     const coversStat = await fs.lstat(covers).catch((error: NodeJS.ErrnoException) => { if (notThere(error)) return undefined; throw error; });
     if (coversStat && !coversStat.isDirectory()) throw linkRefused(`plugins/${name}/covers`);
@@ -295,21 +323,8 @@ export class ProfileSyncHost {
         if (child.isFile() && PANE_FILE.test(`covers/${child.name}`)) await read(path.join(covers, child.name), `covers/${child.name}`);
       }
     }
-    const photos: Record<string, Buffer> = {};
-    for (const entry of avatars ?? await this.avatarEntries()) {
-      const names = photoNames(entry);
-      if (names?.[0] !== name) continue;
-      const file = path.join(this.avatarsFolder(), entry);
-      if (!(await fs.lstat(file)).isFile()) continue;
-      const bytes = await fs.readFile(file);
-      if (!isPng(bytes)) continue;
-      photos[names[1]] = bytes;
-      changedAt = Math.max(changedAt, (await fs.stat(file)).mtimeMs);
-    }
-    const pictureFile = path.join(root, 'avatar.png');
-    const pictureStat = await fs.lstat(pictureFile).catch((error: NodeJS.ErrnoException) => { if (notThere(error)) return undefined; throw error; });
-    const picture = pictureStat?.isFile() ? await fs.readFile(pictureFile) : undefined;
-    return { files, photos, picture: picture && isPng(picture) ? picture : undefined, changedAt: Math.floor(changedAt) };
+    const { overrides, changedAt: overridesChangedAt } = await this.readOverrides(name);
+    return { files, overrides, changedAt: Math.floor(Math.max(changedAt, overridesChangedAt)) };
   }
 
   /**
@@ -359,19 +374,18 @@ export class ProfileSyncHost {
   }
 
   /**
-   * Whether a Pane plugin has a title (pane.yaml) or a cover page here. Pane's plugins ship neither,
-   * and Agent Farm's receipt doesn't cover them, so one is an edit of yours (review F-13).
+   * Whether a Pane plugin has a cover page here. Pane's plugins ship none, and Agent Farm's receipt
+   * doesn't cover them, so one is an edit of yours (review F-13). Titles are display overrides (T-83).
    */
   private async hasPaneFiles(name: string): Promise<boolean> {
     const root = this.pluginRoot(name);
-    if ((await fs.lstat(path.join(root, 'pane.yaml')).catch(() => undefined))?.isFile()) return true;
     const covers = await fs.readdir(path.join(root, 'covers'), { withFileTypes: true }).catch(() => []);
     return covers.some(child => child.isFile() && PANE_FILE.test(`covers/${child.name}`));
   }
 
   /**
    * Brings sync.json up to date with the plugins here: a plugin whose files changed since its record
-   * (a save, Restore, a photo, or an edit outside Pane) gets a new record; one with no record yet
+   * (a save, Restore, a title, description or photo, or an edit outside Pane) gets a new record; one with no record yet
    * gets one dated by its newest file; and a plugin of yours whose Agent Farm receipt is gone (removed
    * with `agent-farm plugin uninstall`) is recorded as deleted. A Pane plugin is never recorded as
    * deleted: a missing one is a Pane install that hasn't finished.
@@ -388,13 +402,6 @@ export class ProfileSyncHost {
       console.warn('[ProfileSync] Pane couldn\'t read Agent Farm\'s receipts folder, so no profile records were changed this time.');
       return data;
     }
-    // One listing of names; only the plugin's own photos are then looked at or read (review F-4).
-    let avatars: string[];
-    try { avatars = await this.avatarEntries(); }
-    catch (error) {
-      console.warn(`[ProfileSync] Pane couldn't read the avatars folder (${reasonOf(error)}), so no profile records were changed this time.`);
-      return data;
-    }
     const wanted = (name: string) => !only || only.has(name);
     const names = receipts.names.filter(wanted);
     const machine = this.options.machine();
@@ -403,16 +410,16 @@ export class ProfileSyncHost {
       const record = data.plugins[name];
       const state: ProfileSyncRecordState = await this.isYours(name, record) ? 'saved' : 'pane';
       let contents: Awaited<ReturnType<ProfileSyncHost['contents']>>;
-      try { contents = await this.contents(name, avatars); }
+      try { contents = await this.contents(name); }
       catch (error) {
         console.warn(`[ProfileSync] Pane couldn't read ${name} (${reasonOf(error)}), so its record was left as it was.`);
         receipts.unsure.add(name);
         continue;
       }
-      const hash = packHash(state, contents.files, contents.photos, contents.picture);
+      const hash = packHash(state, contents.files, contents.overrides);
       if (!record) {
-        // Pane's own plugins sync only once you change them (A-3).
-        if (state === 'pane' && !Object.keys(contents.photos).length) continue;
+        // Pane's own plugins sync only once you change them or their display (A-3).
+        if (state === 'pane' && !Object.keys(contents.overrides).length) continue;
         data.plugins[name] = { state, hash, savedAt: contents.changedAt || this.now(), machine };
         changed = true;
       } else if (record.state === 'deleted' || record.hash !== hash || record.state !== state) {
@@ -460,8 +467,8 @@ export class ProfileSyncHost {
   }
 
   /**
-   * A change the Profiles tab makes to `plugin` (a save, new file, Restore, a photo), run under the
-   * same lock as an arriving save and recorded before the lock is let go: a save here and one from
+   * A change the Profiles tab makes to `plugin` (a save, new file, Restore, a title, description or
+   * photo), run under the same lock as an arriving save and recorded before the lock is let go: a save here and one from
    * another computer never interleave, so neither is lost (review F-2). A change that waited while
    * the switch went off is still made, as the person asked for it, but not recorded for sync.
    */
@@ -508,8 +515,7 @@ export class ProfileSyncHost {
           files[file] = (file === 'plugin.yaml' ? Buffer.from(packManifest(content.toString('utf8'), contents.files)) : content).toString('base64');
         }
       }
-      const pack: ProfilePack = { plugin, record, files, photos: Object.fromEntries(Object.entries(contents.photos).map(([profile, bytes]) => [profile, bytes.toString('base64')])) };
-      if (record.state === 'saved' && contents.picture) pack.picture = contents.picture.toString('base64');
+      const pack: ProfilePack = { plugin, record, files, overrides: Object.fromEntries(Object.entries(contents.overrides).map(([name, bytes]) => [name, bytes.toString('base64')])) };
       const transferId = randomUUID();
       const folder = this.outgoing(transferId);
       await fs.mkdir(folder, { recursive: true });
@@ -593,7 +599,7 @@ export class ProfileSyncHost {
       // Pane's own plugins are never deleted by a sync; a deletion of yours is.
       if (BUNDLED.includes(plugin)) return { applied: false, record: current };
       if (sameSave(record, current)) return { applied: false, record: current };
-      return this.replaceLive(plugin, record, { movePlugin: true, photos: {} }, async () => undefined);
+      return this.replaceLive(plugin, record, { movePlugin: true, overrides: {} }, async () => undefined);
     }
     if (!transferId || !pack) throw new PaneError('PROFILE_SYNC_DAMAGED', `${plugin} arrived without its files, so nothing was changed.`, 'Sync profiles again.');
     if (pack.bytes > this.maxPackBytes()) throw new PaneError('PROFILE_SYNC_TOO_LARGE', `${plugin} arrived as a pack larger than profiles sync, so nothing was changed.`, 'Move large files out of the plugin on the other computer, then sync again.');
@@ -605,34 +611,37 @@ export class ProfileSyncHost {
       throw new PaneError('PROFILE_SYNC_DAMAGED', `${plugin} arrived as a pack Pane can't read, so nothing was changed.`, 'Update Pane on both computers, then sync again.');
     }
     const files = Object.fromEntries(Object.entries(decoded.files).map(([file, content]) => [file, Buffer.from(content, 'base64')]));
-    const photos = Object.fromEntries(Object.entries(decoded.photos).filter(([profile]) => PROFILE_NAME_PATTERN.test(profile)).map(([profile, content]) => [profile, Buffer.from(content, 'base64')]));
-    const picture = decoded.picture === undefined ? undefined : Buffer.from(decoded.picture, 'base64');
-    if (Object.values(photos).some(bytes => !isPng(bytes)) || (picture && !isPng(picture))) {
-      throw new PaneError('PROFILE_SYNC_DAMAGED', `${plugin} arrived with a photo that isn't a PNG of 1 MB or less, so nothing was changed.`, 'Choose the photo again on the other computer.');
+    const overrides = Object.fromEntries(Object.entries(decoded.overrides).map(([name, content]) => [name, Buffer.from(content, 'base64')]));
+    const refused = Object.entries(overrides).find(([name, bytes]) => !isOverride(name, bytes));
+    if (refused) {
+      throw new PaneError('PROFILE_SYNC_DAMAGED', `${plugin} arrived with a display override "${refused[0]}" that isn't a <profile>.json or <profile>.svg of 64 KB or less, so nothing was changed.`, 'Set the profile\'s title, description or photo again on the other computer, then sync again.');
     }
-    if (packHash(record.state, files, photos, picture) !== record.hash) {
+    const malformed = Object.entries(overrides).find(([name, bytes]) => !overrideReadable(name, bytes));
+    if (malformed) {
+      throw new PaneError('PROFILE_SYNC_DAMAGED', `${plugin} arrived with a display override "${malformed[0]}" that isn't valid JSON, so nothing was changed.`, 'Set the profile\'s title and description again on the other computer, then sync again.');
+    }
+    if (packHash(record.state, files, overrides) !== record.hash) {
       throw new PaneError('PROFILE_SYNC_DAMAGED', `${plugin} arrived with files that don't match the other computer's save, so nothing was changed.`, 'Sync profiles again.');
     }
     if (force && sameSave(record, current)) {
       const here = await this.contents(plugin).catch(() => undefined);
-      if (here && packHash(record.state, here.files, here.photos, here.picture) === record.hash) return { applied: false, record: current };
+      if (here && packHash(record.state, here.files, here.overrides) === record.hash) return { applied: false, record: current };
     }
     let result: ProfileSyncApplyResult;
     if (record.state === 'saved') {
       const source = await this.stagePack(plugin, files, transferId);
-      result = await this.replaceLive(plugin, record, { movePlugin: true, photos }, async () => {
+      result = await this.replaceLive(plugin, record, { movePlugin: true, overrides }, async () => {
         await this.installStaged(plugin, source);
         // Pane's own files, which Agent Farm's install leaves out.
         for (const [file, content] of Object.entries(files)) {
           if (PANE_FILE.test(file)) await writeAtomic(path.join(this.pluginRoot(plugin), ...checkRelative(file)), content);
         }
-        if (picture) await writeAtomic(path.join(this.pluginRoot(plugin), 'avatar.png'), picture);
       });
     } else {
       if (!BUNDLED.includes(plugin)) throw new PaneError('PROFILE_SYNC_DAMAGED', `${plugin} arrived as Pane's own version, but it isn't a plugin that ships with Pane, so nothing was changed.`, 'Sync profiles again.');
       const installed = (await this.receipts(new Set([plugin])))?.names.includes(plugin) === true;
       const reinstall = await this.isYours(plugin, current) || !installed;
-      result = await this.replaceLive(plugin, record, { movePlugin: reinstall, photos }, async () => {
+      result = await this.replaceLive(plugin, record, { movePlugin: reinstall, overrides }, async () => {
         if (!reinstall) return;
         try { await reinstallBundledPlugin(this.options.paneDir, plugin, this.bundle(), this.options.run); }
         catch (error) {
@@ -643,7 +652,7 @@ export class ProfileSyncHost {
       });
     }
     const here = await this.contents(plugin).catch(() => undefined);
-    if (here && packHash(record.state, here.files, here.photos, here.picture) !== record.hash) {
+    if (here && packHash(record.state, here.files, here.overrides) !== record.hash) {
       console.warn(`[ProfileSync] ${plugin} was installed, but its files here hash differently from the save; the next sync records the difference.`);
     }
     return result;
@@ -651,32 +660,32 @@ export class ProfileSyncHost {
 
   /**
    * Replaces a plugin here with an arriving save, keeping the last good copy until the record is
-   * written (review F-3): the plugin and its receipt (when `movePlugin`) and its photos are set aside
-   * in drafts/, `change` builds the new copy, the photos are replaced and the record is written. On
-   * any failure the new files go and the old ones come back; if even that fails, the old copy stays
-   * in drafts/ and the error names where.
+   * written (review F-3): the plugin and its receipt (when `movePlugin`) and your display overrides
+   * of it are set aside in drafts/, `change` builds the new copy, the overrides are replaced and the
+   * record is written. On any failure the new files go and the old ones come back; if even that
+   * fails, the old copy stays in drafts/ and the error names where.
    */
-  private async replaceLive(plugin: string, record: ProfileSyncRecord, { movePlugin, photos }: { movePlugin: boolean; photos: Record<string, Buffer> }, change: () => Promise<void>): Promise<ProfileSyncApplyResult> {
+  private async replaceLive(plugin: string, record: ProfileSyncRecord, { movePlugin, overrides }: { movePlugin: boolean; overrides: Record<string, Buffer> }, change: () => Promise<void>): Promise<ProfileSyncApplyResult> {
     const backup = path.join(this.configRoot, 'drafts', `.previous-${plugin}-${randomUUID()}`);
     const root = this.pluginRoot(plugin);
     const receipt = path.join(this.configRoot, '.plugins', `${plugin}.json`);
+    const overridesFolder = this.overridesFolder(plugin);
     const moved = { plugin: false, receipt: false };
-    const keptPhotos: string[] = [];
+    const keptOverrides: string[] = [];
     // Nothing live is removed or replaced until both the plugin and its receipt are set aside: a
     // backup that fails puts back only what moved (review F-3).
     let setAside = false;
     try {
-      await fs.mkdir(path.join(backup, 'photos'), { recursive: true });
-      for (const entry of await this.avatarEntries()) {
-        if (photoNames(entry)?.[0] !== plugin) continue;
-        await fs.copyFile(path.join(this.avatarsFolder(), entry), path.join(backup, 'photos', entry));
-        keptPhotos.push(entry);
+      await fs.mkdir(path.join(backup, 'overrides'), { recursive: true });
+      for (const entry of await this.overrideEntries(plugin)) {
+        await fs.copyFile(path.join(overridesFolder, entry), path.join(backup, 'overrides', entry));
+        keptOverrides.push(entry);
       }
       if (movePlugin && await present(root)) { await fs.rename(root, path.join(backup, 'plugin')); moved.plugin = true; }
       if (movePlugin && await present(receipt)) { await fs.rename(receipt, path.join(backup, 'receipt.json')); moved.receipt = true; }
       setAside = true;
       await change();
-      await this.replacePhotos(plugin, photos);
+      await this.replaceOverrides(plugin, overrides);
       const data = await readProfileSync(this.configRoot);
       data.plugins[plugin] = record;
       await writeProfileSync(this.configRoot, data);
@@ -686,7 +695,7 @@ export class ProfileSyncHost {
           // Only the plugin can have moved (the receipt moves last): put it back, and touch nothing else.
           if (moved.plugin) await fs.rename(path.join(backup, 'plugin'), root);
         } else {
-          await this.restoreAfterFailure(plugin, backup, movePlugin, moved, keptPhotos);
+          await this.restoreAfterFailure(plugin, backup, movePlugin, moved, keptOverrides);
         }
       } catch (rollback) {
         throw new PaneError('PROFILE_SYNC_ROLLBACK', `${plugin} from your other computer couldn't be installed (${reasonOf(error)}), and putting your copy back failed too (${reasonOf(rollback)}). Your copy is kept in ${backup}.`, `Move ${backup}/plugin back to ${root}, then restart Pane.`);
@@ -699,8 +708,8 @@ export class ProfileSyncHost {
     return { applied: true, record };
   }
 
-  /** After a failed change: removes what it installed and puts back the set-aside plugin, receipt and photos. */
-  private async restoreAfterFailure(plugin: string, backup: string, movePlugin: boolean, moved: { plugin: boolean; receipt: boolean }, keptPhotos: string[]): Promise<void> {
+  /** After a failed change: removes what it installed and puts back the set-aside plugin, receipt and display overrides. */
+  private async restoreAfterFailure(plugin: string, backup: string, movePlugin: boolean, moved: { plugin: boolean; receipt: boolean }, keptOverrides: string[]): Promise<void> {
     const root = this.pluginRoot(plugin);
     const receipt = path.join(this.configRoot, '.plugins', `${plugin}.json`);
     if (movePlugin) {
@@ -713,8 +722,10 @@ export class ProfileSyncHost {
     }
     if (moved.plugin) await fs.rename(path.join(backup, 'plugin'), root);
     if (moved.receipt) await fs.rename(path.join(backup, 'receipt.json'), receipt);
-    await this.replacePhotos(plugin, {});
-    for (const entry of keptPhotos) await fs.copyFile(path.join(backup, 'photos', entry), path.join(this.avatarsFolder(), entry));
+    await this.replaceOverrides(plugin, {});
+    const overridesFolder = this.overridesFolder(plugin);
+    if (keptOverrides.length) await fs.mkdir(overridesFolder, { recursive: true });
+    for (const entry of keptOverrides) await fs.copyFile(path.join(backup, 'overrides', entry), path.join(overridesFolder, entry));
   }
 
   /** Writes a pack's files into the transfer's staging folder, checked to stay inside the plugin. */
@@ -744,19 +755,37 @@ export class ProfileSyncHost {
     }
   }
 
+  /** The regular files with an override name in `profile-overrides/<plugin>/`, whatever their size: what a replace sets aside. */
+  private async overrideEntries(plugin: string): Promise<string[]> {
+    if (!await this.overridesThere(plugin)) return [];
+    const entries = await fs.readdir(this.overridesFolder(plugin), { withFileTypes: true });
+    return entries.filter(entry => entry.isFile() && OVERRIDE_FILE.test(entry.name)).map(entry => entry.name);
+  }
+
   /**
-   * Makes your photos of a plugin exactly `photos`. Only unambiguous `plugin--profile.png` names are
-   * touched: a name another plugin's could also be read as is left alone and not synced (review F-9).
+   * Makes `profile-overrides/<plugin>/` hold exactly `overrides`: new and changed files are written
+   * atomically, other override files there go, and the folder goes once it is empty. Files without
+   * an override name are left alone. A folder that is a link is refused, so nothing is written
+   * outside Pane's Agent Farm folder (review F-5).
    */
-  private async replacePhotos(plugin: string, photos: Record<string, Buffer>): Promise<void> {
-    const avatars = this.avatarsFolder();
-    for (const entry of await this.avatarEntries()) {
-      const names = photoNames(entry);
-      if (names?.[0] === plugin && !photos[names[1]]) await fs.rm(path.join(avatars, entry), { force: true });
+  private async replaceOverrides(plugin: string, overrides: Record<string, Buffer>): Promise<void> {
+    const folder = this.overridesFolder(plugin);
+    const there = await this.overridesThere(plugin);
+    if (there) {
+      for (const entry of await fs.readdir(folder, { withFileTypes: true })) {
+        if (OVERRIDE_FILE.test(entry.name) && !entry.isDirectory() && !overrides[entry.name]) await fs.rm(path.join(folder, entry.name), { force: true });
+      }
     }
-    for (const [profile, bytes] of Object.entries(photos)) {
-      if (!photoNames(`${plugin}--${profile}.png`)) continue;
-      await writeAtomic(path.join(avatars, `${plugin}--${profile}.png`), bytes);
+    for (const [name, bytes] of Object.entries(overrides)) {
+      if (!isOverride(name, bytes)) continue;
+      const file = path.join(folder, name);
+      const same = await fs.lstat(file).then(stat => stat.isFile() && stat.size === bytes.length, () => false) && (await fs.readFile(file)).equals(bytes);
+      if (same) continue;
+      await writeAtomic(file, bytes);
+      await fs.chmod(file, 0o600);
+    }
+    if (!Object.keys(overrides).length && there) {
+      await fs.rmdir(folder).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOTEMPTY' && error.code !== 'EEXIST' && !notThere(error)) throw error; });
     }
   }
 }

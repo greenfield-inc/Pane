@@ -4,7 +4,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentFarmProfiles } from './importer';
 import { readProfilesSwitchFrom } from '../agentFarm/profilesFeature';
-import { installBundledAgentFarm } from '../agentFarm/bundledAgentFarm';
+import { agentFarmConfigRoot, installBundledAgentFarm } from '../agentFarm/bundledAgentFarm';
 
 /** Which Agent Farm a Session move asks for profiles (T-63): PATH's with Profiles off, as on main; Pane's with it on. */
 
@@ -43,5 +43,16 @@ describe('a Session move\'s Agent Farm', () => {
     const profiles = await agentFarmProfiles(shellPath);
     expect(profiles).not.toHaveProperty('mine/own');
     expect(Object.keys(profiles).some(name => name.startsWith('greenfield/'))).toBe(true);
+  }, 60_000);
+
+  it.skipIf(process.platform === 'win32')('leaves out a profile that fails to resolve, so a move never counts it as runnable', async () => {
+    readProfilesSwitchFrom(() => ({ sessionProfilesEnabled: true }));
+    // Review F-3: seo links to seo-writer; without it Agent Farm still lists seo's ref and version, with an error.
+    const status = await installBundledAgentFarm({ paneDir: path.join(root, 'pane'), telemetry: false, log: () => undefined });
+    expect(status.state).toBe('ready');
+    rmSync(path.join(agentFarmConfigRoot(path.join(root, 'pane')), 'plugins', 'greenfield', 'agents', 'seo-writer.md'));
+    const profiles = await agentFarmProfiles(shellPath);
+    expect(profiles).toHaveProperty('greenfield/orchestrator');
+    expect(profiles).not.toHaveProperty('greenfield/seo');
   }, 60_000);
 });

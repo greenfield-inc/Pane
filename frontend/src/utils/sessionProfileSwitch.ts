@@ -1,5 +1,5 @@
 import { agentLabel } from '../../../shared/agents';
-import { plainProfileAgents, plainProfileRef, profileDisplayName, profileSwitchEffect, type ProfileSwitchEffect } from '../../../shared/agentProfiles';
+import { plainProfileAgents, plainProfileRef, profileEntryName, profileSwitchEffect, type ProfileSwitchEffect } from '../../../shared/agentProfiles';
 import type { AgentFarmProfileEntry } from '../../../shared/types/agentFarmProfiles';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 
@@ -35,7 +35,7 @@ export function profileSwitchChoices(session: Pick<OrchestrationSessionRecord, '
   });
   const named = profiles
     .filter(entry => !entry.hidden && agents.some(agent => agent === entry.harness))
-    .map(entry => choice(`profile:${entry.ref}`, 'profiles', profileDisplayName(entry.ref), entry.ref, entry.harness, entry.ref, entry.ref));
+    .map(entry => choice(`profile:${entry.ref}`, 'profiles', profileEntryName(entry), entry.ref, entry.harness, entry.ref, entry.ref));
   return [...plain, ...named];
 }
 

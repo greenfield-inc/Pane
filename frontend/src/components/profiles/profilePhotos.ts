@@ -1,12 +1,10 @@
-import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { MAX_PROFILE_PHOTO_BYTES } from '../../../../shared/types/profileEditor';
 
 /**
- * Profile photos (T-63 PR 5): the sample pictures the photo menu offers, and scaling a chosen
- * picture into the small square PNG Pane stores per profile on this computer.
+ * Profile photos (T-83): SVG only. Agent Farm keeps your photo on this computer and checks it
+ * (at most 64 KiB, shapes and gradients only, no script, foreignObject, image or external href), so
+ * Pane sends the SVG file's text as it is. The photo menu also offers a few sample SVGs.
  */
-
-/** The side, in px, of a stored photo: twice the largest avatar Pane draws (44 px in the photo menu), with room for 3x screens. */
-const PHOTO_SIDE = 160;
 
 /** A sample picture: a two-colour gradient with a simple figure. These are pictures, not interface colours. */
 interface Sample {
@@ -29,51 +27,36 @@ const SAMPLES: Sample[] = [
 export interface PhotoSample {
   id: string;
   label: string;
-  /** An SVG data URL. */
+  /** The SVG's text, which Set photo sends. */
+  svg: string;
+  /** The same SVG as a data URL, for the menu's swatch. */
   src: string;
 }
 
-export const PHOTO_SAMPLES: PhotoSample[] = SAMPLES.map(sample => ({
-  id: sample.id,
-  label: sample.label,
-  src: `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${sample.from}"/><stop offset="1" stop-color="${sample.to}"/></linearGradient></defs><rect width="64" height="64" fill="url(#g)"/>${sample.body}</svg>`)}`,
-}));
+export const PHOTO_SAMPLES: PhotoSample[] = SAMPLES.map(sample => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${sample.from}"/><stop offset="1" stop-color="${sample.to}"/></linearGradient></defs><rect width="64" height="64" fill="url(#g)"/>${sample.body}</svg>`;
+  return { id: sample.id, label: sample.label, svg, src: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}` };
+});
 
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('That file isn\'t a picture Pane can read. Choose a PNG, JPEG, GIF, WebP or SVG.'));
-    image.src = src;
-  });
+/** What the file inputs accept. */
+export const PHOTO_ACCEPT = '.svg,image/svg+xml';
+
+/** Why a chosen file can't be a photo before it is read (not an SVG, or too big), or null when it may be. */
+export function svgPhotoProblem(file: Pick<File, 'name' | 'type' | 'size'>): string | null {
+  const isSvg = file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg');
+  if (!isSvg) return `${file.name} isn't an SVG. Profile photos are SVG files only: choose a .svg file, or pick a sample.`;
+  if (file.size > MAX_PROFILE_PHOTO_BYTES) {
+    return `${file.name} is ${Math.ceil(file.size / 1024)} KiB; a profile photo is at most ${MAX_PROFILE_PHOTO_BYTES / 1024} KiB. Choose a smaller SVG, or simplify this one.`;
+  }
+  return null;
 }
 
-/** A picture (any URL the window can draw), cropped to its centre square and scaled to a PNG; its base64. */
-export async function squarePhoto(src: string): Promise<string> {
-  const image = await loadImage(src);
-  const width = image.naturalWidth || PHOTO_SIDE;
-  const height = image.naturalHeight || PHOTO_SIDE;
-  const side = Math.min(width, height);
-  const canvas = document.createElement('canvas');
-  canvas.width = PHOTO_SIDE;
-  canvas.height = PHOTO_SIDE;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('Pane couldn\'t draw the picture. Try another one.');
-  context.imageSmoothingQuality = 'high';
-  context.drawImage(image, (width - side) / 2, (height - side) / 2, side, side, 0, 0, PHOTO_SIDE, PHOTO_SIDE);
-  return canvas.toDataURL('image/png').replace(/^data:image\/png;base64,/, '');
-}
-
-/** A file the person chose, as a data URL. */
-export function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = decodeOptionalBoundary(reader.result, boundary.string);
-      if (url) resolve(url);
-      else reject(new Error('Pane couldn\'t read that file.'));
-    };
-    reader.onerror = () => reject(new Error('Pane couldn\'t read that file.'));
-    reader.readAsDataURL(file);
-  });
+/** A chosen SVG file's text, refused up front when it isn't an SVG or is too big; Agent Farm checks the rest. */
+export async function readSvgPhoto(file: File): Promise<string> {
+  const problem = svgPhotoProblem(file);
+  if (problem) throw new Error(problem);
+  const unreadable = new Error(`Pane couldn't read ${file.name}. Choose the file again.`);
+  const text = await file.text().catch(() => { throw unreadable; });
+  if (!text) throw unreadable;
+  return text;
 }

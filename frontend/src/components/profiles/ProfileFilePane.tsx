@@ -9,7 +9,7 @@ import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { TODOS_HEADER_BUTTON } from '../todos/todoStyles';
 import { GeneratedCover, HtmlPage, MarkdownWithMeta, YamlPreview } from './ProfilePreviews';
-import { findNode, previewKind } from './profilePreview';
+import { findNode, previewKind, subagentLabel } from './profilePreview';
 import { savedSyncText } from './profileSyncText';
 import { isProfilesEnabled, useConfigStore } from '../../stores/configStore';
 
@@ -99,7 +99,7 @@ export function ProfileFilePane({ plugin, profile, file, notify, onShow }: {
   };
   const cancel = () => { if (dirty) setConfirmCancel(true); else discard(); };
 
-  const heading = cover ? (subagent ? subagent.label : 'Cover page') : file;
+  const heading = cover ? (subagent ? subagentLabel(subagent) : 'Cover page') : file;
   const coverNote = cover && path ? `From the ${subagent ? 'subagent’s profile' : 'profile'}: ${path}` : null;
   const status = dirty
     ? 'Unsaved changes'
@@ -136,7 +136,7 @@ export function ProfileFilePane({ plugin, profile, file, notify, onShow }: {
   } else if (saved === undefined || !path) body = <div className="flex-1" />;
   else {
     const kind = previewKind(path);
-    body = kind === 'html' ? <HtmlPage html={value} title={`${plugin.name}/${path}`} />
+    body = kind === 'html' ? <HtmlPage html={value} title={`${plugin.name}/${path}`} subagent={cover ? subagent : undefined} />
       : kind === 'markdown' ? <MarkdownWithMeta source={value} />
         : kind === 'yaml' ? <YamlPreview source={value} />
           : <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap px-6 py-4 font-mono text-[12.5px] text-text-primary" data-testid="profiles-text-preview">{value}</pre>;

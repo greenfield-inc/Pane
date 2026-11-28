@@ -1,4 +1,36 @@
 import type { ChatTabLaunch } from './types/chatTab';
+import type { AgentFarmProfileEntry } from './types/agentFarmProfiles';
+import { agentLabel } from './agents';
+import { profileEntryName } from './agentProfiles';
+
+/** One choice in the "Profile…" form's picker: a profile ref (with its variant for a non-default one) and how it reads. */
+export interface ChatTabProfileOption {
+  ref: string;
+  label: string;
+}
+
+/**
+ * The picker's choices (T-83), from `agent-farm profiles list --json`: every profile but Pane's own
+ * plain ones, by Agent Farm's title and ref; a profile with variants also offers each other variant.
+ */
+export function chatTabProfileOptions(profiles: readonly AgentFarmProfileEntry[]): ChatTabProfileOption[] {
+  return profiles.filter(entry => !entry.hidden).flatMap(entry => {
+    const name = profileEntryName(entry);
+    const others = (entry.variants ?? []).filter(variant => variant.name !== (entry.defaultVariant ?? entry.variants?.[0]?.name));
+    return [
+      { ref: entry.ref, label: `${name} · ${entry.ref}` },
+      ...others.map(variant => ({ ref: `${entry.ref}:${variant.name}`, label: `${name} (${agentLabel(variant.name)}) · ${entry.ref}:${variant.name}` })),
+    ];
+  });
+}
+
+/**
+ * The profile name the typed field shows as its example. With Profiles off it stays main's
+ * (greenfield/implementer); with it on, greenfield 0.1.0's entry profile.
+ */
+export function chatTabProfileExample(profilesOn: boolean): string {
+  return profilesOn ? 'greenfield/orchestrator' : 'greenfield/implementer';
+}
 
 export type ChatTabProfileLaunch = Extract<ChatTabLaunch, { kind: 'profile' }>;
 
@@ -11,9 +43,9 @@ export type ChatTabProfileLaunchResult =
  * --agent-farm <profile> --arg key=value` sends: a profile name and one
  * `key=value` per line (blank lines skipped; the value keeps any `=` after the first).
  */
-export function chatTabProfileLaunch(profileText: string, argsText: string): ChatTabProfileLaunchResult {
+export function chatTabProfileLaunch(profileText: string, argsText: string, options: { profilesOn?: boolean } = {}): ChatTabProfileLaunchResult {
   const profile = profileText.trim();
-  if (!profile) return { ok: false, field: 'profile', error: 'Enter a profile name, such as greenfield/implementer.' };
+  if (!profile) return { ok: false, field: 'profile', error: `Enter a profile name, such as ${chatTabProfileExample(options.profilesOn === true)}.` };
   if (/\s/.test(profile)) return { ok: false, field: 'profile', error: `"${profile}" is not a profile name: profile names have no spaces.` };
   const args: Record<string, string> = {};
   for (const raw of argsText.split(/\r?\n/)) {

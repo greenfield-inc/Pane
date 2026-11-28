@@ -10,7 +10,7 @@ import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } fro
 import { hashDirectory } from '../skillCacheManager';
 import { syncedPluginEdits } from './profileSyncFile';
 import { writeRecoveryNote } from './agentFarmRecovery';
-import { panePluginFiles, panePluginInstalled, parseProfileList, writePanePluginSource } from './agentFarmProfiles';
+import { panePluginFiles, panePluginInstalled, parseProfileListJson, profileListEntries, writePanePluginSource } from './agentFarmProfiles';
 import { PANE_PROFILE_PLUGIN } from '../../../../shared/agentProfiles';
 import type { AgentFarmProfileList } from '../../../../shared/types/agentFarmProfiles';
 
@@ -129,16 +129,16 @@ export function paneAgentFarmProcess(paneDir: string, args: string[], options: {
 }
 
 /**
- * The profiles installed in Pane's own Agent Farm (`agent-farm profiles list`), Pane's plain ones
+ * The profiles installed in Pane's own Agent Farm (`agent-farm profiles list --json`), Pane's plain ones
  * marked hidden. Never throws: a missing bundle or a failed read comes back as an empty list with
  * an error that says what to do. Session move and the Session list both read it.
  */
 export async function listPaneAgentFarmProfiles(paneDir: string, env: NodeJS.ProcessEnv = process.env, run: AgentFarmRunner = runAgentFarm): Promise<AgentFarmProfileList> {
   // Only read while Profiles is on (chat-tab:profiles and a Session's named profile check that first).
-  const agentFarm = paneAgentFarmProcess(paneDir, ['profiles', 'list'], { env, profiles: true });
+  const agentFarm = paneAgentFarmProcess(paneDir, ['profiles', 'list', '--json'], { env, profiles: true });
   if (!agentFarm) return { profiles: [], error: `This Pane build does not include ${AGENT_FARM_PACKAGE}, so it has no Agent Farm profiles. Reinstall Pane from runpane.com.` };
   try {
-    return { profiles: parseProfileList(await run(agentFarm)) };
+    return { profiles: profileListEntries(parseProfileListJson(await run(agentFarm))) };
   } catch (error) {
     const reason = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1) || reasonOf(error);
     return { profiles: [], error: `Pane couldn't list its Agent Farm profiles: ${reason}. Restart Pane, then try again.` };

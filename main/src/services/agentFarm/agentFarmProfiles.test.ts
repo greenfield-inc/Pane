@@ -1,46 +1,73 @@
+import fs from 'fs';
+import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { configuredAgent } from '../../../../shared/agents';
 import { PROFILE_REF_PATTERN } from '../../../../shared/types/agentFarmProfiles';
-import { panePluginFiles, parseProfileList, parseProfileListLine } from './agentFarmProfiles';
+import { panePluginFiles, parseProfileListJson, profileListEntries } from './agentFarmProfiles';
 import { plainProfileAgent, plainProfileAgents, plainProfileRef } from '../../../../shared/agentProfiles';
 
-// Lines as Agent Farm 0.2.34's `profiles list` prints them.
-const LIST = [
-  'dcouple/raw (opus: claude-opus-5-5 medium · astra: gpt-6-astra medium · sol: gpt-6.1-sol medium) -> raw-claude | plugin dcouple 0.1.27 | claude | claude-opus-5-5 medium | native default',
-  'greenfield/product-researcher (astra: gpt-6-astra high fast · opus: claude-opus-5-5 high) -> astra-researcher [ambiguous bare name] | plugin greenfield 0.0.46 | codex | gpt-6-astra high | fast',
-  'pane/claude -> claude | plugin pane 1.0.0 | claude | claude-opus-5-5 default | native default',
-  'warning: something Agent Farm printed first',
-  '',
-].join('\n');
+// `agent-farm profiles list --json` as Agent Farm 0.3.0 prints it (CONFIGURATION.md), trimmed.
+const LIST = JSON.stringify({
+  schema: 1,
+  profiles: [
+    {
+      ref: 'greenfield/orchestrator', name: 'orchestrator', plugin: 'greenfield', version: '0.1.0',
+      title: 'Orchestrator', description: 'Software work.', photo: '/root/plugins/greenfield/profiles/orchestrator.svg',
+      sources: { title: 'plugin', description: 'plugin', photo: 'plugin' },
+      editable: { via: 'override', file: '/root/plugins/greenfield/profiles/orchestrator.yaml' },
+      variants: {
+        claude: { agent: 'greenfield/orchestrator', harness: 'claude', model: { name: 'claude-opus-5-5', reasoning: 'medium' } },
+        codex: { agent: 'greenfield/orchestrator-codex', harness: 'codex', model: { name: 'gpt-6.2-sol', reasoning: 'medium', speed: 'ultrafast' } },
+      },
+      default: 'claude',
+      command: 'agent-farm run greenfield/orchestrator',
+      tree: [{ alias: 'planner', agent: 'greenfield/planner', mode: 'launch', variants: ['claude', 'codex'], default: 'claude', command: 'agent-farm run greenfield/planner --agent-only', children: [] }],
+    },
+    {
+      ref: 'greenfield/seo', name: 'seo', plugin: 'greenfield', version: '0.1.0', title: null, description: null, photo: null,
+      variants: null, default: null, agent: 'greenfield/seo', harness: 'codex', model: { name: 'gpt-6.2-sol', reasoning: 'high' },
+      command: 'agent-farm run greenfield/seo', tree: [],
+    },
+    { ref: 'pane/claude', name: 'claude', plugin: 'pane', version: '1.0.0', variants: null, default: null, agent: 'pane/claude', harness: 'claude', model: { name: 'claude-opus-5-5' }, tree: [] },
+    { ref: 'mine/broken', name: 'broken', plugin: 'mine', version: '0.1.0', error: 'agents/broken.md does not parse' },
+  ],
+});
 
-describe('parseProfileList', () => {
-  it('reads each profile with its plugin, default harness and model, and its variants default first', () => {
-    expect(parseProfileList(LIST)).toEqual([
+describe('profileListEntries', () => {
+  it('reads each profile with its title, description, default harness and model, and its variants default first', () => {
+    expect(profileListEntries(parseProfileListJson(LIST))).toEqual([
       {
-        ref: 'dcouple/raw', plugin: 'dcouple', version: '0.1.27', harness: 'claude', model: 'claude-opus-5-5', effort: 'medium', hidden: false,
-        defaultVariant: 'opus',
-        variants: [{ name: 'opus', model: 'claude-opus-5-5', effort: 'medium' }, { name: 'astra', model: 'gpt-6-astra', effort: 'medium' }, { name: 'sol', model: 'gpt-6.1-sol', effort: 'medium' }],
+        ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.1.0', harness: 'claude', model: 'claude-opus-5-5', effort: 'medium', hidden: false,
+        title: 'Orchestrator', description: 'Software work.',
+        defaultVariant: 'claude',
+        variants: [{ name: 'claude', model: 'claude-opus-5-5', effort: 'medium' }, { name: 'codex', model: 'gpt-6.2-sol', effort: 'medium' }],
       },
-      {
-        ref: 'greenfield/product-researcher', plugin: 'greenfield', version: '0.0.46', harness: 'codex', model: 'gpt-6-astra', effort: 'high', hidden: false,
-        defaultVariant: 'astra',
-        variants: [{ name: 'astra', model: 'gpt-6-astra', effort: 'high' }, { name: 'opus', model: 'claude-opus-5-5', effort: 'high' }],
-      },
-      // Pane's plain profile: hidden, and "default" effort means none was set.
+      // A single-agent profile: no variants, and a null title or description is left out.
+      { ref: 'greenfield/seo', plugin: 'greenfield', version: '0.1.0', harness: 'codex', model: 'gpt-6.2-sol', effort: 'high', hidden: false },
+      // Pane's plain profile: hidden.
       { ref: 'pane/claude', plugin: 'pane', version: '1.0.0', harness: 'claude', model: 'claude-opus-5-5', hidden: true },
     ]);
   });
 
-  it('marks a profile its plugin unlists, and leaves listing unsaid for an Agent Farm that says nothing (T-63)', () => {
-    expect(parseProfileListLine('greenfield/planner -> planner | plugin greenfield 0.0.47 | claude | claude-opus-5-5 high | native default | unlisted'))
-      .toMatchObject({ ref: 'greenfield/planner', listed: false });
-    expect(parseProfileListLine('greenfield/orchestrator -> orchestrator | plugin greenfield 0.0.47 | claude | claude-opus-5-5 high | native default'))
-      .not.toHaveProperty('listed');
+  it('leaves out a title Agent Farm only made from the name, so Pane makes its own', () => {
+    const listing = JSON.stringify({ schema: 1, profiles: [{ ref: 'team/planner', name: 'planner', plugin: 'team', version: '0.1.0', title: 'planner', sources: { title: 'default' }, variants: null, agent: 'team/planner', harness: 'claude', tree: [] }] });
+    expect(parseProfileListJson(listing)[0].title).toBeUndefined();
   });
 
-  it('skips a line in another shape', () => {
-    expect(parseProfileListLine('pane/claude -> claude')).toBeUndefined();
-    expect(parseProfileListLine('Not/A profile | plugin x 1 | claude | m')).toBeUndefined();
+  it('leaves out a profile Agent Farm could not resolve', () => {
+    expect(profileListEntries(parseProfileListJson(LIST)).map(entry => entry.ref)).not.toContain('mine/broken');
+  });
+
+  it('reads installed profiles beside a local one, leaving the local one out (bundled CLI output)', () => {
+    // Generated by the bundled `agent-farm profiles list --json` for a root with local profiles/mine.yaml and greenfield installed, trimmed.
+    const listing = fs.readFileSync(path.join(__dirname, 'fixtures', 'profiles-list-local-and-installed.json'), 'utf8');
+    expect(parseProfileListJson(listing).map(entry => entry.ref)).toEqual(['greenfield/seo']);
+    expect(profileListEntries(parseProfileListJson(listing)).map(entry => entry.ref)).toEqual(['greenfield/seo']);
+  });
+
+  it('refuses output that is not the JSON listing, saying what it got', () => {
+    expect(() => parseProfileListJson('greenfield/orchestrator -> orchestrator | plugin greenfield 0.1.0 | claude | m')).toThrow(/profiles list --json/);
+    expect(() => parseProfileListJson(JSON.stringify({ schema: 2, profiles: [] }))).toThrow(/schema 2/);
   });
 });
 
@@ -64,7 +91,7 @@ describe('Pane\'s plain profiles', () => {
 
 describe('PROFILE_REF_PATTERN', () => {
   it('takes plugin/profile with an optional variant', () => {
-    expect(['greenfield/orchestrator', 'pane/claude', 'dcouple/raw:sol'].every(ref => PROFILE_REF_PATTERN.test(ref))).toBe(true);
+    expect(['greenfield/orchestrator', 'pane/claude', 'greenfield/orchestrator:codex'].every(ref => PROFILE_REF_PATTERN.test(ref))).toBe(true);
     expect(['orchestrator', 'a/b/c', '../x', 'Greenfield/x', 'a/b:'].some(ref => PROFILE_REF_PATTERN.test(ref))).toBe(false);
   });
 });

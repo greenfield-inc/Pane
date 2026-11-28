@@ -20,7 +20,7 @@ import {
   type AgentFarmProcess,
   type BundledAgentFarm,
 } from './bundledAgentFarm';
-import { parseProfileList } from './agentFarmProfiles';
+import { parseProfileListJson, profileListEntries } from './agentFarmProfiles';
 import { writeProfileSync } from './profileSyncFile';
 import { pendingRecoveries } from './agentFarmRecovery';
 import { configuredAgent } from '../../../../shared/agents';
@@ -524,10 +524,10 @@ describe('Pane\'s own plugin with the pinned package', () => {
     expect(first.error).toBeUndefined();
     const bundle = bundledAgentFarm()!;
     const list = (): string => {
-      const process = bundledAgentFarmProcess(bundle, ['profiles', 'list'], configRoot);
+      const process = bundledAgentFarmProcess(bundle, ['profiles', 'list', '--json'], configRoot);
       return execFileSync(process.executable, process.args, { env: process.env, encoding: 'utf8' });
     };
-    const plain = parseProfileList(list()).filter((entry) => entry.plugin === 'pane');
+    const plain = profileListEntries(parseProfileListJson(list())).filter((entry) => entry.plugin === 'pane');
     expect(plain.map(({ ref, harness, model, hidden }) => ({ ref, harness, model, hidden }))).toEqual([
       { ref: 'pane/claude', harness: 'claude', model: configuredAgent('claude').chat?.profileModel, hidden: true },
       { ref: 'pane/codex', harness: 'codex', model: configuredAgent('codex').chat?.profileModel, hidden: true },

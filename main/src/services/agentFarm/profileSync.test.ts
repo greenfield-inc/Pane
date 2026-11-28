@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'fs';
 import { gzipSync } from 'zlib';
 import { tmpdir } from 'os';
 import path from 'path';
@@ -86,6 +86,26 @@ function peer(target: Computer): ProfileSyncPeer {
 
 function desktop(here: Computer, others: Computer[]): ProfileSyncCoordinator {
   return new ProfileSyncCoordinator({ local: here.host, peers: () => others.map(other => peer(other)), machine: () => here.id });
+}
+
+const SVG = (fill: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="${fill}"/></svg>\n`;
+const OVERRIDES = (paneDir: string, plugin: string) => path.join(agentFarmConfigRoot(paneDir), 'profile-overrides', plugin);
+
+/** Sets a profile's display with the real `agent-farm profiles set`, as the Profiles tab does, and records it. */
+async function setDisplay(on: Computer, ref: string, { title, description, photo }: { title?: string; description?: string; photo?: string }): Promise<void> {
+  const args = ['profiles', 'set', ref];
+  if (title !== undefined) args.push('--title', title);
+  if (description !== undefined) args.push('--description', description);
+  if (photo !== undefined) {
+    let file = '';
+    if (photo) {
+      file = path.join(tempDir(), 'photo.svg');
+      writeFileSync(file, photo);
+    }
+    args.push('--photo', file);
+  }
+  await agentFarm(on.paneDir, args);
+  await on.host.recordChange();
 }
 
 async function saveMarker(on: Computer, marker: string): Promise<void> {
@@ -177,14 +197,17 @@ describe('profile sync: every save reaches the other computers', () => {
     const b = computer('build', 'b-id');
     const c = computer('travel', 'c-id');
     await installFixture(a.paneDir);
+    await setDisplay(a, 'labtest/writer', { title: 'Writer' });
     await desktop(a, [b, c]).syncNow();
     expect(existsSync(WRITER(c.paneDir))).toBe(true);
+    expect(existsSync(path.join(OVERRIDES(c.paneDir, 'labtest'), 'writer.json'))).toBe(true);
 
     a.clock.now += 60_000;
     await agentFarm(a.paneDir, ['plugin', 'uninstall', 'labtest']);
     await desktop(a, [b, c]).syncNow();
     for (const other of [b, c]) {
       expect(existsSync(path.join(agentFarmConfigRoot(other.paneDir), 'plugins', 'labtest'))).toBe(false);
+      expect(existsSync(OVERRIDES(other.paneDir, 'labtest'))).toBe(false);
       expect((await readProfileSync(agentFarmConfigRoot(other.paneDir))).plugins.labtest).toMatchObject({ state: 'deleted', machine: 'a-id' });
     }
   }, 120_000);
@@ -202,8 +225,8 @@ describe('profile sync: every save reaches the other computers', () => {
     const pack = decodeBoundary(JSON.parse(readFileSync(packFile, 'utf8')), boundary.object({ files: boundary.record(boundary.string), record: profileSyncRecordSchema }));
     const files = Object.fromEntries(Object.entries(pack.files).map(([file, content]) => [file, Buffer.from(content, 'base64')]));
     files['agents/writer.md'] = Buffer.from('---\nharness: claude\n---\n\nMarker: EVIL\n');
-    const record = { ...pack.record, savedAt: Date.now() + 3_600_000, hash: packHash('saved', files, {}, undefined) };
-    writeFileSync(packFile, JSON.stringify({ ...pack, plugin: 'labtest', photos: {}, record, files: Object.fromEntries(Object.entries(files).map(([file, content]) => [file, content.toString('base64')])) }));
+    const record = { ...pack.record, savedAt: Date.now() + 3_600_000, hash: packHash('saved', files, {}) };
+    writeFileSync(packFile, JSON.stringify({ ...pack, plugin: 'labtest', overrides: {}, record, files: Object.fromEntries(Object.entries(files).map(([file, content]) => [file, content.toString('base64')])) }));
     const sender = peer(b);
     const sent = await sendFile({ write: async write => decodeBoundary(await sender.invoke(PROFILE_SYNC_CHANNELS.write, [write], 1000), writeResultSchema) }, transferId, 'pack.json', packFile);
     const request: ProfileSyncApplyRequest = { plugin: 'labtest', record, transferId, pack: sent };
@@ -212,17 +235,28 @@ describe('profile sync: every save reaches the other computers', () => {
     expect(existsSync(path.join(agentFarmConfigRoot(b.paneDir), '.plugins', 'labtest.json'))).toBe(true);
   }, 120_000);
 
-  it('syncs a photo on a Pane plugin without making it edited, and an edit of one as yours', async () => {
+  it('syncs a display override on a Pane plugin without making it edited, and an edit of one as yours', async () => {
     const a = computer('studio', 'a-id');
     const b = computer('build', 'b-id');
     await installBundledAgentFarm({ paneDir: a.paneDir, bundle, log: () => undefined });
     await installBundledAgentFarm({ paneDir: b.paneDir, bundle, log: () => undefined });
-    const png = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.from('photo')]);
-    await a.editor.setPhoto('greenfield/orchestrator', png.toString('base64'));
-    await a.host.recordChange();
+    await setDisplay(a, 'greenfield/orchestrator', { title: 'Chief', description: 'Runs the team', photo: SVG('red') });
     await desktop(a, [b]).syncNow();
-    expect(readFileSync(path.join(agentFarmConfigRoot(b.paneDir), 'avatars', 'greenfield--orchestrator.png'))).toEqual(png);
+    const overrides = OVERRIDES(b.paneDir, 'greenfield');
+    expect(readFileSync(path.join(overrides, 'orchestrator.svg'), 'utf8')).toBe(SVG('red'));
+    expect(readFileSync(path.join(overrides, 'orchestrator.json'), 'utf8')).toBe(readFileSync(path.join(OVERRIDES(a.paneDir, 'greenfield'), 'orchestrator.json'), 'utf8'));
+    // Agent Farm on B shows A's title and photo.
+    const listed = decodeBoundary(JSON.parse(await agentFarm(b.paneDir, ['profiles', 'list', '--json'])), boundary.object({ profiles: boundary.array(boundary.object({ ref: boundary.string, title: boundary.optional(boundary.string), photo: boundary.optional(boundary.nullable(boundary.string)) })) }));
+    const orchestrator = listed.profiles.find(profile => profile.ref === 'greenfield/orchestrator');
+    expect(orchestrator).toMatchObject({ title: 'Chief', photo: path.join(realpathSync(overrides), 'orchestrator.svg') });
     expect((await b.editor.list()).plugins.find(plugin => plugin.name === 'greenfield')?.edited).toBe(false);
+
+    // A changes the title and removes the photo: B follows, and the removed photo goes.
+    a.clock.now += 60_000;
+    await setDisplay(a, 'greenfield/orchestrator', { title: 'Boss', photo: '' });
+    await desktop(a, [b]).syncNow();
+    expect(readFileSync(path.join(overrides, 'orchestrator.json'), 'utf8')).toContain('Boss');
+    expect(existsSync(path.join(overrides, 'orchestrator.svg'))).toBe(false);
 
     a.clock.now += 60_000;
     const planner = 'agents/orchestrator.md';
@@ -239,14 +273,21 @@ describe('profile sync: every save reaches the other computers', () => {
     expect(status.edited).toContain('greenfield');
     expect(await b.editor.read('greenfield', planner)).toContain('Marker: MANGO');
 
-    // Restore Pane's version on A brings it back on B too, photo kept.
+    // Restore Pane's version on A brings it back on B too, display override kept.
     a.clock.now += 60_000;
     await a.editor.restore('greenfield');
     await a.host.recordChange();
     await desktop(a, [b]).syncNow();
     expect(await b.editor.read('greenfield', planner)).not.toContain('Marker: MANGO');
     expect((await b.editor.list()).plugins.find(plugin => plugin.name === 'greenfield')?.edited).toBe(false);
-    expect(existsSync(path.join(agentFarmConfigRoot(b.paneDir), 'avatars', 'greenfield--orchestrator.png'))).toBe(true);
+    expect(readFileSync(path.join(overrides, 'orchestrator.json'), 'utf8')).toContain('Boss');
+
+    // Clearing the last field removes A's override files, and B's folder goes with them.
+    a.clock.now += 60_000;
+    await setDisplay(a, 'greenfield/orchestrator', { title: '', description: '' });
+    expect(existsSync(path.join(OVERRIDES(a.paneDir, 'greenfield'), 'orchestrator.json'))).toBe(false);
+    await desktop(a, [b]).syncNow();
+    expect(existsSync(overrides)).toBe(false);
   }, 240_000);
 
   it('brings one plugin up to date on this computer before a Session uses it', async () => {
@@ -335,15 +376,19 @@ describe('profile sync: review fixes (fix round 2)', () => {
     const b = computer('build', 'b-id');
     await installFixture(a.paneDir);
     await installFixture(b.paneDir, 'labtest', 'MINE');
-    // A photo travels with A's save, but B's avatars "folder" is a file, so it can't be written there.
+    // A photo travels with A's save, but on B its file's name is taken by a folder, so it can't be written there.
+    await setDisplay(b, 'labtest/writer', { title: 'Mine' });
     a.clock.now = Date.now() + 60_000;
-    await a.editor.setPhoto('labtest/writer', Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.from('photo')]).toString('base64'));
-    writeFileSync(path.join(agentFarmConfigRoot(b.paneDir), 'avatars'), 'not a folder');
+    await setDisplay(a, 'labtest/writer', { title: 'Scribe', photo: SVG('red') });
+    mkdirSync(path.join(OVERRIDES(b.paneDir, 'labtest'), 'writer.svg', 'in-the-way'), { recursive: true });
     const before = (await readProfileSync(agentFarmConfigRoot(b.paneDir))).plugins.labtest;
-    await desktop(a, [b]).syncNow();
+    const status = await desktop(a, [b]).syncNow();
+    expect(status.computers[0]).toMatchObject({ state: 'failed' });
     expect(readFileSync(WRITER(b.paneDir), 'utf8')).toContain('Marker: MINE');
     expect(existsSync(path.join(agentFarmConfigRoot(b.paneDir), '.plugins', 'labtest.json'))).toBe(true);
     expect((await readProfileSync(agentFarmConfigRoot(b.paneDir))).plugins.labtest).toEqual(before);
+    // B's own title came back.
+    expect(readFileSync(path.join(OVERRIDES(b.paneDir, 'labtest'), 'writer.json'), 'utf8')).toContain('Mine');
   }, 120_000);
 
   it('keeps an edited Pane plugin when restoring Pane\'s version of it fails (F-3)', async () => {
@@ -438,14 +483,85 @@ describe('profile sync: review fixes (fix round 2)', () => {
     sync.stop();
   }, 120_000);
 
-  it('leaves a photo alone whose name another plugin could share (F-9)', async () => {
+  it('carries only override files with an override name of 64 KiB or less, and refuses a pack with any other', async () => {
+    const a = computer('studio', 'a-id');
     const b = computer('build', 'b-id');
-    const avatars = path.join(agentFarmConfigRoot(b.paneDir), 'avatars');
-    mkdirSync(avatars, { recursive: true });
-    const photo = path.join(avatars, 'lab--x--writer.png');
-    writeFileSync(photo, Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.from('photo')]));
-    await b.host.apply({ plugin: 'lab', record: { state: 'deleted', hash: '', savedAt: Date.now(), machine: 'a-id' } });
-    expect(existsSync(photo)).toBe(true);
+    await installFixture(a.paneDir);
+    await setDisplay(a, 'labtest/writer', { title: 'Scribe' });
+    const folder = OVERRIDES(a.paneDir, 'labtest');
+    writeFileSync(path.join(folder, 'Other.json'), '{}\n');
+    writeFileSync(path.join(folder, 'notes.txt'), 'not an override\n');
+    writeFileSync(path.join(folder, 'huge.svg'), Buffer.alloc(64 * 1024 + 1, 0x20));
+    symlinkSync(path.join(folder, 'writer.json'), path.join(folder, 'linked.json'));
+    await a.host.recordChange();
+    await desktop(a, [b]).syncNow();
+    expect(readFileSync(path.join(OVERRIDES(b.paneDir, 'labtest'), 'writer.json'), 'utf8')).toContain('Scribe');
+    for (const name of ['Other.json', 'notes.txt', 'huge.svg', 'linked.json']) expect(existsSync(path.join(OVERRIDES(b.paneDir, 'labtest'), name))).toBe(false);
+
+    // A pack made to carry a file with another name is refused, with nothing changed.
+    const c = computer('travel', 'c-id');
+    await installFixture(c.paneDir, 'labtest', 'ORIGINAL');
+    const exported = await a.host.export('labtest');
+    const transferId = exported.transferId ?? '';
+    const packFile = a.host.packFile(transferId);
+    const pack = decodeBoundary(JSON.parse(readFileSync(packFile, 'utf8')), boundary.object({ files: boundary.record(boundary.string), record: profileSyncRecordSchema }));
+    const files = Object.fromEntries(Object.entries(pack.files).map(([file, content]) => [file, Buffer.from(content, 'base64')]));
+    const overrides = { '../escape.json': Buffer.from('{}') };
+    const record = { ...pack.record, savedAt: Date.now() + 3_600_000, hash: packHash('saved', files, overrides) };
+    writeFileSync(packFile, JSON.stringify({ ...pack, plugin: 'labtest', record, overrides: { '../escape.json': overrides['../escape.json'].toString('base64') } }));
+    const sender = peer(c);
+    const sent = await sendFile({ write: async write => decodeBoundary(await sender.invoke(PROFILE_SYNC_CHANNELS.write, [write], 1000), writeResultSchema) }, transferId, 'pack.json', packFile);
+    await expect(c.host.apply({ plugin: 'labtest', record, transferId, pack: sent })).rejects.toMatchObject({ code: 'PROFILE_SYNC_DAMAGED' });
+    expect(readFileSync(WRITER(c.paneDir), 'utf8')).toContain('Marker: ORIGINAL');
+    expect(existsSync(path.join(agentFarmConfigRoot(c.paneDir), 'profile-overrides'))).toBe(false);
+  }, 120_000);
+
+  it('never sends or takes a display override whose JSON is malformed, so a working override elsewhere is kept (review F-4)', async () => {
+    const a = computer('studio', 'a-id');
+    const b = computer('build', 'b-id');
+    await installFixture(a.paneDir);
+    await installFixture(b.paneDir);
+    await setDisplay(b, 'labtest/writer', { title: 'Mine' });
+    const bOverride = path.join(OVERRIDES(b.paneDir, 'labtest'), 'writer.json');
+    const working = readFileSync(bOverride, 'utf8');
+    const before = (await readProfileSync(agentFarmConfigRoot(b.paneDir))).plugins.labtest;
+
+    // Sending side: a hand edit on A leaves its override malformed, later than B's save.
+    await setDisplay(a, 'labtest/writer', { title: 'Scribe' });
+    const aRecord = (await readProfileSync(agentFarmConfigRoot(a.paneDir))).plugins.labtest;
+    a.clock.now = Date.now() + 3_600_000;
+    writeFileSync(path.join(OVERRIDES(a.paneDir, 'labtest'), 'writer.json'), '{"title": "Scri');
+    await a.host.recordChange();
+    expect((await readProfileSync(agentFarmConfigRoot(a.paneDir))).plugins.labtest).toEqual(aRecord);
+    await desktop(a, [b]).syncNow();
+    expect(readFileSync(bOverride, 'utf8')).toBe(working);
+
+    // Receiving side: a pack carrying a malformed override is refused, B's override and record kept.
+    writeFileSync(path.join(OVERRIDES(a.paneDir, 'labtest'), 'writer.json'), '{"title":"Scribe"}\n');
+    const exported = await a.host.export('labtest');
+    const transferId = exported.transferId ?? '';
+    const packFile = a.host.packFile(transferId);
+    const pack = decodeBoundary(JSON.parse(readFileSync(packFile, 'utf8')), boundary.object({ files: boundary.record(boundary.string), record: profileSyncRecordSchema }));
+    const files = Object.fromEntries(Object.entries(pack.files).map(([file, content]) => [file, Buffer.from(content, 'base64')]));
+    const overrides = { 'writer.json': Buffer.from('{"title": "Scri') };
+    const record = { ...pack.record, savedAt: Date.now() + 7_200_000, hash: packHash('saved', files, overrides) };
+    writeFileSync(packFile, JSON.stringify({ ...pack, plugin: 'labtest', record, overrides: { 'writer.json': overrides['writer.json'].toString('base64') } }));
+    const sender = peer(b);
+    const sent = await sendFile({ write: async write => decodeBoundary(await sender.invoke(PROFILE_SYNC_CHANNELS.write, [write], 1000), writeResultSchema) }, transferId, 'pack.json', packFile);
+    await expect(b.host.apply({ plugin: 'labtest', record, transferId, pack: sent })).rejects.toMatchObject({ code: 'PROFILE_SYNC_DAMAGED' });
+    expect(readFileSync(bOverride, 'utf8')).toBe(working);
+    expect((await readProfileSync(agentFarmConfigRoot(b.paneDir))).plugins.labtest).toEqual(before);
+  }, 120_000);
+
+  it('never reads or writes a display overrides folder that is a link (F-5)', async () => {
+    const a = computer('studio', 'a-id');
+    await installFixture(a.paneDir);
+    await a.host.state();
+    const outside = tempDir();
+    writeFileSync(path.join(outside, 'writer.json'), '{"title":"secret"}\n');
+    mkdirSync(path.join(agentFarmConfigRoot(a.paneDir), 'profile-overrides'), { recursive: true });
+    symlinkSync(outside, OVERRIDES(a.paneDir, 'labtest'));
+    await expect(a.host.export('labtest')).rejects.toMatchObject({ code: 'PROFILE_PATH_INVALID' });
   }, 60_000);
 
   it('refuses to send or take a pack larger than profiles sync (F-10)', async () => {
@@ -552,15 +668,15 @@ describe('profile sync: review fixes (fix round 3)', () => {
     expect(await b.editor.read('greenfield', planner)).not.toContain('Marker: MANGO');
   }, 240_000);
 
-  it('syncs a title edit on an otherwise unchanged Pane plugin (F-13)', async () => {
+  it('syncs a cover page added to an otherwise unchanged Pane plugin (F-13)', async () => {
     const a = computer('studio', 'a-id');
     const b = computer('build', 'b-id');
     await installBundledAgentFarm({ paneDir: a.paneDir, bundle, log: () => undefined });
     await installBundledAgentFarm({ paneDir: b.paneDir, bundle, log: () => undefined });
     a.clock.now = Date.now() + 60_000;
-    await a.editor.save('greenfield', [{ path: 'pane.yaml', content: 'profiles:\n  orchestrator:\n    title: Chief planner\n' }]);
+    await a.editor.save('greenfield', [{ path: 'covers/orchestrator.md', content: '# Chief planner\n' }]);
     await desktop(a, [b]).syncNow();
-    expect(readFileSync(path.join(agentFarmConfigRoot(b.paneDir), 'plugins', 'greenfield', 'pane.yaml'), 'utf8')).toContain('Chief planner');
+    expect(readFileSync(path.join(agentFarmConfigRoot(b.paneDir), 'plugins', 'greenfield', 'covers', 'orchestrator.md'), 'utf8')).toContain('Chief planner');
   }, 240_000);
 
   it('keeps a computer\'s failed status when a Session brings a different profile up to date (F-14)', async () => {
