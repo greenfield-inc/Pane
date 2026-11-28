@@ -10,6 +10,7 @@ import {
   installRunpaneShim,
   PANE_MANAGED_SHIM_MARKER,
   syncAgentFarmShim,
+  agentFarmLauncherPath,
   withRunpaneBinOnPath,
   withRunpaneOnPath,
   writeBrowserShim,
@@ -174,6 +175,14 @@ describe('the agent-farm shim', () => {
     expect(agentFarm(state, ['run', 'greenfield/planner', '--', '--resume', 'x']).stdout.trim()).toBe(`AF run|greenfield/planner|--config-root|${configRoot}|--|--resume|x NODE=1`);
   });
 
+  // T-83 P3: Agent Farm prints child launches with argv[1] as the CLI, so it must be the shim, not Electron's cli.js.
+  it.skipIf(process.platform === 'win32')('names the agent-farm shim as the CLI Agent Farm prints in child launches', () => {
+    fs.writeFileSync(entry, 'console.log(process.argv[1]);\n');
+    const state = installWithAgentFarm();
+    expect(agentFarm(state, ['run', 'greenfield/orchestrator', '--print-acp']).stdout.trim()).toBe(path.join(state.binDir, 'agent-farm'));
+    expect(agentFarmLauncherPath(state)).toBe(path.join(state.binDir, 'agent-farm.cjs'));
+  });
+
   it.skipIf(process.platform === 'win32')('turns Agent Farm telemetry off unless Pane\'s switch is on, keeping a value already set', () => {
     const state = installWithAgentFarm();
     const telemetry = (env: Record<string, string> = {}) => spawnSync(path.join(state.binDir, 'agent-farm'), ['profiles', 'list'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', ...env } }).stderr.trim();
@@ -224,6 +233,33 @@ describe('the agent-farm shim', () => {
     expect(cmd).toContain('set ELECTRON_RUN_AS_NODE=1');
     expect(cmd).toContain(`"C:\\Program Files\\Pane\\Pane.exe" "${path.join(state.binDir, 'agent-farm.cjs')}" %*`);
     expect(fs.readFileSync(path.join(state.binDir, 'agent-farm'), 'utf8')).toContain('WSL_DISTRO_NAME');
+    // Child launches name a folder whose only agent-farm is the .cmd, so PowerShell and cmd run it for the bare name.
+    expect(fs.readdirSync(path.join(state.binDir, 'agent-farm-launch'))).toEqual(['agent-farm.cmd']);
+    expect(fs.readFileSync(path.join(state.binDir, 'agent-farm-launch', 'agent-farm.cmd'), 'utf8')).toBe(cmd);
+    expect(fs.readFileSync(path.join(state.binDir, 'agent-farm.cjs'), 'utf8')).toContain(JSON.stringify(path.join(state.binDir, 'agent-farm-launch', 'agent-farm')));
+  });
+
+  // Review F-7: a link or a file named like the Windows folder is the person's; cleanup leaves it and what it points at.
+  it.skipIf(process.platform === 'win32')('cleans the Windows folder only when it is a real folder in Pane\'s bin', () => {
+    const state = installWithAgentFarm('win32', 'C:\\Program Files\\Pane\\Pane.exe');
+    const folder = path.join(state.binDir, 'agent-farm-launch');
+    const marked = fs.readFileSync(path.join(folder, 'agent-farm.cmd'), 'utf8');
+    syncAgentFarmShim(undefined, state, 'win32');
+    expect(fs.existsSync(folder)).toBe(false);
+
+    const elsewhere = path.join(root, 'elsewhere');
+    fs.mkdirSync(elsewhere, { recursive: true });
+    fs.writeFileSync(path.join(elsewhere, 'agent-farm.cmd'), marked);
+    fs.symlinkSync(elsewhere, folder, 'dir');
+    syncAgentFarmShim(undefined, state, 'win32');
+    expect(fs.readFileSync(path.join(elsewhere, 'agent-farm.cmd'), 'utf8')).toBe(marked);
+    expect(fs.lstatSync(folder).isSymbolicLink()).toBe(true);
+    fs.unlinkSync(folder);
+
+    fs.writeFileSync(folder, 'mine');
+    expect(() => syncAgentFarmShim(undefined, state, 'win32')).not.toThrow();
+    expect(() => installWithAgentFarm('win32', 'C:\\Program Files\\Pane\\Pane.exe')).not.toThrow();
+    expect(fs.readFileSync(folder, 'utf8')).toBe('mine');
   });
 
   it.skipIf(process.platform === 'win32' || fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop'))('explains in WSL when interop is off', () => {

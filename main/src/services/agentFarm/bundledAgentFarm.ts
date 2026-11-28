@@ -10,7 +10,7 @@ import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } fro
 import { hashDirectory } from '../skillCacheManager';
 import { syncedPluginEdits } from './profileSyncFile';
 import { writeRecoveryNote } from './agentFarmRecovery';
-import { panePluginFiles, panePluginInstalled, parseProfileListJson, profileListEntries, writePanePluginSource } from './agentFarmProfiles';
+import { linkedAgentRefs, panePluginFiles, panePluginInstalled, parseProfileListJson, profileListEntries, writePanePluginSource } from './agentFarmProfiles';
 import { PANE_PROFILE_PLUGIN } from '../../../../shared/agentProfiles';
 import type { AgentFarmProfileList } from '../../../../shared/types/agentFarmProfiles';
 
@@ -109,13 +109,15 @@ function telemetryHeldOff(configRoot: string, profiles: boolean | undefined): bo
  * `agent-farm <args> --config-root <root>` with the bundled copy. While Pane holds telemetry off
  * it sets AGENT_FARM_TELEMETRY=off, the one setting that outranks a repository's
  * .agent-farm/workspace.yaml, unless the environment already chose a value. `profiles` is the
- * caller's live Profiles state; without it, config.json on disk says.
+ * caller's live Profiles state; without it, config.json on disk says. `launcher` is the agent-farm
+ * shim's launcher (runpaneShim.ts agentFarmLauncherPath): run through it, Agent Farm prints child
+ * launches with the shim as their CLI rather than this Electron binary (T-83 P3).
  */
-export function bundledAgentFarmProcess(bundle: BundledAgentFarm, args: string[], configRoot: string, env: NodeJS.ProcessEnv = process.env, runtime: string = process.execPath, profiles?: boolean): AgentFarmProcess {
+export function bundledAgentFarmProcess(bundle: BundledAgentFarm, args: string[], configRoot: string, env: NodeJS.ProcessEnv = process.env, runtime: string = process.execPath, profiles?: boolean, launcher?: string): AgentFarmProcess {
   const rest = { ...env };
   delete rest.AGENT_FARM_CONFIG_ROOT;
   if (!rest.AGENT_FARM_TELEMETRY && telemetryHeldOff(configRoot, profiles)) rest.AGENT_FARM_TELEMETRY = 'off';
-  return { executable: runtime, args: [bundle.entry, ...args, '--config-root', configRoot], env: { ...rest, ELECTRON_RUN_AS_NODE: '1' } };
+  return { executable: runtime, args: [launcher ?? bundle.entry, ...args, '--config-root', configRoot], env: { ...rest, ELECTRON_RUN_AS_NODE: '1' } };
 }
 
 /**
@@ -123,9 +125,9 @@ export function bundledAgentFarmProcess(bundle: BundledAgentFarm, args: string[]
  * shim in Pane's terminals): the bundled copy, against `<PANE_DIR>/agent-farm`. Undefined when
  * this build lacks the package. The person's own agent-farm on PATH is never used (T-63, Q3).
  */
-export function paneAgentFarmProcess(paneDir: string, args: string[], options: { profiles?: boolean; env?: NodeJS.ProcessEnv; bundle?: BundledAgentFarm | null; runtime?: string }): AgentFarmProcess | undefined {
+export function paneAgentFarmProcess(paneDir: string, args: string[], options: { profiles?: boolean; env?: NodeJS.ProcessEnv; bundle?: BundledAgentFarm | null; runtime?: string; launcher?: string }): AgentFarmProcess | undefined {
   const bundle = options.bundle === undefined ? bundledAgentFarm() : options.bundle;
-  return bundle ? bundledAgentFarmProcess(bundle, args, agentFarmConfigRoot(paneDir), options.env ?? process.env, options.runtime, options.profiles) : undefined;
+  return bundle ? bundledAgentFarmProcess(bundle, args, agentFarmConfigRoot(paneDir), options.env ?? process.env, options.runtime, options.profiles, options.launcher) : undefined;
 }
 
 /**
@@ -138,7 +140,8 @@ export async function listPaneAgentFarmProfiles(paneDir: string, env: NodeJS.Pro
   const agentFarm = paneAgentFarmProcess(paneDir, ['profiles', 'list', '--json'], { env, profiles: true });
   if (!agentFarm) return { profiles: [], error: `This Pane build does not include ${AGENT_FARM_PACKAGE}, so it has no Agent Farm profiles. Reinstall Pane from runpane.com.` };
   try {
-    return { profiles: profileListEntries(parseProfileListJson(await run(agentFarm))) };
+    const listed = parseProfileListJson(await run(agentFarm));
+    return { profiles: profileListEntries(listed), linked: linkedAgentRefs(listed) };
   } catch (error) {
     const reason = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1) || reasonOf(error);
     return { profiles: [], error: `Pane couldn't list its Agent Farm profiles: ${reason}. Restart Pane, then try again.` };

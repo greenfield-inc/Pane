@@ -128,23 +128,26 @@ function paneOwnsProfileFile(file: string): 'missing' | 'pane' | 'theirs' {
  * reads instruction files again but not a launch's system prompt. Both are rewritten at every
  * start, so a reload or switch reaches the agent. Only a folder under Pane's sessions folder is
  * written, and a PROFILE.md Pane didn't write stays as it is: the AGENTS.md section alone then
- * carries the profile (review F-1).
+ * carries the profile (review F-1). `title` is the profile's title in Agent Farm's list (T-83 P3),
+ * shown with its ref when known.
  */
-export function writeSessionProfile(sessionFolder: string, profile: string, instructions: string): void {
+export function writeSessionProfile(sessionFolder: string, profile: string, instructions: string, title?: string): void {
   const cwd = ownSessionFolder(sessionFolder);
   const text = instructions.trim();
+  const named = title?.trim() && title.trim() !== profile ? `${title.trim()} (${profile})` : profile;
   const file = path.join(cwd, SESSION_PROFILE_FILE);
   const owner = paneOwnsProfileFile(file);
   if (owner !== 'theirs') {
-    writeFileWithoutFollowingLinks(file, `${PROFILE_FILE_MARKER}\n# Agent Farm profile: ${profile}\n\nPane writes this file from the profile at every start of this Session's agent; edit the profile instead.\n\n${text}\n`);
+    writeFileWithoutFollowingLinks(file, `${PROFILE_FILE_MARKER}\n# Agent Farm profile: ${named}\n\nPane writes this file from the profile at every start of this Session's agent; edit the profile instead.\n\n${text}\n`);
   } else if (!lstatOrMissing(file)?.isFile()) {
     throw new PaneError('SESSION_PROFILE_FILE', `${file} is not a regular file (it may be a link), so Pane did not write the Session's profile there.`, `Remove ${file}, then start the Session again.`);
   }
   const section = [
     '## Agent Farm profile',
     owner === 'theirs'
-      ? `This Session runs the Agent Farm profile ${profile}. Its instructions follow (${SESSION_PROFILE_FILE} here is not Pane's and is not this profile). Where they disagree with the Pane Session rules above, the Pane rules win.`
-      : `This Session runs the Agent Farm profile ${profile}. Its instructions follow (Pane keeps the same text in ${SESSION_PROFILE_FILE}). Where they disagree with the Pane Session rules above, the Pane rules win.`,
+      ? `This Session runs the Agent Farm profile ${named}. Its instructions follow (${SESSION_PROFILE_FILE} here is not Pane's and is not this profile). Where they disagree with the Pane Session rules above, the Pane rules win.`
+      : `This Session runs the Agent Farm profile ${named}. Its instructions follow (Pane keeps the same text in ${SESSION_PROFILE_FILE}). Where they disagree with the Pane Session rules above, the Pane rules win.`,
+    `Start a linked agent with the exact command its Launch links list: it names Pane's agent-farm and carries --parent, and Agent Farm refuses a name that isn't listed.`,
     '',
     text,
   ].join('\n');

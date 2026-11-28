@@ -873,7 +873,7 @@ interface PanelCreateRequest {
   type?: 'terminal' | 'chat';
   tool?: PaneToolSpec;
   /** A chat tab: a plain agent, or an Agent Farm profile with its launch arguments. */
-  chat?: { agent?: string; profile?: string; args?: Record<string, string>; initialInput?: string; title?: string };
+  chat?: { agent?: string; profile?: string; args?: Record<string, string>; parent?: string; initialInput?: string; title?: string };
   /** A native session id the new tab resumes, as panes adopt --resume. */
   resume?: string;
   noFocus?: boolean;
@@ -4590,6 +4590,7 @@ export async function buildPanelCreateRequest(parsed: ParsedArgs): Promise<Panel
   }
   const source = parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined;
   if (parsed.launchArgs && !parsed.agentFarm) throw new Error('--arg is a launch argument for --agent-farm; pass --agent-farm <profile> too.');
+  if (parsed.agentFarmParent && !parsed.agentFarm) throw new Error('--parent is the Agent Farm parent token of a linked agent; pass --agent-farm <profile> too, or run the link\'s command with --tool-command.');
   if (parsed.chat || parsed.agentFarm) {
     if (parsed.toolCommand) throw new Error('A chat tab runs its agent over ACP, so it takes --agent or --agent-farm, not --tool-command.');
     const agent = parsed.chatAgent ?? parsed.agent;
@@ -4600,6 +4601,7 @@ export async function buildPanelCreateRequest(parsed: ParsedArgs): Promise<Panel
     if (agent) chat.agent = agent;
     if (parsed.agentFarm) chat.profile = parsed.agentFarm;
     if (parsed.launchArgs) chat.args = parsed.launchArgs;
+    if (parsed.agentFarmParent) chat.parent = parsed.agentFarmParent;
     if (initialInput) chat.initialInput = initialInput;
     if (parsed.title) chat.title = parsed.title;
     return {

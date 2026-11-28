@@ -203,7 +203,7 @@ FLAG_OWNERS = {
     "--id": ("secrets lease end",),
     "--kind": ("machine cleanup", "todos attach"),
     "--done-when": ("todos create", "todos update"),
-    "--parent": ("todos create",),
+    "--parent": ("todos create", "panels create"),
     "--check": ("todos update", "notify"),
     "--uncheck": ("todos update",),
     "--label": ("todos attach",),
@@ -256,6 +256,8 @@ class ParsedArgs:
     chat: bool = False
     agent_farm: Optional[str] = None
     launch_args: Dict[str, str] = field(default_factory=dict)
+    # `panels create --parent <token>`: the Agent Farm parent token of a linked agent started with --agent-farm (T-83 P3).
+    agent_farm_parent: Optional[str] = None
     title: Optional[str] = None
     url: Optional[str] = None
     file: Optional[str] = None
@@ -1275,7 +1277,10 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         parsed.done_when = [*(parsed.done_when or []), *json_lines(value)]
         return
     if flag == "--parent":
-        parsed.todo_parent = value
+        if parsed.command == "panels create":
+            parsed.agent_farm_parent = value
+        else:
+            parsed.todo_parent = value
         return
     if flag in {"--check", "--uncheck"}:
         lines = parse_done_when_lines(flag, value)

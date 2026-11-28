@@ -1242,6 +1242,8 @@ export interface RunpaneChatTabSpec {
   /** An Agent Farm profile, started through `agent-farm run --print-acp`. */
   profile?: string;
   args?: Record<string, string>;
+  /** The Agent Farm parent token (`--parent`) of a launch link the profile is started as (T-83 P3). */
+  parent?: string;
   /** The first prompt, sent once when the conversation starts. */
   initialInput?: string;
   title?: string;

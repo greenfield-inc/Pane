@@ -420,7 +420,7 @@ export class MoveImporter {
       // Agent Farm stops untrusted workspaces: each repository its tabs use must be trusted here.
       for (const found of repos.values()) {
         if (!found.found || !found.path) continue;
-        if (!found.pane.tabs.some(tab => agentFarmProfileOf(tabCommand(tab)))) continue;
+        if (!found.pane.tabs.some(tab => agentFarmProfileOf(tabCommand(tab), profilesOn()))) continue;
         const trust = await this.agentFarmTrust(found.path);
         if (trust === 'untrusted') {
           checks.push({ id: `trust:${found.path}`, level: 'block', title: `Agent Farm doesn't trust ${path.basename(found.path)} there`, detail: `Agent Farm stops untrusted workspaces. Trusting runs agent-farm workspace trust on ${machine}.`, fix: { kind: 'trust', label: 'Trust', path: found.path } });

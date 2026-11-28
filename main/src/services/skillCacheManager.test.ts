@@ -7,6 +7,8 @@ import { SkillCacheManager } from './skillCacheManager';
 import { buildPaneHomeSkill, buildPaneTodosSkill } from './paneHomeSkill';
 import { readTodosSwitchFrom } from './todos/todosFeature';
 import { withTodosText } from '../../../shared/todosText';
+import { withProfilesText } from '../../../shared/profilesText';
+import { readProfilesSwitchFrom } from './agentFarm/profilesFeature';
 import { prepareSessionWorkspace } from './sessionWorkspace';
 
 function normalizePathSeparators(value: string): string {
@@ -141,6 +143,7 @@ describe('SkillCacheManager Pane Chat guide', () => {
       tempDir = undefined;
     }
     readTodosSwitchFrom(() => undefined);
+    readProfilesSwitchFrom(() => undefined);
   });
 
   it('points the Pane Chat entry skill only at files that exist before any sync', async () => {
@@ -628,11 +631,33 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     const bundle = path.join(__dirname, 'paneChatBundle', 'skills');
     for (const skill of ['pane-orchestration', 'runpane', 'orchestrate-sessions']) {
       const source = await fs.readFile(path.join(bundle, skill, 'SKILL.md'), 'utf8');
-      expect(on.get(path.join(manager.paneChatSkillsRoot, skill, 'SKILL.md')), skill).toBe(source.replace(/^<!-- \/?pane:todos -->\n/gm, '').replace(/<!-- \/?pane:todos -->/g, ''));
+      expect(on.get(path.join(manager.paneChatSkillsRoot, skill, 'SKILL.md')), skill).toBe(withProfilesText(source.replace(/^<!-- \/?pane:todos -->\n/gm, '').replace(/<!-- \/?pane:todos -->/g, ''), false));
     }
     expect(on.get('Session folder AGENTS.md')).toContain('## To-dos: your work list');
     expect(on.get('Session folder AGENTS.md')).toContain("For a to-do's own Session, `runpane todos archive T-n`");
     for (const [name, text] of on) expect(text, name).not.toContain('pane:todos');
+  });
+
+  it('installs the linked-worker launch text only while Profiles is on; off keeps the earlier text (T-83 P3, review F-2)', async () => {
+    const manager = new SkillCacheManager();
+    const installed = () => fs.readFile(path.join(manager.paneChatSkillsRoot, 'pane-orchestration', 'SKILL.md'), 'utf8');
+
+    await manager.ensurePaneChatGuide();
+    const off = (await installed()).replace(/\s+/g, ' ');
+    expect(off).toContain('"agent-farm run <profile>:<variant> --arg parent=<absolute status file> --arg source=<absolute source>"');
+    expect(off).toContain('`--agent-farm <profile>:<variant> --arg key=value …` for an Agent Farm profile, with `--initial-input`');
+    expect(off).not.toContain('--parent <your token>');
+    expect(off).not.toContain('Launch links');
+    expect(off).not.toContain('pane:profiles');
+    expect(off).not.toContain('pane:no-profiles');
+
+    readProfilesSwitchFrom(() => ({ sessionProfilesEnabled: true }));
+    await manager.ensurePaneChatGuide();
+    const on = (await installed()).replace(/\s+/g, ' ');
+    expect(on).toContain('Agent Farm linked agents:');
+    expect(on).toContain('add `--parent <your token>`, the token your Launch links print, for a linked agent');
+    expect(on).not.toContain('<profile>:<variant>');
+    expect(on).not.toContain('pane:profiles');
   });
 
   it('installs the wrap-up skill only where Session orchestrators look, not in the home skill workers get', async () => {

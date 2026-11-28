@@ -276,6 +276,13 @@ describe('bundledAgentFarmProcess', () => {
     expect(process).toEqual({ executable: '/Pane.exe', args: ['/app/dist/cli.js', 'run', 'greenfield/planner', '--config-root', '/pane/agent-farm'], env: { PATH: '/bin', ELECTRON_RUN_AS_NODE: '1' } });
   });
 
+  // T-83 P3: through the shim's launcher, Agent Farm prints the shim in child launches.
+  it('runs the agent-farm shim\'s launcher in place of the entry when given one', () => {
+    const bundle = { root: '/app', entry: '/app/dist/cli.js', version: '0.3.0' };
+    const process = bundledAgentFarmProcess(bundle, ['run', 'greenfield/planner'], '/pane/agent-farm', { PATH: '/bin', AGENT_FARM_TELEMETRY: 'off' }, '/Pane.exe', true, '/pane/bin/agent-farm.cjs');
+    expect(process.args).toEqual(['/pane/bin/agent-farm.cjs', 'run', 'greenfield/planner', '--config-root', '/pane/agent-farm']);
+  });
+
   // A repository's .agent-farm/workspace.yaml outranks settings.json; only AGENT_FARM_TELEMETRY outranks it.
   it('turns telemetry off for the launch while Profiles is on, unless Pane\'s switch is on, keeping a value already set', async () => {
     const paneDir = tempDir();

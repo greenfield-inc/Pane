@@ -196,6 +196,26 @@ export function listedDefault(profile: AgentFarmListedProfile): { agent?: string
   return chosen ? { agent: chosen[1].agent, harness: chosen[1].harness, model: chosen[1].model } : { agent: profile.agent ?? undefined, harness: profile.harness ?? undefined, model: profile.model };
 }
 
+/**
+ * The agents a listing's trees link to, as names they start by (`plugin/agent`, and `plugin/alias` when
+ * the alias differs), or `plugin/*` for a link that may start any agent in its plugin (T-83 P3).
+ */
+export function linkedAgentRefs(profiles: AgentFarmListedProfile[]): string[] {
+  const refs = new Set<string>();
+  const walk = (links: readonly AgentFarmListedLink[], plugin: string) => {
+    for (const link of links) {
+      const own = link.plugin ?? plugin;
+      if (link.any) refs.add(`${own}/*`);
+      // Agent Farm 0.3.0 lists agent as plugin/agent already.
+      if (link.agent) refs.add(link.agent.includes('/') ? link.agent : `${own}/${link.agent}`);
+      if (link.mode === 'launch' && link.alias && !link.any) refs.add(`${own}/${link.alias}`);
+      walk(link.children, own);
+    }
+  };
+  for (const profile of profiles) walk(profile.tree ?? [], profile.plugin);
+  return [...refs];
+}
+
 /** New Session's and the profile picker's entries: every listed profile that resolved, in Agent Farm's order. */
 export function profileListEntries(profiles: AgentFarmListedProfile[]): AgentFarmProfileEntry[] {
   return profiles.flatMap((profile): AgentFarmProfileEntry[] => {

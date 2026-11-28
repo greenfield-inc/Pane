@@ -3,9 +3,17 @@ import type { NotifyItem } from '../../../../shared/types/notify';
 import type { SessionMoveCheck } from '../../../../shared/types/sessionMove';
 import type { PathMap } from './pathMap';
 
-/** The Agent Farm profile a launch command runs (`agent-farm run greenfield/implementer:opus …`), without its variant. */
-export function agentFarmProfileOf(command: string | undefined): string | null {
-  const match = /(?:^|\s)agent-farm\s+run\s+([^\s:]+)/.exec(command ?? '');
+/**
+ * The Agent Farm profile a launch command runs (`agent-farm run greenfield/planner:codex …`), without
+ * its variant. With `links` (Profiles on, T-83 P3) it also reads a launch link's command as Agent Farm
+ * prints it, with the shim's path (`/Users/me/.pane/bin/agent-farm run greenfield/planner
+ * --config-root … --parent …`). Only the trust check passes `links`: a linked agent isn't a top-level
+ * profile the other machine lists, so it can't be a profile the move requires there (review F-3).
+ */
+export function agentFarmProfileOf(command: string | undefined, links = false): string | null {
+  const match = links
+    ? /(?:^|[\s/\\'"])agent-farm(?:\.cmd)?['"]?\s+run\s+([^\s:'"]+)/i.exec(command ?? '')
+    : /(?:^|\s)agent-farm\s+run\s+([^\s:]+)/.exec(command ?? '');
   return match ? match[1] : null;
 }
 

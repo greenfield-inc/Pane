@@ -14,7 +14,7 @@ const report = boundary.object({
 });
 const launchSchema = boundary.union(
   boundary.object({ kind: boundary.literal('agent'), mode: boundary.optional(boundary.string), fullAccess: boundary.optional(boundary.literal(true)) }),
-  boundary.object({ kind: boundary.literal('profile'), profile: boundary.nonEmptyString, args: boundary.optional(boundary.record(boundary.string)), fullAccess: boundary.optional(boundary.literal(true)), fromSession: boundary.optional(boundary.literal(true)) }),
+  boundary.object({ kind: boundary.literal('profile'), profile: boundary.nonEmptyString, args: boundary.optional(boundary.record(boundary.string)), parent: boundary.optional(boundary.nonEmptyString), fullAccess: boundary.optional(boundary.literal(true)), fromSession: boundary.optional(boundary.literal(true)) }),
 );
 const schema: BoundarySchema<ChatPanelState> = boundary.object({
   agent: boundary.nonEmptyString,
