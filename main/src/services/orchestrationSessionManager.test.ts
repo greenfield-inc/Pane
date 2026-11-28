@@ -612,7 +612,7 @@ describe('OrchestrationSessionManager', () => {
         farm.profiles.mockResolvedValue({ profiles: [], error: 'Pane couldn\'t list its Agent Farm profiles.' });
         await fixture.manager.refreshPluginHashes(true);
         expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileGone).toBe(true);
-        const switched = await fixture.manager.switchProfile({ sessionId: created.session.id }, 'pane/codex');
+        const switched = await switchTo(fixture, created.session.id, 'pane/codex', 'new-conversation');
         expect(switched.session.agentProfileGone).toBeUndefined();
       }));
 
