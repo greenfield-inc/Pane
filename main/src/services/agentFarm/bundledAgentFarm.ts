@@ -63,6 +63,8 @@ export interface AgentFarmProcess {
   executable: string;
   args: string[];
   env: NodeJS.ProcessEnv;
+  /** The folder it runs in; absent, Pane's own working folder. */
+  cwd?: string;
 }
 
 type JsonFile = { state: 'read'; value: JsonObject } | { state: 'missing' } | { state: 'unreadable' };
@@ -146,7 +148,9 @@ export async function paneAgentFarmHarness(paneDir: string, ref: string, env: No
   const agentFarm = paneAgentFarmProcess(paneDir, ['inspect', ref], { env, profiles: true });
   if (!agentFarm) return undefined;
   try {
-    const inspected = decodeOptionalBoundary(JSON.parse(await run(agentFarm)), boundary.object({ agents: boundary.record(boundary.jsonObject) }));
+    // inspect reads the workspace.yaml of the repository it runs in, and refuses an untrusted one: run it
+    // in Pane's own Agent Farm folder, where a profile's harness is the plugin's alone.
+    const inspected = decodeOptionalBoundary(JSON.parse(await run({ ...agentFarm, cwd: agentFarmConfigRoot(paneDir) })), boundary.object({ agents: boundary.record(boundary.jsonObject) }));
     return decodeOptionalBoundary(inspected?.agents.main?.harness, boundary.nonEmptyString);
   } catch (error) {
     console.warn(`[AgentFarm] Pane couldn't read which agent ${ref} runs: ${reasonOf(error)}`);
@@ -185,8 +189,8 @@ const uninstallOutput = boundary.object({
 /** Runs one Agent Farm command and returns its stdout. */
 type AgentFarmRunner = (process: AgentFarmProcess) => Promise<string>;
 
-const runAgentFarm: AgentFarmRunner = async ({ executable, args, env }) => {
-  const { stdout } = await execFileAsync(executable, args, { env, timeout: 120_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+const runAgentFarm: AgentFarmRunner = async ({ executable, args, env, cwd }) => {
+  const { stdout } = await execFileAsync(executable, args, { env, cwd, timeout: 120_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
   return stdout;
 };
 
