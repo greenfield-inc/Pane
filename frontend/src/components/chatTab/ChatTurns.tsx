@@ -245,11 +245,11 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions,
     {fold}
     {!open && actions.device && pinnedMarkers(activity, latest ? actions.device.openedHere : []).map(marker => <PinnedDeviceCard key={marker.panelId} marker={marker} device={actions.device!} />)}
     <div className="contents" title={ended?.full}>{after.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
-    {!turn.running && (responseText(turn) || ended) && <div className="chat-message-actions chat-response-actions">
+    {!turn.running && (responseText(turn) || (ended && !(latest && activity.length))) && <div className="chat-message-actions chat-response-actions">
       {responseText(turn) && <ChatCopyButton label="Copy response" text={() => responseText(turn)} />}
       {/* T-138: every finished agent turn shows its time at the row's end on hover; the latest
-          turn without a fold keeps it in view (D-202). */}
-      {ended && <span className="chat-turn-time" data-pinned={latest && !activity.length} title={ended.full}>{ended.short}</span>}
+          turn keeps it in view (D-202), here or in its fold row ("Worked for 27s · 2:04 PM"). */}
+      {ended && !(latest && activity.length) && <span className="chat-turn-time" data-pinned={latest} title={ended.full}>{ended.short}</span>}
     </div>}
     {stoppedText(turn) && <p className="chat-turn-stopped">{stoppedText(turn)}</p>}
   </div>;
