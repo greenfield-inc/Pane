@@ -147,11 +147,11 @@ const chatProfileLaunch = boundary.object({ kind: boundary.literal('profile'), p
  * The Agent Farm profile a saved tab launches and the snapshot folder it resolves from (undefined
  * when that folder doesn't travel with the Session folder), or null for a tab that isn't Agent
  * Farm's. A terminal keeps its launch as a command; a profile chat as `launch` (#1762 F-8), whose
- * own `snapshot` wins as `--snapshot` does on a command.
+ * own `snapshot` wins as `--snapshot` does on a command. `chats: false` reads terminals only, as before.
  */
-export function tabAgentFarmLaunch(state: JsonObject, sessionFolder: string, recordSnapshot: string | undefined): { profile: string; folder: string | undefined } | null {
+export function tabAgentFarmLaunch(state: JsonObject, sessionFolder: string, recordSnapshot: string | undefined, { chats = true }: { chats?: boolean } = {}): { profile: string; folder: string | undefined } | null {
   const pinned = { agentFarmSnapshot: decodeOptionalBoundary(state.agentFarmSnapshot, boundary.string) };
-  const chat = decodeOptionalBoundary(state.launch, chatProfileLaunch);
+  const chat = chats ? decodeOptionalBoundary(state.launch, chatProfileLaunch) : undefined;
   if (chat) return { profile: chat.profile, folder: insideSessionSnapshots(chat.snapshot, pinned, sessionFolder, recordSnapshot) };
   const { launch } = readTabFields(state);
   const profile = agentFarmProfileOf(launch);

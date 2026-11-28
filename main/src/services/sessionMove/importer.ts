@@ -723,7 +723,8 @@ export class MoveImporter {
       if (text === null) await fs.promises.copyFile(source, target);
       else await fs.promises.writeFile(target, rewriteText(map, text));
       // #1762 F-2: a script that ran there runs here; only execute bits, where it can be read.
-      if (executable.has(`session/${relative}`)) {
+      // Behind Profiles, which brings the snapshots that hold such scripts; off, a move copies as it did.
+      if (profilesOn() && executable.has(`session/${relative}`)) {
         const mode = (await fs.promises.stat(target)).mode & 0o777;
         await fs.promises.chmod(target, mode | ((mode & 0o444) >> 2));
       }

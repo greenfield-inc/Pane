@@ -38,6 +38,7 @@ import { locateConversation } from './conversations';
 import { createBundle, createSnapshot, ignoredPaths, putBackRef } from './gitSnapshot';
 import { agentFarmProfiles, cliVersion, type TargetPreflight, type TargetStatus } from './importer';
 import { heldBackChecks, sessionApprovals, tabAgentFarmLaunch, type SessionApprovals } from './rules';
+import { profilesOn } from '../agentFarm/profilesFeature';
 import { snapshotHoldsProfile } from '../agentFarm/sessionSnapshot';
 import type { MovedApproval } from '../notify/notifyService';
 import { keepIgnoredFiles } from './ignoredFiles';
@@ -251,8 +252,8 @@ export class MoveCoordinator {
         const moved = tabState.get(panel.id);
         const { agentId: agent, conversationId } = readTabFields(custom);
         if (agent && isConfiguredAgent(agent) && !(agent in agentVersions)) agentVersions[agent] = await cliVersion(configuredAgent(agent).executables[0]);
-        // A terminal's command or a profile chat's structured launch (#1762 F-8).
-        const farm = tabAgentFarmLaunch(custom, sessionFolder, record.agentFarmSnapshot);
+        // A terminal's command, and with Profiles on a profile chat's structured launch (#1762 F-8).
+        const farm = tabAgentFarmLaunch(custom, sessionFolder, record.agentFarmSnapshot, { chats: profilesOn() });
         if (farm) {
           profileNames.add(farm.profile);
           profileSnapshots.set(farm.profile, [...profileSnapshots.get(farm.profile) ?? [], farm.folder]);

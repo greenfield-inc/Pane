@@ -152,4 +152,7 @@ describe('tabAgentFarmLaunch: a move preflight sees a profile chat as it does a 
     expect(tabAgentFarmLaunch({ launch: { kind: 'agent' } }, folder, '.agent-farm/snapshots/d3')).toBeNull();
     expect(tabAgentFarmLaunch({ launchCommand: 'claude' }, folder, undefined)).toBeNull();
   });
+  it('with Profiles off, reads terminals only, as the move preflight did before', () => {
+    expect(tabAgentFarmLaunch({ launch: { kind: 'profile', profile: 'greenfield/planner' } }, folder, undefined, { chats: false })).toBeNull();
+  });
 });

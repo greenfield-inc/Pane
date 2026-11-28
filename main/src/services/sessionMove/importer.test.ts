@@ -8,6 +8,7 @@ import type { ToolPanel } from '../../../../shared/types/panels';
 import type { AppServices } from '../../ipc/types';
 import { PaneCommandRegistry } from '../../daemon/commandRegistry';
 import { unreadableSnapshots } from '../agentFarm/sessionSnapshot';
+import { readProfilesSwitchFrom } from '../agentFarm/profilesFeature';
 import { sessionWorkspacePath } from '../sessionWorkspace';
 import { createBundle, createSnapshot } from './gitSnapshot';
 import { MoveImporter, type ImporterTabs, type TargetStatus } from './importer';
@@ -327,8 +328,13 @@ describe('MoveImporter', { timeout: BUILD_TIMEOUT_MS }, () => {
       sessionFolder: { root: '/a/.pane/sessions/sess-1', files: Object.keys(all).map(relative => `.agent-farm/snapshots/d1/${relative}`) },
       files: [{ path: helper, bytes: Buffer.byteLength(script), sha256: createHash('sha256').update(script).digest('hex'), executable: true }],
     }), snapshotPackage(all));
-    importer.build(moveId);
-    expect((await waitStage(importer, moveId, ['built', 'failed'])).stage).toBe('built');
+    readProfilesSwitchFrom(() => ({ sessionProfilesEnabled: true }));
+    try {
+      importer.build(moveId);
+      expect((await waitStage(importer, moveId, ['built', 'failed'])).stage).toBe('built');
+    } finally {
+      readProfilesSwitchFrom(() => undefined);
+    }
     const moved = path.join(sessionWorkspacePath('sess-1'), '.agent-farm', 'snapshots', 'd1', 'plugins', 'team', 'bin', 'helper.sh');
     expect(execFileSync(moved).toString()).toBe('moved\n');
     expect(fs.statSync(path.join(path.dirname(moved), '..', 'agents', 'lead.md')).mode & 0o111).toBe(0);
