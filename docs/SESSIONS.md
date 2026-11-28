@@ -155,7 +155,7 @@ the agent to finish its current reply, then restart its chat tab on the new laun
 With Profiles off, the menu has neither item, `orchestration-sessions:switch-profile`
 and `:reload-profile` refuse (`SESSION_PROFILE_UNSUPPORTED`), Pane reads no plugin for the changed mark, and rows show no amber dot.
 A Session tab whose profile Pane chose (its creation or a Switch, saved with
-`sessionProfile`) starts its agent on its own, as main does; a launch command's own
+`fromSession`) starts its agent on its own, as main does; a launch command's own
 Agent Farm profile still runs. A Reload or Switch still waiting for a reply is
 dropped, and a waiting confirmation or Undo toast closes.
 
