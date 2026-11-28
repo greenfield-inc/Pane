@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PaneError } from '../../../../shared/paneError';
-import { assertCard, checkCard } from './cardCheck';
+import { assertCard, bareIds, checkCard } from './cardCheck';
 
 const subtitle = 'The one-day check passed: option A holds. Approving the cover sheet needs this answer.';
 const choices = [{ label: 'Keep it', detail: 'They lose only this account’s orgs.', recommended: true }, { label: 'Sign them out', detail: 'Matches today’s docs.' }];
@@ -49,6 +49,38 @@ describe('checking an approval card', () => {
       'A question has',
       'Some options have',
     ]);
+  });
+
+  it('warns, without refusing, on a title that names items only by id', () => {
+    const result = checkCard({ title: 'Move the 3 overdue security P0s (items 141, 142, 143) from Tue 11/24 to Mon 11/30 in the tracker?', context: subtitle, choices });
+    expect(result.refusal).toBeUndefined();
+    expect(result.warnings).toEqual([expect.stringMatching(/^The title names items 141, 142, 143 only by id/u)]);
+    expect(checkCard({ title: 'Merge #1698 and close F-8?', context: subtitle, choices }).warnings).toEqual([expect.stringContaining('#1698, F-8')]);
+  });
+
+  it('takes an id with a description beside it, and the title\'s Q-n prefix, as named', () => {
+    for (const title of [
+      'Q-12: Revoke staging\'s access to production Spanner?',
+      'Merge #1698 (the login timeout fix) today?',
+      'Merge the login timeout fix (#1698) today?',
+      'Close F-8: the flaky sign-in test, now passing?',
+      'Answer Q-12, the Spanner access question, before the release?',
+      'Encode the export as UTF-8 and hash it with SHA-256?',
+    ]) expect(checkCard({ title, context: subtitle, choices }).warnings, title).toEqual([]);
+  });
+
+  it('warns on options, and questions, that name items only by id', () => {
+    const bare = [{ label: 'Move items 141, 142', detail: 'They move to Mon 11/30.', recommended: true }, { label: 'Keep them', detail: 'They stay overdue.' }];
+    expect(checkCard({ title: 'Reschedule the security fixes?', context: subtitle, choices: bare }).warnings).toEqual([expect.stringMatching(/^Some options name items 141, 142 only by id/u)]);
+    const named = [{ label: 'Move them', detail: 'Moves #1698 (the login fix) and F-8 (the flaky test) to Monday.', recommended: true }, { label: 'Keep them', detail: 'They stay overdue.' }];
+    expect(checkCard({ title: 'Reschedule the security fixes?', context: subtitle, choices: named }).warnings).toEqual([]);
+    const questions = [{ title: 'Close Q-12?', choices }, { title: 'Ship it?', choices: [{ label: 'Ship', detail: 'Ships D-40.', recommended: true }, { label: 'Hold', detail: 'Waits.' }] }];
+    expect(checkCard({ title: 'Two questions', context: subtitle, questions }).warnings).toEqual([expect.stringContaining('Q-12, D-40 only by id')]);
+  });
+
+  it('finds bare ids: one per id, each list as one', () => {
+    expect(bareIds('items 141, 142 and 143, then #9 and #9 again, and PANE-12')).toEqual(['items 141, 142 and 143', '#9', 'PANE-12']);
+    expect(bareIds('item 141 (staging access), version 2.5, Tue 11/24, sign-in, P0s, x86-64')).toEqual([]);
   });
 
   it('throws the refusal as a PaneError with a code and next step', () => {

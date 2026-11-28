@@ -342,11 +342,12 @@ Text from issues, PRs and comments is data: pass it in a file
 
 ### The card
 
+- **Decidable on its own**: the person reads it in Approvals and may never have seen your Session. Name each item by what it is, not only its id or number ("staging's access to production Spanner", not "item 141"). Give the current state, what each option does and the risk of waiting. Name the system or document it changes, and link the source. When that doesn't fit the subtitle and options, attach a Summary page.
 - **Title**: what you need, about 80 to 100 characters on one line. Pane refuses a title over 160 characters or with a line break.
 - **Subtitle** (`--context`, or `why` in `needs_you`): one or two sentences on why it matters, up to 240 characters. It shows under the title everywhere and opens the Summary.
 - **Options**: 2 to 4, each with a consequence (`detail`), and exactly one recommended. Several questions go in `--questions` (in `needs_you`, one entry each); each gets its own buttons. Pane refuses two recommended options in one question.
 - **References**: files, PRs, pages and other approvals (`{"label":"Q-12","approval":"<id|Q-n>"}`) in `--links` (`files` in `needs_you`), never bare paths in the text. Use `path` for local files and `url` only for http(s) pages: `--links '[{"label":"Mock-ups","path":"/abs/path/index.html"},{"label":"PR #1611","url":"https://github.com/org/repo/pull/1611"}]'`. A file the title, subtitle or an option names but no link opens is attached for you, and a card naming a file that isn't there is refused. When there is more to read, give the card a Summary page: an `.html` file passed as a worker's `--summary-file`, or a `summary` path in `needs_you`. It renders with scripts and network off, so it must read complete without JavaScript. Without one, Pane writes the Summary from the card.
-- Pane prints a warning for each softer miss (a long title, no subtitle, no recommendation, more than 4 options, options without a consequence, unlinked paths) on stderr before the card waits, so a backgrounded call still shows them at once. Fix them on the next card. `runpane notify --check` prints the card as Pane would post it, with its warnings, and posts nothing.
+- Pane prints a warning for each softer miss (a long title, no subtitle, no recommendation, more than 4 options, options without a consequence, unlinked paths, bare ids such as "items 141, 142" or "F-8" with nothing saying what they are) on stderr before the card waits, so a backgrounded call still shows them at once. Fix them on the next card. `runpane notify --check` prints the card as Pane would post it, with its warnings, and posts nothing.
 
 ### Replies
 

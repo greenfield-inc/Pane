@@ -355,7 +355,9 @@ up and ask:
    fields: a title of about 80 characters, context as why it matters, each
    choice with what it does (`detail`) and one `recommended`, and links to
    every reference, other approvals included
-   (`{"label":"Q-12","approval":"<id|Q-n>"}`).
+   (`{"label":"Q-12","approval":"<id|Q-n>"}`). Write it to decide on its own,
+   as the pane skill's "Asking the person in Pane" says: each item named by
+   what it is, not only its id.
 3. Put it on the stack: `runpane autopilot stack push --item <its id> --json`
    (the id is in the notify call's output; `runpane autopilot waiting --json`
    lists it too).

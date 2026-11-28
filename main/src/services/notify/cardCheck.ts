@@ -6,7 +6,8 @@ import { NOTIFY_LINKS_MAX, type NotifyChoice, type NotifyLink, type NotifySubQue
  * a subtitle (the context) of one or two sentences up to 240 characters, 2 to 4 options each with
  * a consequence and one recommended, and linked references. Pane refuses only the two clear
  * mistakes (a title over 160 characters or with a line break, and two recommended options in one
- * question) and warns on the rest. Every way of asking reaches this: runpane notify, runpane
+ * question) and warns on the rest, bare ids included: an approval is read by someone who never saw
+ * the Session. Every way of asking reaches this: runpane notify, runpane
  * report and the MCP notify tool.
  */
 
@@ -39,6 +40,36 @@ export interface CardCheck {
 }
 
 const ABSOLUTE_PATH = /(?:^|[\s(“"'`])(\/(?:[\w.@+~-]+\/)+[\w.@+~-]+(?:#[\w.-]+)?)/gu;
+
+/**
+ * Ids a reader outside the Session can't decode: "#1698", "F-8", "Q-12", "items 141, 142". A
+ * prefix that names a standard ("UTF-8", "SHA-256") is not an id.
+ */
+const ID_REFERENCE = /(?<![\w#/.-])(?:#\d+|[A-Z]{1,5}-\d+(?:\.\d+)*|(?:items?|issues?|tickets?|rows?|tasks?|bugs?|PRs?|nos?\.?)\s+\d+(?:(?:\s*,\s*|\s+(?:and|&)\s+)\d+)*)(?![\w-])/giu;
+const NOT_ID_PREFIX = new Set(['UTF', 'SHA', 'ISO', 'AES', 'RSA', 'MD', 'ES', 'ECMA', 'GPT', 'IPV', 'TLS', 'HTTP', 'COVID']);
+/** What says what an id is, right after it: "(the login fix)", ": login", " — login", ", the login fix". */
+const DESCRIPTION_AFTER = /^\s*(?:\([^)]*[a-z]{3}[^)]*\)|[:\u2014\u2013]\s*\p{L}|\s-\s*\p{L}|,\s+(?:the|a|an|which|its|our|their|your)\b)/iu;
+/** The title's leading Q-n, which a Session question carries by rule. */
+const QN_PREFIX = /^\s*Q-\d+\s*:\s*/u;
+
+/** The ids in the text with nothing beside them saying what they are. */
+export function bareIds(text: string): string[] {
+  const bare: string[] = [];
+  for (const match of text.matchAll(ID_REFERENCE)) {
+    const id = match[0];
+    const prefix = /^([A-Za-z]+)-\d/u.exec(id)?.[1];
+    if (prefix && (prefix !== prefix.toUpperCase() || NOT_ID_PREFIX.has(prefix))) continue;
+    const several = /\d\D+\d/u.test(id) && !prefix && !id.startsWith('#');
+    const start = match.index ?? 0;
+    const after = text.slice(start + id.length);
+    const before = text.slice(0, start);
+    // One id in brackets after its name, "the login fix (#1698)", is named; a list in brackets is not.
+    const namedBefore = /\p{L}[^()]*\(\s*$/u.test(before) && /^\s*\)/u.test(after);
+    if (!several && (namedBefore || DESCRIPTION_AFTER.test(after))) continue;
+    bare.push(id);
+  }
+  return [...new Set(bare)];
+}
 
 /** Code points, as the CLIs count them. */
 function length(text: string): number {
@@ -97,6 +128,13 @@ export function checkCard(card: CardFields): CardCheck {
   if (questions.some(question => !question.choices.some(choice => choice.recommended))) warnings.push('No option is recommended: mark the one you would pick with "recommended": true.');
   if (questions.some(question => question.choices.length > CARD_OPTIONS_WARN)) warnings.push(`A question has more than ${CARD_OPTIONS_WARN} options; offer 2 to ${CARD_OPTIONS_WARN}.`);
   if (questions.some(question => question.choices.some(choice => !choice.detail?.trim()))) warnings.push('Some options have no consequence: give each a "detail" saying what happens if it is picked.');
+  const titleIds = bareIds(title.replace(QN_PREFIX, ''));
+  if (titleIds.length) warnings.push(`The title names ${titleIds.join(', ')} only by id: say what each is beside it ("F-8 (the login timeout)") or name it instead, for a reader who never saw the Session.`);
+  const optionIds = [...new Set(questions.flatMap(question => [
+    ...(card.questions?.length ? bareIds(question.title.replace(QN_PREFIX, '')) : []),
+    ...question.choices.flatMap(choice => [...bareIds(choice.label), ...bareIds(choice.detail ?? '')]),
+  ]))];
+  if (optionIds.length) warnings.push(`Some options name ${optionIds.join(', ')} only by id: say what each is beside it, or name it instead, for a reader who never saw the Session.`);
   return { warnings };
 }
 
