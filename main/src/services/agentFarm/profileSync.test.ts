@@ -540,7 +540,7 @@ describe('profile sync: review fixes (fix round 3)', () => {
     const b = computer('build', 'b-id');
     await installBundledAgentFarm({ paneDir: a.paneDir, bundle, log: () => undefined });
     await installBundledAgentFarm({ paneDir: b.paneDir, bundle, log: () => undefined });
-    const planner = 'agents/planner.md';
+    const planner = 'agents/orchestrator.md';
     a.clock.now = Date.now() + 60_000;
     await a.editor.save('greenfield', [{ path: planner, content: `${await a.editor.read('greenfield', planner)}\nMarker: MANGO\n` }]);
     await desktop(a, [b]).syncNow();
@@ -558,7 +558,7 @@ describe('profile sync: review fixes (fix round 3)', () => {
     await installBundledAgentFarm({ paneDir: a.paneDir, bundle, log: () => undefined });
     await installBundledAgentFarm({ paneDir: b.paneDir, bundle, log: () => undefined });
     a.clock.now = Date.now() + 60_000;
-    await a.editor.save('greenfield', [{ path: 'pane.yaml', content: 'profiles:\n  planner:\n    title: Chief planner\n' }]);
+    await a.editor.save('greenfield', [{ path: 'pane.yaml', content: 'profiles:\n  orchestrator:\n    title: Chief planner\n' }]);
     await desktop(a, [b]).syncNow();
     expect(readFileSync(path.join(agentFarmConfigRoot(b.paneDir), 'plugins', 'greenfield', 'pane.yaml'), 'utf8')).toContain('Chief planner');
   }, 240_000);
