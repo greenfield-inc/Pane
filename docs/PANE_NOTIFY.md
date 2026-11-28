@@ -49,7 +49,10 @@ another approval from it.
 
 Pane builds each approval's **Summary** from these fields (D-225), unless the
 asker linked its own `.html` Summary page (a worker's `--summary-file`, or
-`summary` in its `needs_you`). Agents write a card to read on its own: a
+`summary` in its `needs_you`). Agents write a card to decide on its own, for a
+reader who never saw the Session: each item named by what it is, not only its
+id; the current state, what each option does and the risk of waiting; the
+system or document it changes, linked. It has a
 one-line title of about 80 to 100 characters, `context` of one or two sentences
 on why it matters (up to 240 characters), 2 to 4 choices each with what it does
 (`detail`) and exactly one `recommended`, and links to every reference: files,
