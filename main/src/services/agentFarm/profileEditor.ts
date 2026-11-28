@@ -50,6 +50,8 @@ export interface ProfileEditorOptions {
   run?: AgentFarmRunner;
   /** Called after a plugin's files changed (save, new file, restore), so Sessions using it can show the changed dot. */
   onChanged?: (plugin: string) => void;
+  /** Whether a bundled plugin's files still match its receipt; Agent Farm's own check unless a test counts the calls. */
+  installedState?: typeof installedState;
 }
 
 const receiptSchema = boundary.object({ name: boundary.string, layout: boundary.optional(boundary.number) });
@@ -168,11 +170,66 @@ async function checkNoLinks(root: string, parts: string[]): Promise<void> {
   }
 }
 
+/**
+ * A plugin file's text for the list, or '' when it is missing or reached through a link: the
+ * list reads only what an explicit read would (review F-7).
+ */
+async function readUnlinked(root: string, relative: string): Promise<string> {
+  const parts = relative.split('/');
+  let cursor = root;
+  for (const part of parts) {
+    cursor = path.join(cursor, part);
+    const stat = await fs.lstat(cursor).catch(() => undefined);
+    if (!stat || stat.isSymbolicLink()) return '';
+  }
+  return fs.readFile(cursor, 'utf8').catch(() => '');
+}
+
 async function writeAtomic(file: string, content: string | Buffer): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });
   const temporary = `${file}.${randomBytes(4).toString('hex')}.tmp`;
   await fs.writeFile(temporary, content);
   await fs.rename(temporary, file);
+}
+
+/**
+ * Writes every file, or none (review F-6): when one write fails, the files already written go
+ * back to what they held, and a file that was new is removed, so a retry isn't refused as a
+ * duplicate. Folders it created under `root` for a new file are removed when empty.
+ */
+async function writeAllOrNone(root: string, writes: { file: string; content: string }[]): Promise<void> {
+  const done: { file: string; before: string | undefined }[] = [];
+  try {
+    for (const write of writes) {
+      const before = await fs.readFile(write.file, 'utf8').catch(() => undefined);
+      await writeAtomic(write.file, write.content);
+      done.push({ file: write.file, before });
+    }
+  } catch (error) {
+    for (const { file, before } of done.reverse()) {
+      if (before !== undefined) await writeAtomic(file, before).catch(() => undefined);
+      else {
+        await fs.rm(file, { force: true }).catch(() => undefined);
+        for (let folder = path.dirname(file); folder.startsWith(`${root}${path.sep}`); folder = path.dirname(folder)) {
+          if (!await fs.rmdir(folder).then(() => true, () => false)) break;
+        }
+      }
+    }
+    throw error;
+  }
+}
+
+/** Each file under the given paths (recursively, links not followed) with its size and time, as one string; nothing is read. */
+async function fileStamps(paths: string[]): Promise<string> {
+  const parts: string[] = [];
+  const visit = async (entry: string): Promise<void> => {
+    const stat = await fs.lstat(entry).catch(() => undefined);
+    if (!stat) { parts.push(`${entry}:-`); return; }
+    parts.push(`${entry}:${stat.mtimeMs}:${stat.size}`);
+    if (stat.isDirectory()) for (const child of (await fs.readdir(entry).catch(() => [])).sort()) await visit(path.join(entry, child));
+  };
+  for (const entry of paths) await visit(entry);
+  return parts.join('|');
 }
 
 /** Every file of a plugin Agent Farm reads, relative with `/`, sorted; links are left out. */
@@ -186,7 +243,8 @@ async function pluginFiles(root: string): Promise<string[]> {
       else if (child.isFile()) files.push(path.relative(root, full).split(path.sep).join('/'));
     }
   };
-  for (const section of SECTIONS) await visit(path.join(root, section));
+  // A section that is itself a link is left out too, as an explicit read of it is refused (review F-7).
+  for (const section of SECTIONS) if ((await fs.lstat(path.join(root, section)).catch(() => undefined))?.isDirectory()) await visit(path.join(root, section));
   for (const file of ['plugin.yaml', PANE_META_FILE]) if ((await fs.lstat(path.join(root, file)).catch(() => undefined))?.isFile()) files.push(file);
   for (const child of await fs.readdir(path.join(root, 'covers'), { withFileTypes: true }).catch(() => [])) {
     if (child.isFile() && COVER_FILE.test(`covers/${child.name}`)) files.push(`covers/${child.name}`);
@@ -300,7 +358,7 @@ export class ProfileEditor {
       visited.add(agent);
       const file = `agents/${agent}.md`;
       used.add(file);
-      const front = parseFrontmatter(await fs.readFile(path.join(root, file), 'utf8').catch(() => ''));
+      const front = parseFrontmatter(await readUnlinked(root, file));
       if (!front) return;
       for (const instruction of decodeOptionalBoundary(front.data.instructions_files, stringList) ?? []) used.add(path.posix.normalize(path.posix.join('agents', instruction)));
       for (const skill of decodeOptionalBoundary(front.data.skills, stringList) ?? []) if (!skill.includes('/')) under(`skills/${skill}`);
@@ -324,7 +382,7 @@ export class ProfileEditor {
   private async profileTree(root: string, files: string[], agent: string, id: string, context: { plugin: string; profileOfAgent: Map<string, string>; meta: Map<string, PaneMetaEntry>; path: string[] }): Promise<ProfileTreeNode[]> {
     const identity = `agents/${agent}.md`;
     const nodes: ProfileTreeNode[] = [{ kind: 'file', id: `${id}/identity`, path: identity, label: `${agent}.md`, note: 'identity' }];
-    const front = parseFrontmatter(await fs.readFile(path.join(root, identity), 'utf8').catch(() => ''));
+    const front = parseFrontmatter(await readUnlinked(root, identity));
     if (!front) return nodes;
     const instructions = (decodeOptionalBoundary(front.data.instructions_files, stringList) ?? [])
       .map(file => path.posix.normalize(path.posix.join('agents', file))).filter(file => files.includes(file));
@@ -343,7 +401,7 @@ export class ProfileEditor {
     for (const [alias, binding] of Object.entries(decodeOptionalBoundary(front.data.subagents, boundary.jsonObject) ?? {})) {
       const child = text(decodeOptionalBoundary(binding, boundary.jsonObject)?.agent);
       if (!child || child.includes('/') || !files.includes(`agents/${child}.md`)) continue;
-      const childFront = parseFrontmatter(await fs.readFile(path.join(root, `agents/${child}.md`), 'utf8').catch(() => ''));
+      const childFront = parseFrontmatter(await readUnlinked(root, `agents/${child}.md`));
       const profile = context.profileOfAgent.get(child);
       const ref = profile ? `${context.plugin}/${profile}` : undefined;
       const node: ProfileSubagentNode = {
@@ -394,16 +452,34 @@ export class ProfileEditor {
     return listed;
   }
 
+  /** Each bundled plugin's Edited answer, and the file stamps it was worked out from. */
+  private readonly editedCache = new Map<string, { signature: string; edited: boolean }>();
+
+  /**
+   * Whether a bundled plugin was changed since Pane installed it. Hashing its files against the
+   * receipt reads every one of them, so it is worked out again only when a file's size or time,
+   * or the receipt's, changed since the last poll (review F-8).
+   */
+  private async editedHere(name: string): Promise<boolean> {
+    const signature = await fileStamps([this.pluginRoot(name), path.join(this.configRoot, '.plugins', `${name}.json`)]);
+    const known = this.editedCache.get(name);
+    if (known?.signature === signature) return known.edited;
+    const edited = await (this.options.installedState ?? installedState)(this.configRoot, name) === 'edited';
+    this.editedCache.set(name, { signature, edited });
+    return edited;
+  }
+
   private async readPlugin(name: string): Promise<ProfilePlugin> {
     const root = this.pluginRoot(name);
     const listed = await this.listedProfiles(await this.pluginNames());
+    await checkNoLinks(root, ['plugin.yaml']);
     const manifest = decodeOptionalBoundary(yaml.load(await fs.readFile(path.join(root, 'plugin.yaml'), 'utf8')), boundary.jsonObject) ?? {};
     const files = await pluginFiles(root);
-    const meta = paneMeta(await fs.readFile(path.join(root, PANE_META_FILE), 'utf8').catch(() => ''));
+    const meta = paneMeta(await readUnlinked(root, PANE_META_FILE));
     const agents = new Map<string, string>();
     for (const file of files.filter(entry => /^profiles\/[^/]+\.yaml$/.test(entry))) {
       const profile = file.slice('profiles/'.length, -'.yaml'.length);
-      const agent = profileAgent(await fs.readFile(path.join(root, file), 'utf8').catch(() => ''));
+      const agent = profileAgent(await readUnlinked(root, file));
       if (agent && PROFILE_NAME_PATTERN.test(profile)) agents.set(profile, agent);
     }
     const profileOfAgent = new Map<string, string>();
@@ -411,7 +487,7 @@ export class ProfileEditor {
     const profiles: ProfileSummary[] = [];
     for (const [profile, agent] of agents) {
       const entry = `agents/${agent}.md`;
-      const front = parseFrontmatter(await fs.readFile(path.join(root, entry), 'utf8').catch(() => ''));
+      const front = parseFrontmatter(await readUnlinked(root, entry));
       const ref = `${name}/${profile}`;
       const tree = await this.profileTree(root, files, agent, profile, { plugin: name, profileOfAgent, meta, path: [agent] });
       const settings = [`profiles/${profile}.yaml`, PANE_META_FILE].filter(file => files.includes(file));
@@ -436,7 +512,7 @@ export class ProfileEditor {
       name,
       version: text(manifest.version) ?? '',
       bundled,
-      edited: bundled && await installedState(this.configRoot, name) === 'edited',
+      edited: bundled && await this.editedHere(name),
       profiles,
       files,
     };
@@ -493,7 +569,7 @@ export class ProfileEditor {
       await fs.rm(staging, { recursive: true, force: true });
       await fs.rmdir(path.join(this.configRoot, 'drafts')).catch(() => undefined);
     }
-    for (const change of checked) await writeAtomic(path.join(root, ...change.parts), change.content);
+    await writeAllOrNone(root, checked.map(change => ({ file: path.join(root, ...change.parts), content: change.content })));
     this.options.onChanged?.(plugin);
     return { plugin: await this.readPlugin(plugin), path: changes[0].path };
   }
@@ -629,7 +705,7 @@ export class ProfileEditor {
     } catch (error) {
       if (error instanceof PaneError) throw error;
       const reason = agentFarmReason({ stderr: decodeOptionalBoundary(error, stderrSchema)?.stderr ?? '', fallback: reasonOf(error) });
-      throw new PaneError('PROFILE_RESTORE_FAILED', `Pane couldn't restore its version of ${plugin}: ${reason}.`, 'Restart Pane, which reinstalls it, then try again.');
+      throw new PaneError('PROFILE_RESTORE_FAILED', `Pane couldn't restore its version of ${plugin}: ${reason}. Your edited copy is as it was.`, 'Restart Pane, then try again.');
     }
     this.options.onChanged?.(plugin);
     const restored = await this.readPlugin(plugin);

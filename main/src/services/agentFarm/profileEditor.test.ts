@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -76,6 +76,21 @@ describe('ProfileEditor: list and read', () => {
     symlinkSync(outside, path.join(agentFarmConfigRoot(paneDir), 'plugins', 'labtest', 'references-link.md'));
     await expect(profiles.read('labtest', 'references-link.md')).rejects.toMatchObject({ code: 'PROFILE_PATH_INVALID' });
   }, 60_000);
+
+  it.skipIf(process.platform === 'win32')('leaves a linked section folder and a linked identity out of the list, as a read refuses them (review F-7)', async () => {
+    const paneDir = tempDir();
+    await installFixture(paneDir);
+    const root = path.join(agentFarmConfigRoot(paneDir), 'plugins', 'labtest');
+    const outside = tempDir();
+    writeFileSync(path.join(outside, 'secret.md'), 'secret');
+    writeFileSync(path.join(outside, 'writer.md'), '---\nharness: claude\ndescription: From outside the plugin\n---\n');
+    symlinkSync(outside, path.join(root, 'references'));
+    rmSync(path.join(root, 'agents', 'writer.md'));
+    symlinkSync(path.join(outside, 'writer.md'), path.join(root, 'agents', 'writer.md'));
+    const plugin = (await editor(paneDir).list()).plugins.find(entry => entry.name === 'labtest');
+    expect(plugin?.files.some(file => file.startsWith('references/'))).toBe(false);
+    expect(plugin?.profiles[0]?.description).not.toBe('From outside the plugin');
+  }, 60_000);
 });
 
 describe('ProfileEditor: save', () => {
@@ -149,6 +164,26 @@ describe('ProfileEditor: new profile, subagent, skill and reference', () => {
     // Agent Farm still accepts the plugin.
     const run = bundledAgentFarmProcess(bundle!, ['plugin', 'validate', path.join(agentFarmConfigRoot(paneDir), 'plugins', 'labtest')], agentFarmConfigRoot(paneDir));
     await execFileAsync(run.executable, run.args, { env: run.env });
+  }, 60_000);
+});
+
+describe('ProfileEditor: a save that fails part-way (review F-6)', () => {
+  it.skipIf(process.platform === 'win32')('takes back a new skill when its identity can\'t be written, so trying again works', async () => {
+    const paneDir = tempDir();
+    await installFixture(paneDir);
+    const profiles = editor(paneDir);
+    const root = path.join(agentFarmConfigRoot(paneDir), 'plugins', 'labtest');
+    const identity = readFileSync(path.join(root, 'agents', 'writer.md'), 'utf8');
+    // agents/ refuses writes, so the skill is written and then its identity fails.
+    chmodSync(path.join(root, 'agents'), 0o555);
+    try {
+      await expect(profiles.newFile('labtest', 'writer', 'skill', 'weekly-recap')).rejects.toThrow();
+    } finally {
+      chmodSync(path.join(root, 'agents'), 0o755);
+    }
+    expect(existsSync(path.join(root, 'skills', 'weekly-recap'))).toBe(false);
+    expect(readFileSync(path.join(root, 'agents', 'writer.md'), 'utf8')).toBe(identity);
+    expect((await profiles.newFile('labtest', 'writer', 'skill', 'weekly-recap')).path).toBe('skills/weekly-recap/SKILL.md');
   }, 60_000);
 });
 
