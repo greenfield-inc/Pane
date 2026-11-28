@@ -64,6 +64,9 @@ interface Reached {
 
 const codedSchema = boundary.object({ code: boundary.string });
 
+/** The Profiles switch went off (or the coordinator stopped) mid-run: the rest of the run is dropped (review F-11). */
+class SyncStopped extends Error {}
+
 async function call<T>(peer: ProfileSyncPeer, channel: string, args: PaneCommandValue[], schema: BoundarySchema<T>, timeoutMs = TRANSFER_TIMEOUT_MS): Promise<T> {
   return decodeBoundary(await peer.invoke(channel, args, timeoutMs), schema);
 }
@@ -145,12 +148,21 @@ export class ProfileSyncCoordinator {
     this.options.onStatus?.(this.status());
   }
 
+  /** Throws SyncStopped once the switch is off: checked before each new call, pull, push and write (review F-11). */
+  private check(): void {
+    if (this.stopped || !this.enabled()) throw new SyncStopped();
+  }
+
   private async run(run: SyncRun): Promise<void> {
     if (this.stopped || !this.enabled()) return;
     this.running += 1;
     this.announce();
     try {
       await this.reconcile(run);
+    } catch (error) {
+      // An install already under way on a computer finishes there (it holds that computer's lock); nothing new starts.
+      // The host here refuses on its own once the switch is off, which ends the run the same way.
+      if (!(error instanceof SyncStopped) && !this.stopped && this.enabled()) throw error;
     } finally {
       this.running -= 1;
       this.lastSyncAt = Date.now();
@@ -161,6 +173,8 @@ export class ProfileSyncCoordinator {
   private async reconcile(run: SyncRun): Promise<void> {
     // A Session about to start reads only its own profile's records and files (review F-4).
     const scope = run.plugins ? [...run.plugins] : undefined;
+    // A run for one plugin or one computer doesn't learn whole-computer status (review F-14).
+    const partial = Boolean(run.plugins || run.only);
     const local = await this.options.local.state(undefined, scope);
     const memory = await this.options.local.peerMemory();
     // Every reachable computer is asked, so the newest save is found wherever it is; `only` limits
@@ -177,8 +191,9 @@ export class ProfileSyncCoordinator {
     };
     let again = false;
     await Promise.all(peers.map(async peer => {
-      if (peer.online === false) return this.setOffline(peer, memory[peer.key], local);
+      if (peer.online === false) return partial ? undefined : this.setOffline(peer, memory[peer.key], local);
       try {
+        this.check();
         const ask = scope ? { from: this.options.machine(), plugins: scope } : { from: this.options.machine() };
         reached.push({ peer, state: await call(peer, PROFILE_SYNC_CHANNELS.state, [ask], profileSyncStateSchema, STATE_TIMEOUT_MS) });
       } catch (error) {
@@ -188,11 +203,12 @@ export class ProfileSyncCoordinator {
           this.computers.set(peer.key, { key: peer.key, id: memory[peer.key]?.machine ?? '', name: peer.name, state: 'off', waiting: [], error: `Profiles is off on ${peer.name}. Turn it on there to sync.` });
         } else if (code === 'ERR_UNKNOWN_CHANNEL' || /no pane daemon command registered/i.test(reasonOf(error))) {
           this.computers.set(peer.key, { key: peer.key, id: memory[peer.key]?.machine ?? '', name: peer.name, state: 'outdated', waiting: [], error: `Pane on ${peer.name} is too old to sync profiles. Update Pane there.` });
-        } else {
+        } else if (!(error instanceof SyncStopped) && !partial) {
           this.setOffline(peer, memory[peer.key], local);
         }
       }
     }));
+    this.check();
 
     const names = new Set([...Object.keys(local.plugins), ...reached.flatMap(entry => Object.keys(entry.state.plugins))]);
     for (const plugin of [...names].sort()) {
@@ -205,10 +221,12 @@ export class ProfileSyncCoordinator {
       }
       if (!newest) continue;
       if (source) {
+        this.check();
         try {
           await this.pull(source.peer, plugin);
           local.plugins[plugin] = newest;
         } catch (error) {
+          if (error instanceof SyncStopped) throw error;
           // This computer doesn't have the newest save, so it can't send it on; the Sync sheet says so (review F-8).
           console.warn(`[ProfileSync] ${plugin} didn't arrive from ${source.peer.name}: ${reasonOf(error)}`);
           fail(source, plugin, `${plugin} couldn't be fetched from ${source.peer.name}: ${reasonOf(error)}`);
@@ -218,9 +236,11 @@ export class ProfileSyncCoordinator {
       const behind = reached.filter(entry => entry !== source && deliver(entry) && (run.force || !sameSave(entry.state.plugins[plugin], newest)));
       if (!behind.length) continue;
       let exported: Awaited<ReturnType<ProfileSyncHost['export']>> | undefined;
+      this.check();
       try {
         exported = await this.options.local.export(plugin);
         for (const entry of behind) {
+          this.check();
           try {
             const result = await this.push(entry.peer, plugin, exported, run.force === true);
             // A computer that saved meanwhile keeps its newer save and says so: remember that, and sync again to bring it here (review F-8).
@@ -231,10 +251,12 @@ export class ProfileSyncCoordinator {
               entry.state.plugins[plugin] = exported.record;
             }
           } catch (error) {
+            if (error instanceof SyncStopped) throw error;
             fail(entry, plugin, `${plugin} didn't reach ${entry.peer.name}: ${reasonOf(error)}`);
           }
         }
       } catch (error) {
+        if (error instanceof SyncStopped) throw error;
         console.warn(`[ProfileSync] Pane couldn't pack ${plugin} to send: ${reasonOf(error)}`);
         for (const entry of behind) fail(entry, plugin, `${plugin} couldn't be packed to send: ${reasonOf(error)}`);
       } finally {
@@ -242,23 +264,35 @@ export class ProfileSyncCoordinator {
       }
     }
 
+    this.check();
     const now = Date.now();
     const remembered = { ...memory } satisfies Record<string, ProfileSyncPeerMemory>;
     for (const entry of reached) {
-      remembered[entry.peer.key] = { name: entry.state.name || entry.peer.name, machine: entry.state.machine, plugins: entry.state.plugins, seenAt: now };
+      // A partial run was answered with only its plugins' records: the rest are remembered as they were.
+      const plugins = partial ? { ...memory[entry.peer.key]?.plugins, ...entry.state.plugins } : entry.state.plugins;
+      remembered[entry.peer.key] = { name: entry.state.name || entry.peer.name, machine: entry.state.machine, plugins, seenAt: now };
       const failure = failures.get(entry.peer.key);
-      this.computers.set(entry.peer.key, failure
-        ? { key: entry.peer.key, id: entry.state.machine, name: entry.peer.name, state: 'failed', waiting: [...failure.plugins].sort(), error: failure.error }
-        : { key: entry.peer.key, id: entry.state.machine, name: entry.peer.name, state: 'up-to-date', waiting: [] });
+      const before = this.computers.get(entry.peer.key);
+      if (failure) {
+        // A partial run adds its failures to what is already waiting there.
+        const waiting = new Set([...(partial && before?.state === 'failed' ? before.waiting : []), ...failure.plugins]);
+        this.computers.set(entry.peer.key, { key: entry.peer.key, id: entry.state.machine, name: entry.peer.name, state: 'failed', waiting: [...waiting].sort(), error: failure.error });
+      } else if (!partial) {
+        // Only a full sync says a computer is up to date.
+        this.computers.set(entry.peer.key, { key: entry.peer.key, id: entry.state.machine, name: entry.peer.name, state: 'up-to-date', waiting: [] });
+      }
     }
-    // Offline computers' waiting lists use this computer's records after the sync.
-    const after = run.plugins || run.only ? local : await this.options.local.state();
-    for (const peer of peers) {
-      if (this.computers.get(peer.key)?.state === 'offline') this.setOffline(peer, remembered[peer.key], after);
+    if (!partial) {
+      // Offline computers' waiting lists use this computer's records after the sync.
+      const after = await this.options.local.state();
+      for (const peer of peers) {
+        if (this.computers.get(peer.key)?.state === 'offline') this.setOffline(peer, remembered[peer.key], after);
+      }
     }
     for (const key of Object.keys(remembered)) {
       if (!this.options.peers().some(peer => peer.key === key)) delete remembered[key];
     }
+    this.check();
     if (reached.length || Object.keys(remembered).length !== Object.keys(memory).length) await this.options.local.rememberPeers(remembered);
     if (again) this.request();
   }

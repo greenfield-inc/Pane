@@ -9,6 +9,7 @@ import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { PROFILE_NAME_PATTERN } from '../../../../shared/types/profileEditor';
 import {
   PROFILE_SYNC_CHANNELS,
+  PROFILE_SYNC_OFF_CODE,
   isNewerSave,
   profileSyncApplyRequestSchema,
   profileSyncRecordSchema,
@@ -184,8 +185,23 @@ export interface ProfileSyncHostOptions {
   onPeerSeen?: (machine: string) => void;
   /** Largest pack sent or taken, in bytes; tests lower it. */
   maxPackBytes?: number;
-  /** Called each time a plugin's files are read for its hash; tests count them. */
-  onInventory?: (plugin: string) => void;
+  /** Called each time a plugin's receipt or files are read; tests count them. */
+  onRead?: (kind: 'receipt' | 'files', plugin: string) => void;
+  /**
+   * The Profiles switch (D-474), checked again once work has the lock: a call that waited behind a
+   * change here is refused if the switch went off meanwhile (review F-11). Absent: always on.
+   */
+  enabled?: () => boolean;
+}
+
+/** What a computer whose Profiles switch is off answers to every profile sync call. */
+export function profilesOffError(): PaneError {
+  return new PaneError(PROFILE_SYNC_OFF_CODE, 'Profiles is off on this computer, so it doesn\'t sync profiles. Nothing was changed.', 'Turn it on in Settings > Advanced > Experimental > Profiles on this computer.');
+}
+
+/** Whether a path is there; any error besides "not there" is thrown, not taken for absence (review F-3). */
+async function present(file: string): Promise<boolean> {
+  return fs.lstat(file).then(() => true, (error: NodeJS.ErrnoException) => { if (notThere(error)) return false; throw error; });
 }
 
 /**
@@ -243,7 +259,7 @@ export class ProfileSyncHost {
    * Farm folder is read (F-5). Links inside a section are left out, as the Profiles tab leaves them out.
    */
   private async contents(name: string, avatars?: string[]): Promise<{ files: Record<string, Buffer>; photos: Record<string, Buffer>; picture?: Buffer; changedAt: number }> {
-    this.options.onInventory?.(name);
+    this.options.onRead?.('files', name);
     const root = this.pluginRoot(name);
     if (!(await fs.lstat(root)).isDirectory()) throw linkRefused(`plugins/${name}`);
     const files: Record<string, Buffer> = {};
@@ -299,17 +315,27 @@ export class ProfileSyncHost {
   /**
    * The plugins Agent Farm has receipts for, read strictly (review F-1): undefined when the receipts
    * folder can't be read; `unsure` holds plugins whose receipt couldn't be read, which are neither
-   * refreshed nor taken for deleted. Pane's own plain plugin is left out.
+   * refreshed nor taken for deleted. Pane's own plain plugin is left out. With `only`, just those
+   * receipts are read, by name, so a Session's preflight never opens the others (review F-4).
    */
-  private async receipts(): Promise<{ names: string[]; unsure: Set<string> } | undefined> {
+  private async receipts(only?: ReadonlySet<string>): Promise<{ names: string[]; unsure: Set<string> } | undefined> {
+    const folder = path.join(this.configRoot, '.plugins');
     let entries: string[];
-    try { entries = await fs.readdir(path.join(this.configRoot, '.plugins')); }
-    catch { return undefined; }
+    if (only) {
+      if (!(await fs.stat(folder).catch(() => undefined))?.isDirectory()) return undefined;
+      // A receipt that can't even be looked at is read below, fails, and counts as unsure.
+      entries = [...only].map(name => `${name}.json`);
+    } else {
+      try { entries = await fs.readdir(folder); }
+      catch { return undefined; }
+    }
     const names: string[] = [];
     const unsure = new Set<string>();
     for (const file of entries.filter(entry => entry.endsWith('.json')).sort()) {
       const name = file.slice(0, -'.json'.length);
       if (!PROFILE_NAME_PATTERN.test(name) || name === 'pane') continue;
+      this.options.onRead?.('receipt', name);
+      if (only && !await present(path.join(folder, file)).catch(() => true)) continue;
       try {
         const receipt = decodeOptionalBoundary(JSON.parse(await fs.readFile(path.join(this.configRoot, '.plugins', file), 'utf8')), receiptSchema);
         if (receipt?.layout === 2 && receipt.name === name) names.push(name);
@@ -329,7 +355,18 @@ export class ProfileSyncHost {
   /** Whether a Pane plugin here is your copy: edited here, or an edited copy that arrived from another computer. */
   private async isYours(name: string, record: ProfileSyncRecord | undefined): Promise<boolean> {
     if (!BUNDLED.includes(name)) return true;
-    return record?.state === 'saved' || await installedState(this.configRoot, name) === 'edited';
+    return record?.state === 'saved' || await installedState(this.configRoot, name) === 'edited' || await this.hasPaneFiles(name);
+  }
+
+  /**
+   * Whether a Pane plugin has a title (pane.yaml) or a cover page here. Pane's plugins ship neither,
+   * and Agent Farm's receipt doesn't cover them, so one is an edit of yours (review F-13).
+   */
+  private async hasPaneFiles(name: string): Promise<boolean> {
+    const root = this.pluginRoot(name);
+    if ((await fs.lstat(path.join(root, 'pane.yaml')).catch(() => undefined))?.isFile()) return true;
+    const covers = await fs.readdir(path.join(root, 'covers'), { withFileTypes: true }).catch(() => []);
+    return covers.some(child => child.isFile() && PANE_FILE.test(`covers/${child.name}`));
   }
 
   /**
@@ -346,11 +383,12 @@ export class ProfileSyncHost {
   private async refreshUnlocked(justSaved = false, only?: ReadonlySet<string>): Promise<ProfileSyncFileData> {
     const data = await readProfileSync(this.configRoot);
     // What isn't certainly known is left as it is: a read that failed is never taken for a removal (review F-1).
-    const receipts = await this.receipts();
+    const receipts = await this.receipts(only);
     if (!receipts) {
       console.warn('[ProfileSync] Pane couldn\'t read Agent Farm\'s receipts folder, so no profile records were changed this time.');
       return data;
     }
+    // One listing of names; only the plugin's own photos are then looked at or read (review F-4).
     let avatars: string[];
     try { avatars = await this.avatarEntries(); }
     catch (error) {
@@ -395,30 +433,42 @@ export class ProfileSyncHost {
     return data;
   }
 
+  private on(): boolean {
+    return this.options.enabled?.() ?? true;
+  }
+
+  /** Throws the off answer when the switch went off while this call waited for the lock (review F-11). */
+  private requireOn(): void {
+    if (!this.on()) throw profilesOffError();
+  }
+
   /**
    * This computer's records, brought up to date first: all of them, or only `plugins` (a Session
-   * about to start reads just its own profile's, review F-4).
+   * about to start reads, and is sent, just its own profile's, review F-4).
    */
   async state(from?: string, plugins?: readonly string[]): Promise<ProfileSyncState> {
     if (from && from !== this.options.machine()) this.options.onPeerSeen?.(from);
-    const data = await this.lock.run(() => this.refreshUnlocked(false, plugins ? new Set(plugins) : undefined));
-    return { machine: this.options.machine(), name: this.options.name(), plugins: data.plugins };
+    const only = plugins ? new Set(plugins) : undefined;
+    const data = await this.lock.run(() => { this.requireOn(); return this.refreshUnlocked(false, only); });
+    const records = only ? Object.fromEntries(Object.entries(data.plugins).filter(([name]) => only.has(name))) : data.plugins;
+    return { machine: this.options.machine(), name: this.options.name(), plugins: records };
   }
 
-  /** After a save here: records it, so the next sync sends it. */
+  /** After a save here: records it, so the next sync sends it. Off, nothing is recorded. */
   async recordChange(): Promise<void> {
-    await this.lock.run(() => this.refreshUnlocked(true));
+    await this.lock.run(async () => { if (this.on()) await this.refreshUnlocked(true); });
   }
 
   /**
    * A change the Profiles tab makes to `plugin` (a save, new file, Restore, a photo), run under the
    * same lock as an arriving save and recorded before the lock is let go: a save here and one from
-   * another computer never interleave, so neither is lost (review F-2).
+   * another computer never interleave, so neither is lost (review F-2). A change that waited while
+   * the switch went off is still made, as the person asked for it, but not recorded for sync.
    */
   exclusive<T>(plugin: string, work: () => Promise<T>): Promise<T> {
     return this.lock.run(async () => {
       const result = await work();
-      await this.refreshUnlocked(true, new Set([plugin]));
+      if (this.on()) await this.refreshUnlocked(true, new Set([plugin]));
       return result;
     });
   }
@@ -430,6 +480,7 @@ export class ProfileSyncHost {
 
   async rememberPeers(computers: ProfileSyncFileData['computers']): Promise<void> {
     await this.lock.run(async () => {
+      this.requireOn();
       const data = await readProfileSync(this.configRoot);
       await writeProfileSync(this.configRoot, { ...data, computers });
     });
@@ -445,6 +496,7 @@ export class ProfileSyncHost {
     if (!PROFILE_NAME_PATTERN.test(plugin)) throw new PaneError('PROFILE_NAME_INVALID', `"${plugin}" isn't a plugin name.`, 'Sync profiles again.');
     await this.removeStale();
     return this.lock.run(async () => {
+      this.requireOn();
       const data = await this.refreshUnlocked(false, new Set([plugin]));
       const record = data.plugins[plugin];
       if (!record) throw new PaneError('PROFILE_SYNC_UNKNOWN', `This computer has no save of ${plugin} to send.`, 'Sync profiles again.');
@@ -524,7 +576,9 @@ export class ProfileSyncHost {
     const { plugin } = request;
     if (!PROFILE_NAME_PATTERN.test(plugin) || plugin === 'pane') throw new PaneError('PROFILE_NAME_INVALID', `"${plugin}" isn't a plugin Pane syncs, so nothing was changed.`, 'Sync profiles again.');
     try {
-      return await this.lock.run(() => this.applyUnlocked(request));
+      // An apply that waited behind a change here is refused once the switch is off; one already
+      // swapping files finishes, as it holds the lock (review F-11).
+      return await this.lock.run(() => { this.requireOn(); return this.applyUnlocked(request); });
     } finally {
       if (request.transferId) await this.receiver.remove(request.transferId).catch(() => undefined);
     }
@@ -576,7 +630,7 @@ export class ProfileSyncHost {
       });
     } else {
       if (!BUNDLED.includes(plugin)) throw new PaneError('PROFILE_SYNC_DAMAGED', `${plugin} arrived as Pane's own version, but it isn't a plugin that ships with Pane, so nothing was changed.`, 'Sync profiles again.');
-      const installed = (await this.receipts())?.names.includes(plugin) === true;
+      const installed = (await this.receipts(new Set([plugin])))?.names.includes(plugin) === true;
       const reinstall = await this.isYours(plugin, current) || !installed;
       result = await this.replaceLive(plugin, record, { movePlugin: reinstall, photos }, async () => {
         if (!reinstall) return;
@@ -606,17 +660,21 @@ export class ProfileSyncHost {
     const backup = path.join(this.configRoot, 'drafts', `.previous-${plugin}-${randomUUID()}`);
     const root = this.pluginRoot(plugin);
     const receipt = path.join(this.configRoot, '.plugins', `${plugin}.json`);
-    await fs.mkdir(path.join(backup, 'photos'), { recursive: true });
     const moved = { plugin: false, receipt: false };
     const keptPhotos: string[] = [];
-    for (const entry of await this.avatarEntries()) {
-      if (photoNames(entry)?.[0] !== plugin) continue;
-      await fs.copyFile(path.join(this.avatarsFolder(), entry), path.join(backup, 'photos', entry));
-      keptPhotos.push(entry);
-    }
+    // Nothing live is removed or replaced until both the plugin and its receipt are set aside: a
+    // backup that fails puts back only what moved (review F-3).
+    let setAside = false;
     try {
-      if (movePlugin && await fs.lstat(root).then(() => true, () => false)) { await fs.rename(root, path.join(backup, 'plugin')); moved.plugin = true; }
-      if (movePlugin && await fs.lstat(receipt).then(() => true, () => false)) { await fs.rename(receipt, path.join(backup, 'receipt.json')); moved.receipt = true; }
+      await fs.mkdir(path.join(backup, 'photos'), { recursive: true });
+      for (const entry of await this.avatarEntries()) {
+        if (photoNames(entry)?.[0] !== plugin) continue;
+        await fs.copyFile(path.join(this.avatarsFolder(), entry), path.join(backup, 'photos', entry));
+        keptPhotos.push(entry);
+      }
+      if (movePlugin && await present(root)) { await fs.rename(root, path.join(backup, 'plugin')); moved.plugin = true; }
+      if (movePlugin && await present(receipt)) { await fs.rename(receipt, path.join(backup, 'receipt.json')); moved.receipt = true; }
+      setAside = true;
       await change();
       await this.replacePhotos(plugin, photos);
       const data = await readProfileSync(this.configRoot);
@@ -624,17 +682,12 @@ export class ProfileSyncHost {
       await writeProfileSync(this.configRoot, data);
     } catch (error) {
       try {
-        if (movePlugin) {
-          await fs.rm(root, { recursive: true, force: true });
-          await fs.rm(receipt, { force: true });
-          // A reinstall that failed leaves its marker, which would make the next start clear the copy put back here.
-          const installing = path.join(this.configRoot, INSTALLING_FILE);
-          if ((await fs.readFile(installing, 'utf8').catch(() => '')).includes(`"${plugin}"`)) await fs.rm(installing, { force: true });
+        if (!setAside) {
+          // Only the plugin can have moved (the receipt moves last): put it back, and touch nothing else.
+          if (moved.plugin) await fs.rename(path.join(backup, 'plugin'), root);
+        } else {
+          await this.restoreAfterFailure(plugin, backup, movePlugin, moved, keptPhotos);
         }
-        if (moved.plugin) await fs.rename(path.join(backup, 'plugin'), root);
-        if (moved.receipt) await fs.rename(path.join(backup, 'receipt.json'), receipt);
-        await this.replacePhotos(plugin, {});
-        for (const entry of keptPhotos) await fs.copyFile(path.join(backup, 'photos', entry), path.join(this.avatarsFolder(), entry));
       } catch (rollback) {
         throw new PaneError('PROFILE_SYNC_ROLLBACK', `${plugin} from your other computer couldn't be installed (${reasonOf(error)}), and putting your copy back failed too (${reasonOf(rollback)}). Your copy is kept in ${backup}.`, `Move ${backup}/plugin back to ${root}, then restart Pane.`);
       }
@@ -644,6 +697,24 @@ export class ProfileSyncHost {
     await fs.rm(backup, { recursive: true, force: true }).catch(() => undefined);
     this.options.onApplied?.(plugin);
     return { applied: true, record };
+  }
+
+  /** After a failed change: removes what it installed and puts back the set-aside plugin, receipt and photos. */
+  private async restoreAfterFailure(plugin: string, backup: string, movePlugin: boolean, moved: { plugin: boolean; receipt: boolean }, keptPhotos: string[]): Promise<void> {
+    const root = this.pluginRoot(plugin);
+    const receipt = path.join(this.configRoot, '.plugins', `${plugin}.json`);
+    if (movePlugin) {
+      // Everything live was set aside first, so what is there now is the failed change's.
+      await fs.rm(root, { recursive: true, force: true });
+      await fs.rm(receipt, { force: true });
+      // A reinstall that failed leaves its marker, which would make the next start clear the copy put back here.
+      const installing = path.join(this.configRoot, INSTALLING_FILE);
+      if ((await fs.readFile(installing, 'utf8').catch(() => '')).includes(`"${plugin}"`)) await fs.rm(installing, { force: true });
+    }
+    if (moved.plugin) await fs.rename(path.join(backup, 'plugin'), root);
+    if (moved.receipt) await fs.rename(path.join(backup, 'receipt.json'), receipt);
+    await this.replacePhotos(plugin, {});
+    for (const entry of keptPhotos) await fs.copyFile(path.join(backup, 'photos', entry), path.join(this.avatarsFolder(), entry));
   }
 
   /** Writes a pack's files into the transfer's staging folder, checked to stay inside the plugin. */

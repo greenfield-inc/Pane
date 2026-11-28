@@ -387,7 +387,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       logger.warn(`[AgentFarm] Could not ${what} in its settings.json. ${launches}; Pane tries again at the next settings change and the next start.`, error instanceof Error ? error : undefined);
     },
   });
-  void installBundledAgentFarm({ paneDir: getAppDirectory(), syncTelemetry: () => telemetrySync.sync(), log: message => logger.info(message) });
+  void installBundledAgentFarm({ paneDir: getAppDirectory(), profiles: profilesEnabled(configManager.getConfig()), syncTelemetry: () => telemetrySync.sync(), log: message => logger.info(message) });
   configManager.on('config-updated', () => { void telemetrySync.sync(); });
   if (configManager.getConfig().agentContext?.cleanupPending && configManager.getConfig().agentContext?.managedAgentsMd !== true) {
     // Retry until all saved repositories are available, without delaying startup.

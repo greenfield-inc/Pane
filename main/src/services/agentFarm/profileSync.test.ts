@@ -5,7 +5,7 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PROFILE_SYNC_CHANNELS, PROFILE_SYNC_OFF_CODE, profileSyncRecordSchema, type ProfileSyncApplyRequest } from '../../../../shared/types/profileSync';
+import { PROFILE_SYNC_CHANNELS, PROFILE_SYNC_OFF_CODE, profileSyncRecordSchema, profileSyncStateSchema, type ProfileSyncApplyRequest } from '../../../../shared/types/profileSync';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { sendFile, writeResultSchema } from '../sessionMove/transfer';
 import { agentFarmConfigRoot, bundledAgentFarm, bundledAgentFarmProcess, installBundledAgentFarm } from './bundledAgentFarm';
@@ -235,7 +235,7 @@ describe('profile sync: every save reaches the other computers', () => {
     expect(await syncedPluginEdits(agentFarmConfigRoot(b.paneDir))).toEqual(new Set(['greenfield']));
     // A Pane update on B keeps the edit that arrived (a missing manifest makes it set up again, as an update does).
     rmSync(path.join(agentFarmConfigRoot(b.paneDir), 'pane-manifest.json'));
-    const status = await installBundledAgentFarm({ paneDir: b.paneDir, bundle, log: () => undefined });
+    const status = await installBundledAgentFarm({ paneDir: b.paneDir, bundle, profiles: true, log: () => undefined });
     expect(status.edited).toContain('greenfield');
     expect(await b.editor.read('greenfield', planner)).toContain('Marker: MANGO');
 
@@ -373,8 +373,8 @@ describe('profile sync: review fixes (fix round 2)', () => {
 
   it('reads only the profile a Session is about to use, here and on the other computers (F-4)', async () => {
     const reads: string[] = [];
-    const a = computer('studio', 'a-id', tempDir(), { onInventory: plugin => reads.push(`a:${plugin}`) });
-    const b = computer('build', 'b-id', tempDir(), { onInventory: plugin => reads.push(`b:${plugin}`) });
+    const a = computer('studio', 'a-id', tempDir(), { onRead: (_kind, plugin) => reads.push(`a:${plugin}`) });
+    const b = computer('build', 'b-id', tempDir(), { onRead: (_kind, plugin) => reads.push(`b:${plugin}`) });
     await installFixture(a.paneDir);
     await installFixture(a.paneDir, 'labtwo');
     await desktop(a, [b]).syncNow();
@@ -458,6 +458,124 @@ describe('profile sync: review fixes (fix round 2)', () => {
     const bomb = gzipSync(Buffer.alloc(100_000)).toString('base64');
     await expect(b.host.write({ moveId: 'transfer-5678', path: 'pack.json', offset: 0, content: bomb, last: { bytes: 500, sha256: 'x' } })).rejects.toMatchObject({ code: 'ERR_MOVE_PACKAGE_DAMAGED' });
   }, 60_000);
+});
+
+describe('profile sync: review fixes (fix round 3)', () => {
+  it('leaves the live copy and its receipt in place when they can\'t be set aside (F-3)', async () => {
+    const a = computer('studio', 'a-id');
+    const b = computer('build', 'b-id');
+    await installFixture(a.paneDir);
+    await installFixture(b.paneDir, 'labtest', 'MINE');
+    a.clock.now = Date.now() + 60_000;
+    await saveMarker(a, 'NEWER');
+    const receipt = path.join(agentFarmConfigRoot(b.paneDir), '.plugins', 'labtest.json');
+    // The plugin can't be moved aside, then (plugin moved) its receipt can't: nothing of B's is removed either way.
+    for (const locked of ['plugins', '.plugins']) {
+      const folder = path.join(agentFarmConfigRoot(b.paneDir), locked);
+      chmodSync(folder, 0o555);
+      try { await desktop(a, [b]).syncNow(); }
+      finally { chmodSync(folder, 0o755); }
+      expect(readFileSync(WRITER(b.paneDir), 'utf8'), locked).toContain('Marker: MINE');
+      expect(existsSync(receipt), locked).toBe(true);
+    }
+  }, 120_000);
+
+  it('answers a Session\'s preflight with only its profile\'s receipt and record, and remembers the rest (F-4)', async () => {
+    const reads: string[] = [];
+    const a = computer('studio', 'a-id', tempDir(), { onRead: (kind, plugin) => reads.push(`a:${kind}:${plugin}`) });
+    const b = computer('build', 'b-id', tempDir(), { onRead: (kind, plugin) => reads.push(`b:${kind}:${plugin}`) });
+    await installFixture(a.paneDir);
+    await installFixture(a.paneDir, 'labtwo');
+    await desktop(a, [b]).syncNow();
+    reads.length = 0;
+    const answers: string[][] = [];
+    const watched: ProfileSyncPeer = { ...peer(b), invoke: async (channel, args, timeout) => {
+      const answer = await peer(b).invoke(channel, args, timeout);
+      if (channel === PROFILE_SYNC_CHANNELS.state) answers.push(Object.keys(decodeBoundary(answer, profileSyncStateSchema).plugins));
+      return answer;
+    } };
+    await new ProfileSyncCoordinator({ local: a.host, peers: () => [watched], machine: () => a.id }).syncPlugin('labtest');
+    expect(answers).toEqual([['labtest']]);
+    expect(reads.some(entry => entry.includes(':receipt:'))).toBe(true);
+    expect(reads.every(entry => entry.endsWith(':labtest'))).toBe(true);
+    expect(Object.keys((await readProfileSync(agentFarmConfigRoot(a.paneDir))).computers['machine-build']?.plugins ?? {}).sort()).toEqual(['labtest', 'labtwo']);
+  }, 120_000);
+
+  it('stops a running sync as soon as the switch goes off (F-11)', async () => {
+    const a = computer('studio', 'a-id');
+    const b = computer('build', 'b-id');
+    await installFixture(a.paneDir);
+    let on = true;
+    // The person turns Profiles off while the desktop waits for B's records.
+    const turning: ProfileSyncPeer = { ...peer(b), invoke: async (channel, args, timeout) => {
+      const answer = await peer(b).invoke(channel, args, timeout);
+      if (channel === PROFILE_SYNC_CHANNELS.state) on = false;
+      return answer;
+    } };
+    await new ProfileSyncCoordinator({ local: a.host, peers: () => [turning], machine: () => a.id, enabled: () => on }).syncNow();
+    expect(existsSync(WRITER(b.paneDir))).toBe(false);
+    expect((await readProfileSync(agentFarmConfigRoot(a.paneDir))).computers).toEqual({});
+  }, 60_000);
+
+  it('refuses an arriving save that waited behind a change here once the switch is off (F-11)', async () => {
+    let on = true;
+    const b = computer('build', 'b-id', tempDir(), { enabled: () => on });
+    await installFixture(b.paneDir);
+    await b.host.state();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const holding = b.host.exclusive('labtest', () => gate);
+    const applying = b.host.apply({ plugin: 'labtest', record: { state: 'deleted', hash: '', savedAt: Date.now() + 3_600_000, machine: 'a-id' } });
+    on = false;
+    release();
+    await holding;
+    await expect(applying).rejects.toMatchObject({ code: PROFILE_SYNC_OFF_CODE });
+    expect(readFileSync(WRITER(b.paneDir), 'utf8')).toContain('Marker: APPLE');
+    expect((await readProfileSync(agentFarmConfigRoot(b.paneDir))).plugins.labtest?.state).toBe('saved');
+  }, 60_000);
+
+  it('lets a Pane update replace an arriving edit of a Pane plugin while Profiles is off (F-12)', async () => {
+    const a = computer('studio', 'a-id');
+    const b = computer('build', 'b-id');
+    await installBundledAgentFarm({ paneDir: a.paneDir, bundle, log: () => undefined });
+    await installBundledAgentFarm({ paneDir: b.paneDir, bundle, log: () => undefined });
+    const planner = 'agents/planner.md';
+    a.clock.now = Date.now() + 60_000;
+    await a.editor.save('greenfield', [{ path: planner, content: `${await a.editor.read('greenfield', planner)}\nMarker: MANGO\n` }]);
+    await desktop(a, [b]).syncNow();
+    expect(await b.editor.read('greenfield', planner)).toContain('Marker: MANGO');
+    // Profiles off, then an update: the receipt-matching copy is Pane's to replace, as before T-63.
+    rmSync(path.join(agentFarmConfigRoot(b.paneDir), 'pane-manifest.json'));
+    const status = await installBundledAgentFarm({ paneDir: b.paneDir, bundle, profiles: false, log: () => undefined });
+    expect(status.edited).not.toContain('greenfield');
+    expect(await b.editor.read('greenfield', planner)).not.toContain('Marker: MANGO');
+  }, 240_000);
+
+  it('syncs a title edit on an otherwise unchanged Pane plugin (F-13)', async () => {
+    const a = computer('studio', 'a-id');
+    const b = computer('build', 'b-id');
+    await installBundledAgentFarm({ paneDir: a.paneDir, bundle, log: () => undefined });
+    await installBundledAgentFarm({ paneDir: b.paneDir, bundle, log: () => undefined });
+    a.clock.now = Date.now() + 60_000;
+    await a.editor.save('greenfield', [{ path: 'pane.yaml', content: 'profiles:\n  planner:\n    title: Chief planner\n' }]);
+    await desktop(a, [b]).syncNow();
+    expect(readFileSync(path.join(agentFarmConfigRoot(b.paneDir), 'plugins', 'greenfield', 'pane.yaml'), 'utf8')).toContain('Chief planner');
+  }, 240_000);
+
+  it('keeps a computer\'s failed status when a Session brings a different profile up to date (F-14)', async () => {
+    const a = computer('studio', 'a-id');
+    const b = computer('build', 'b-id');
+    await installFixture(a.paneDir);
+    await installFixture(a.paneDir, 'labtwo');
+    const refusing: ProfileSyncPeer = { ...peer(b), invoke: async (channel, args, timeout) => {
+      if (channel === PROFILE_SYNC_CHANNELS.apply && JSON.stringify(args[0]).includes('"plugin":"labtwo"')) throw new Error('disk full');
+      return peer(b).invoke(channel, args, timeout);
+    } };
+    const sync = new ProfileSyncCoordinator({ local: a.host, peers: () => [refusing], machine: () => a.id });
+    expect((await sync.syncNow()).computers[0]).toMatchObject({ state: 'failed', waiting: ['labtwo'] });
+    await sync.syncPlugin('labtest');
+    expect(sync.status().computers[0]).toMatchObject({ state: 'failed', waiting: ['labtwo'] });
+  }, 120_000);
 });
 
 describe('profile sync: the Profiles switch (D-474)', () => {

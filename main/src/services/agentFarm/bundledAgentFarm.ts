@@ -437,6 +437,12 @@ export interface InstallBundledAgentFarmOptions {
   telemetry?: boolean;
   /** Writes the telemetry setting through Pane's one queue (agentFarmTelemetrySync) instead of `telemetry`. */
   syncTelemetry?: () => Promise<void>;
+  /**
+   * The Profiles switch at startup (D-474). Only while it is on does a Pane plugin that profile sync
+   * marked as your copy in sync.json stay through an update; off, the receipt alone decides, as
+   * before T-63 (review F-12). Absent: off.
+   */
+  profiles?: boolean;
   bundle?: BundledAgentFarm;
   run?: AgentFarmRunner;
   log?: (message: string) => void;
@@ -513,8 +519,9 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
     const clear: string[] = [];
     // Bundled plugins whose install receipt can't be read (review F-10).
     const unreadable: string[] = [];
-    // An edited copy that arrived from another computer matches its own receipt, so sync.json says it is yours (T-63 PR 6).
-    const synced = await syncedPluginEdits(configRoot);
+    // An edited copy that arrived from another computer matches its own receipt, so sync.json says it is yours (T-63 PR 6),
+    // which counts only while Profiles is on (review F-12).
+    const synced = options.profiles === true ? await syncedPluginEdits(configRoot) : new Set<string>();
     for (const name of BUNDLED_AGENT_FARM_PLUGINS) {
       // A plugin Pane was installing when it stopped is Pane's half-copy, not an edit.
       const state = unfinished.includes(name) ? undefined : await installedState(configRoot, name);

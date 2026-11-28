@@ -2,11 +2,11 @@ import type { IpcMain } from 'electron';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { profileDetailsSchema, profileFileChangesSchema } from '../../../shared/types/profileEditor';
-import { PROFILE_SYNC_CHANGED_EVENT, PROFILE_SYNC_CHANNELS, PROFILE_SYNC_OFF_CODE } from '../../../shared/types/profileSync';
+import { PROFILE_SYNC_CHANGED_EVENT, PROFILE_SYNC_CHANNELS } from '../../../shared/types/profileSync';
 import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 import { getPaneEventSink } from '../core/runtime';
 import { ProfileEditor, parseYaml } from '../services/agentFarm/profileEditor';
-import { ProfileSyncHost, runProfileSyncCommand } from '../services/agentFarm/profileSync';
+import { ProfileSyncHost, profilesOffError, runProfileSyncCommand } from '../services/agentFarm/profileSync';
 import { ProfileSyncCoordinator, type ProfileSyncPeer } from '../services/agentFarm/profileSyncCoordinator';
 import { profilesOn } from '../services/agentFarm/profilesFeature';
 import type { MachineConnections } from '../services/machineConnections';
@@ -89,6 +89,8 @@ export function registerProfileHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
       getPaneEventSink().send(PROFILE_SYNC_CHANGED_EVENT);
     },
     onPeerSeen: machine => coordinator.peerSeen(machine),
+    // Checked again once a call has the lock, so one that waited refuses after the switch goes off (review F-11).
+    enabled: profilesOn,
   });
   const peers = (): ProfileSyncPeer[] => {
     const saved: ProfileSyncPeer[] = (machines?.list() ?? []).filter(machine => machine.id !== LOCAL_MACHINE_ID && machine.kind === 'remote').map(machine => ({
@@ -195,7 +197,7 @@ export function registerProfileHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
   // and only while Profiles is on here.
   for (const channel of Object.values(PROFILE_SYNC_CHANNELS)) {
     commandRegistry?.register(channel, (request: PaneCommandValue) => {
-      if (!profilesOn()) throw new PaneError(PROFILE_SYNC_OFF_CODE, 'Profiles is off on this computer, so it doesn\'t sync profiles. Nothing was changed.', 'Turn it on in Settings > Advanced > Experimental > Profiles on this computer.');
+      if (!profilesOn()) throw profilesOffError();
       const teammate = teammatePaneCaller();
       if (teammate) throw new PaneError('ERR_PROFILE_SYNC_TEAMMATE', `${teammate} asked to sync profiles with this computer, and profiles sync only between one person's own computers. Nothing was changed.`, 'Share a profile by sending its files instead.');
       return runProfileSyncCommand(host, channel, request ?? null);
