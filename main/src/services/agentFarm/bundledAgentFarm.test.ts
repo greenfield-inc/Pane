@@ -111,8 +111,8 @@ describe('installBundledAgentFarm', () => {
       ['plugin', 'uninstall', 'bigbrain'],
     ]);
     expect(status).toMatchObject({ state: 'ready', plugins: { greenfield: '1.2.3' } });
-    expect(Object.keys(status.plugins)).toEqual(['greenfield']);
-    expect(Object.keys(JSON.parse(readFileSync(manifestPath, 'utf8')).plugins)).toEqual(['greenfield']);
+    expect(Object.keys(status.plugins)).toEqual(['greenfield', 'pane']);
+    expect(Object.keys(JSON.parse(readFileSync(manifestPath, 'utf8')).plugins)).toEqual(['greenfield', 'pane']);
     expect(logs).toContainEqual(expect.stringContaining('Uninstalled retired plugin dcouple: removed 2 files, left 1 changed file in place (c.md).'));
     expect(logs).toContainEqual(expect.stringContaining('Uninstalled retired plugin bigbrain'));
     // Idempotent: the next start finds nothing to retire and nothing to reinstall.
@@ -138,7 +138,7 @@ describe('installBundledAgentFarm', () => {
     expect(calls).toEqual([]);
     expect(readFileSync(local, 'utf8')).toBe('name: mine\n');
     expect(status).toMatchObject({ state: 'ready', plugins: { greenfield: '1.2.3' } });
-    expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toEqual({ ...manifest, plugins: { greenfield: '1.2.3' } });
+    expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toEqual({ ...manifest, plugins: { greenfield: '1.2.3', pane: '1.2.3' } });
     expect(logs).toContainEqual(expect.stringContaining('dropped dcouple from the manifest'));
   });
 
@@ -151,7 +151,8 @@ describe('installBundledAgentFarm', () => {
     const logs: string[] = [];
     const status = await installBundledAgentFarm({ paneDir, bundle: fakeBundle(), run: recordingRunner(calls), log: (line) => logs.push(line) });
     expect(status).toMatchObject({ state: 'ready', plugins: { greenfield: '1.2.3' } });
-    expect(calls.map((call) => call.args.slice(1, 3))).toEqual([['plugin', 'install']]);
+    // greenfield, then Pane's own plugin.
+    expect(calls.map((call) => call.args.slice(1, 3))).toEqual([['plugin', 'install'], ['plugin', 'install']]);
     const aside = readdirSync(path.join(configRoot, '.plugins')).filter((file) => file.startsWith('dcouple'));
     expect(aside).toHaveLength(1);
     expect(aside[0].endsWith('.json')).toBe(false);
@@ -167,7 +168,7 @@ describe('installBundledAgentFarm', () => {
     const logs: string[] = [];
     const status = await installBundledAgentFarm({ paneDir, bundle: fakeBundle(), run: recordingRunner(calls, undefined, 'error: permission denied'), log: (line) => logs.push(line) });
     expect(status).toMatchObject({ state: 'ready', plugins: { greenfield: '1.2.3' } });
-    expect(calls.map((call) => call.args.slice(1, 3))).toEqual([['plugin', 'uninstall'], ['plugin', 'install']]);
+    expect(calls.map((call) => call.args.slice(1, 3))).toEqual([['plugin', 'uninstall'], ['plugin', 'install'], ['plugin', 'install']]);
     expect(logs).toContainEqual(expect.stringContaining("Pane couldn't uninstall the retired Agent Farm plugin dcouple"));
     expect(logs).toContainEqual(expect.stringContaining('error: permission denied'));
   });
