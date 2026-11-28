@@ -107,8 +107,8 @@ let listening = false;
 let linkUp = true;
 /** Chat tabs whose live mount takes what was typed into their Session and not delivered yet. */
 const undelivered = new Map<string, EngageTarget>();
-/** The last engage that landed: its Session, the chat that took the text, and when. */
-let landed: (EngageTarget & { panelId: string; at: number }) | undefined;
+/** The last engage that landed: its Session, the chat that took the text, when, and the window's switch then. */
+let landed: (EngageTarget & { panelId: string; at: number; switchTicket: number }) | undefined;
 
 /**
  * While an engage that was typed runs, a printable key that finds focus on nothing (the page body:
@@ -230,6 +230,8 @@ function hostReset(): void {
   const last = landed;
   landed = undefined;
   if (!last || useRemoteEngage.getState().engaging || Date.now() - last.at > REHOLD_AFTER_LAND_MS) return;
+  // A switch to another machine since then: this reset is for that machine, not a repeat of this one's.
+  if (latestMachineSwitchTicket() !== last.switchTicket) return;
   const box = document.querySelector<HTMLTextAreaElement>(`textarea[data-chat-composer="${last.panelId}"]`);
   if (!box || document.activeElement !== box) return;
   const target = { machineId: last.machineId, sessionId: last.sessionId };
@@ -544,7 +546,7 @@ function land(): void {
   // Ended first, so focus moving into the chat there is not taken back to the held box.
   useRemoteEngage.setState({ engaging: undefined, settling: true });
   const panelId = engaging.panelId ?? mirroredChatPanel(engaging) ?? liveChatPanel(engaging);
-  landed = panelId ? { machineId: engaging.machineId, sessionId: engaging.sessionId, panelId, at: Date.now() } : undefined;
+  landed = panelId ? { machineId: engaging.machineId, sessionId: engaging.sessionId, panelId, at: Date.now(), switchTicket: latestMachineSwitchTicket() } : undefined;
   clearTimeout(settleCap);
   settleCap = setTimeout(endEngageSettling, SETTLE_CAP_MS);
   deliverHeld(engaging, { focused: true, sends: true });

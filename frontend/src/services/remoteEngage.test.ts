@@ -296,6 +296,23 @@ describe('typing, Enter or a click engages, and what was typed arrives once (T-1
     expect(state().engaging).toBeUndefined();
   });
 
+  it('a switch to another machine within 5 s of landing, focus still in the chat, re-holds nothing (review 1781 b12 suggestion 1)', async () => {
+    const { engage, handover, link, state } = await setup(async () => ({ ok: true }));
+    engage.holdRemoteText(target, 'hi');
+    engage.engageRemoteSession(target, 'type');
+    await vi.waitFor(() => expect(state().engaging?.switched).toBe(true));
+    handover.chatTabShown('panel-b');
+    const body = {};
+    const box = { value: 'hi there' };
+    const page: StubPage = { body, activeElement: box, querySelector: selector => (selector.includes('data-chat-composer') ? box : null), querySelectorAll: () => [] };
+    vi.stubGlobal('document', page);
+    // The person switches the window to another machine (a shortcut; focus stays in the chat box).
+    const { requestMachinePress } = await import('../hooks/useMachines');
+    void requestMachinePress({ id: 'other', kind: 'computer', action: 'switch', computerId: 'other' }, async () => ({ ok: true }));
+    link.noteWindowHostReset();
+    expect(state().engaging).toBeUndefined();
+  });
+
   it('Enter while the switch runs sends the held text there once, after the switch', async () => {
     const switched = deferred<MachineSelectOutcome>();
     const { engage, handover, taken } = await setup(() => switched.promise);
