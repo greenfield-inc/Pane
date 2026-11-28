@@ -604,7 +604,32 @@ turning Profiles off never lets an update overwrite a plugin edited while it
 was on. An install that never finished (its lock, a
 plugin Pane was installing then, recorded in `pane-installing.json`, or one with
 no receipt) is cleared before the next one, and a failed install is logged and
-never blocks startup. `run` writes its launch bundle to
+never blocks startup. With Profiles on (Settings › Advanced › Experimental), the
+sidebar's **Profiles** tab lists the top-level profiles, pinned ones first: a
+profile Agent Farm's `profiles list` marks `| unlisted` (one another profile runs
+as a subagent) shows inside that profile instead, and an Agent Farm that doesn't
+say lists every profile. For now it shows only greenfield's orchestrator,
+business and seo, the same temporary short list as Create New's To. With
+Profiles off there is no tab and its channels refuse. A profile opens on its cover page,
+`covers/<profile>.html` or `.md` in the plugin when there is one (HTML is shown in
+a sandboxed frame with no scripts and no network), otherwise one Pane makes from
+its title, description, identity, subagents, skills and references. Beside it, a
+tree holds only that profile's own files: its identity, instructions, skills,
+references and the subagents it calls, each nested with its own files, and its
+settings. Files preview first (Markdown with its front-matter as a metadata
+header, YAML as key/value) and **Edit** opens the source. **Edit details**
+writes a profile's description into its identity's front-matter (Agent Farm's own
+`description:`, checked like any save). Its title goes in the plugin's `pane.yaml`
+for now, and its photo stays on this computer: both are temporary until Agent
+Farm's profile format has fields for them. The tab edits the plugins in
+place: a save is first checked with `agent-farm plugin validate` on a staged copy
+(without a pack's stale `checksums`, which launches don't read), so nothing changes
+unless Agent Farm accepts it, and Sessions using the plugin then show the changed
+dot. Saving greenfield or dcouple makes it **Edited** this way, and **Restore
+Pane's version** reinstalls the bundled copy and takes it off `edited`. A new
+profile is a plugin installed with `agent-farm plugin install`, since Agent Farm
+finds plugins by their receipts. Saving to your other computers arrives with
+profile sync. `run` writes its launch bundle to
 `<worktree>/.agent-farm/generated`, which Pane hides from git through
 `info/exclude` as it does `.pane/`.
 

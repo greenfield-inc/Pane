@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 import type { AgentFarmProfileList } from '../shared/types/agentFarmProfiles';
+import type { ParsedYaml, ProfilePhotos, ProfilePlugin, ProfileTreeNode, ProfilesOverview } from '../shared/types/profileEditor';
 import type { ArchiveProgressSnapshot } from '../shared/types/archiveProgress';
 import type { PaneChatAgent } from '../shared/types/paneChat';
 import type { PanePermissionRequest, PanePermissionResponse } from '../shared/types/permissions';
@@ -194,6 +195,12 @@ export type ElectronApiMockOptions = {
   setupImportError?: string;
   /** chat-tab:profiles, this computer's Agent Farm profiles (T-63). Absent: none, and no chatTab API without a chat panel. */
   agentFarmProfiles?: AgentFarmProfileList;
+  /**
+   * window.electronAPI.profiles, the Profiles tab (T-63 PR 5): the plugins, each file's content by
+   * `plugin/path`, and photos. `saveError` makes every save fail with that PaneError text, as a
+   * plugin Agent Farm rejects does. Absent: no Profiles API, so no Profiles row.
+   */
+  profileEditor?: { overview: ProfilesOverview; files: Record<string, string>; photos?: ProfilePhotos; saveError?: string };
   /** Each chat tab's conversation, by panel id (plain text turns). Absent: no messages. */
   chatMessages?: Record<string, Array<{ id: string; role: 'user' | 'assistant'; text: string }>>;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
@@ -1412,7 +1419,199 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     // New Session reads this computer's Agent Farm profiles through chatTab.profiles (T-63).
     const profilesList = mockOptions.agentFarmProfiles;
     const chatTabWithProfiles = profilesList ? { ...chatTabApi, profiles: () => Promise.resolve(clone(profilesList)) } : chatTabApi;
+    // The Profiles tab (T-63 PR 5): an in-memory copy of the plugins it edits. Saves mark Pane's own plugins Edited.
+    const profilesApi = mockOptions.profileEditor ? (() => {
+      const state = clone(mockOptions.profileEditor);
+      const photos: { profiles: Record<string, string>; plugins: Record<string, string> } = state.photos ?? { profiles: {}, plugins: {} };
+      const pristine = clone(state.files);
+      const pristinePlugins = clone(state.overview.plugins);
+      const ok = <T,>(data: T) => Promise.resolve({ success: true, data: clone(data) });
+      const pluginOf = (name: string) => state.overview.plugins.find(plugin => plugin.name === name);
+      const result = (name: string, path: string) => ok({ plugin: pluginOf(name), path });
+      type TreeNode = ProfileTreeNode;
+      /** Drops file rows whose file is gone (as main leaves out a skill or reference that isn't there). */
+      const prune = (nodes: TreeNode[], files: string[]): TreeNode[] => nodes
+        .filter(node => node.kind !== 'file' || files.includes(node.path))
+        .map(node => (node.kind === 'file' ? node : { ...node, children: prune(node.children, files) }));
+      const syncTrees = (entry: ProfilePlugin) => { for (const profile of entry.profiles) profile.tree = prune(profile.tree, entry.files); };
+      /** Adds a row under a top-level folder of a profile's tree (Skills, Subagents, References), making the folder. */
+      const addRow = (tree: TreeNode[], profile: string, label: string, node: TreeNode) => {
+        let folder = tree.find(item => item.kind === 'folder' && item.label === label);
+        if (!folder) {
+          folder = { kind: 'folder', id: `${profile}/${label.toLowerCase()}`, label, children: [] };
+          const settings = tree.findIndex(item => item.kind === 'folder' && item.label === 'Settings');
+          tree.splice(settings < 0 ? tree.length : settings, 0, folder);
+        }
+        if (folder.kind === 'folder') folder.children.push(node);
+      };
+      /** A small YAML reader for previews: nested mappings by indentation, `- ` lists, `[a, b]` and `{ a: b }`. */
+      const parseYamlText = (source: string): ParsedYaml => {
+        const scalar = (text: string): JsonValue => {
+          const value = text.trim();
+          if (value.startsWith('[') && value.endsWith(']')) return value.slice(1, -1).split(',').map(item => item.trim()).filter(Boolean).map(scalar);
+          if (value.startsWith('{') && value.endsWith('}')) {
+            const object: Record<string, JsonValue> = {};
+            for (const pair of value.slice(1, -1).split(',')) { const at = pair.indexOf(':'); if (at > 0) object[pair.slice(0, at).trim()] = scalar(pair.slice(at + 1)); }
+            return object;
+          }
+          if (value === 'true' || value === 'false') return value === 'true';
+          if (/^-?\d+(\.\d+)?$/.test(value)) return Number(value);
+          return value.replace(/^["']|["']$/g, '');
+        };
+        const lines = source.split('\n').filter(line => line.trim() && !line.trim().startsWith('#'));
+        if (lines.some(line => (line.match(/\[/g) ?? []).length !== (line.match(/\]/g) ?? []).length)) return { error: 'unexpected end of the stream within a flow collection at line 1, column 1' };
+        let index = 0;
+        const block = (indent: number): JsonValue => {
+          if (index < lines.length && lines[index].trimStart().startsWith('- ')) {
+            const list: JsonValue[] = [];
+            while (index < lines.length && lines[index].length - lines[index].trimStart().length === indent && lines[index].trimStart().startsWith('- ')) {
+              list.push(scalar(lines[index].trimStart().slice(2)));
+              index += 1;
+            }
+            return list;
+          }
+          const object: Record<string, JsonValue> = {};
+          while (index < lines.length) {
+            const line = lines[index];
+            const depth = line.length - line.trimStart().length;
+            if (depth < indent) break;
+            const at = line.indexOf(':');
+            const key = line.slice(0, at).trim();
+            const rest = line.slice(at + 1);
+            index += 1;
+            if (rest.trim()) object[key] = scalar(rest);
+            else if (index < lines.length) {
+              const next = lines[index].length - lines[index].trimStart().length;
+              object[key] = next > depth || lines[index].trimStart().startsWith('- ') ? block(next) : null;
+            } else object[key] = null;
+          }
+          return object;
+        };
+        return { data: lines.length ? block(lines[0].length - lines[0].trimStart().length) : null };
+      };
+      return {
+        list: () => ok(state.overview),
+        read: (plugin: string, file: string) => {
+          const content = state.files[`${plugin}/${file}`];
+          return content === undefined ? Promise.resolve({ success: false, error: `${plugin}/${file} doesn't exist. Open the profile again to see its files.` }) : ok(content);
+        },
+        save: (plugin: string, changes: Array<{ path: string; content: string }>) => {
+          if (state.saveError) return Promise.resolve({ success: false, error: state.saveError });
+          const entry = pluginOf(plugin);
+          for (const change of changes) {
+            state.files[`${plugin}/${change.path}`] = change.content;
+            if (entry && !entry.files.includes(change.path)) entry.files = [...entry.files, change.path].sort();
+          }
+          if (entry?.bundled && changes.some(change => change.path !== 'pane.yaml' && !change.path.startsWith('covers/'))) entry.edited = true;
+          if (entry) for (const profile of entry.profiles) {
+            const cover = [`covers/${profile.name}.html`, `covers/${profile.name}.md`].find(file => entry.files.includes(file));
+            if (cover) profile.cover = cover;
+          }
+          return result(plugin, changes[0]?.path ?? '');
+        },
+        setDetails: (plugin: string, profile: string, details: { title: string; description: string }) => {
+          const summary = pluginOf(plugin)?.profiles.find(item => item.name === profile);
+          if (!summary) return Promise.resolve({ success: false, error: `${plugin} has no profile named ${profile}.` });
+          if (details.title.trim()) summary.title = details.title.trim(); else delete summary.title;
+          // The description is the agent's own: it goes in the identity's front-matter, as main writes it.
+          const key = `${plugin}/${summary.entry}`;
+          const identity = state.files[key] ?? '---\n---\n';
+          const description = details.description.trim();
+          if (description) summary.description = description; else delete summary.description;
+          const withoutOld = identity.replace(/^description:.*\n/m, '');
+          state.files[key] = description ? withoutOld.replace(/^---\n/, `---\ndescription: ${JSON.stringify(description)}\n`) : withoutOld;
+          state.files[`${plugin}/pane.yaml`] = `profiles:\n  ${profile}:\n    title: ${details.title}\n`;
+          return result(plugin, summary.entry);
+        },
+        parseYaml: (source: string) => ok(parseYamlText(source)),
+        newProfile: (name: string, agent: string) => {
+          const entry = `agents/${name}.md`;
+          state.files[`${name}/plugin.yaml`] = `name: ${name}\nversion: 0.1.0\ncli_major: 0\n`;
+          state.files[`${name}/profiles/${name}.yaml`] = `agent: ${name}\n`;
+          state.files[`${name}/${entry}`] = `---\nharness: ${agent}\n---\n\n# ${name}\n\nWho you are and what you do.\n`;
+          const files = [entry, 'plugin.yaml', `profiles/${name}.yaml`];
+          state.overview.plugins.push({ name, version: '0.1.0', bundled: false, edited: false, files, profiles: [{
+            name, ref: `${name}/${name}`, entry, harness: agent, uses: files, listed: true,
+            tree: [
+              { kind: 'file', id: `${name}/identity`, path: entry, label: `${name}.md`, note: 'identity' },
+              { kind: 'folder', id: `${name}/settings`, label: 'Settings', children: [{ kind: 'file', id: `${name}/settings/profiles/${name}.yaml`, path: `profiles/${name}.yaml`, label: `${name}.yaml` }] },
+            ],
+          }] });
+          return result(name, entry);
+        },
+        newFile: (plugin: string, profile: string, kind: string, name: string) => {
+          const entry = pluginOf(plugin);
+          const summary = entry?.profiles.find(item => item.name === profile);
+          if (!entry || !summary) return Promise.resolve({ success: false, error: `${plugin} has no profile named ${profile}.` });
+          const path = kind === 'skill' ? `skills/${name}/SKILL.md` : kind === 'subagent' ? `agents/${name}.md` : `references/${profile}/${name}.md`;
+          state.files[`${plugin}/${path}`] = `# ${name}\n`;
+          entry.files = [...entry.files, path].sort();
+          summary.uses = [...summary.uses, path].sort();
+          const id = `${profile}/new/${path}`;
+          if (kind === 'skill') addRow(summary.tree, profile, 'Skills', { kind: 'folder', id, label: name, children: [{ kind: 'file', id: `${id}/SKILL.md`, path, label: 'SKILL.md' }] });
+          else if (kind === 'subagent') addRow(summary.tree, profile, 'Subagents', { kind: 'subagent', id, alias: name, agent: name, label: name, harness: summary.harness, identity: path, children: [{ kind: 'file', id: `${id}/identity`, path, label: `${name}.md`, note: 'identity' }] });
+          else addRow(summary.tree, profile, 'References', { kind: 'file', id, path, label: `${name}.md` });
+          if (entry.bundled) entry.edited = true;
+          return result(plugin, path);
+        },
+        restore: (plugin: string) => {
+          const entry = pluginOf(plugin);
+          if (!entry?.bundled) return Promise.resolve({ success: false, error: `${plugin} doesn't ship with Pane, so there's no Pane version to restore.` });
+          for (const key of Object.keys(state.files)) if (key.startsWith(`${plugin}/`)) delete state.files[key];
+          for (const [key, value] of Object.entries(pristine)) if (key.startsWith(`${plugin}/`)) state.files[key] = value;
+          const shipped = pristinePlugins.find(item => item.name === plugin);
+          if (shipped) Object.assign(entry, clone(shipped));
+          entry.edited = false;
+          return result(plugin, entry.profiles[0]?.entry ?? 'plugin.yaml');
+        },
+        photos: () => ok(photos),
+        /** Not part of Pane's API: a spec changes a file "on disk", as an agent or sync would. Null removes it. */
+        writeOnDisk: (plugin: string, path: string, content: string | null) => {
+          const entry = pluginOf(plugin);
+          if (content === null) {
+            delete state.files[`${plugin}/${path}`];
+            if (entry) {
+              entry.files = entry.files.filter(file => file !== path);
+              syncTrees(entry);
+            }
+            return;
+          }
+          state.files[`${plugin}/${path}`] = content;
+          if (entry && !entry.files.includes(path)) entry.files = [...entry.files, path].sort();
+          // A new profiles/<name>.yaml is a new profile, as Agent Farm reads it.
+          const profile = /^profiles\/([a-z][a-z0-9_-]*)\.yaml$/.exec(path)?.[1];
+          if (entry && profile && !entry.profiles.some(item => item.name === profile)) {
+            entry.profiles = [...entry.profiles, { name: profile, ref: `${plugin}/${profile}`, entry: `agents/${profile}.md`, harness: 'claude', uses: [path], listed: true, tree: [] }];
+          }
+        },
+        setPhoto: (ref: string, base64: string) => { photos.profiles[ref] = `data:image/png;base64,${base64}`; return ok(null); },
+        removePhoto: (ref: string) => { delete photos.profiles[ref]; return ok(null); },
+      };
+    })() : undefined;
+    /** Every call the renderer made to the Profiles API, by method; a spec checks none happen with Profiles off. */
+    const profilesCalls: string[] = [];
+    const record = <Args extends unknown[], Result>(name: string, method: (...args: Args) => Result) => (...args: Args): Result => {
+      profilesCalls.push(name);
+      return method(...args);
+    };
+    // writeOnDisk is the spec's own control, not something the renderer calls.
+    const recordedProfilesApi = profilesApi && {
+      ...profilesApi,
+      list: record('list', profilesApi.list),
+      read: record('read', profilesApi.read),
+      save: record('save', profilesApi.save),
+      newProfile: record('newProfile', profilesApi.newProfile),
+      newFile: record('newFile', profilesApi.newFile),
+      restore: record('restore', profilesApi.restore),
+      photos: record('photos', profilesApi.photos),
+      setPhoto: record('setPhoto', profilesApi.setPhoto),
+      removePhoto: record('removePhoto', profilesApi.removePhoto),
+      setDetails: record('setDetails', profilesApi.setDetails),
+      parseYaml: record('parseYaml', profilesApi.parseYaml),
+    };
     const electronAPI = {
+      // Absent without the option, so the Profiles row stays hidden in other specs.
+      profiles: recordedProfilesApi,
       autopilot: autopilotApi,
       todos: todosApi,
       chatTab: chatTabWithProfiles,
@@ -2373,6 +2572,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getInvokeCalls(channel: string) {
           return clone(invokeCalls.get(channel) ?? []);
+        },
+        getProfilesCalls() {
+          return clone(profilesCalls);
+        },
+        writeProfileFile(plugin: string, path: string, content: string | null) {
+          profilesApi?.writeOnDisk(plugin, path, content);
         },
         setTodoReplyRefusal(on: boolean) {
           todoRepliesRefused = on;

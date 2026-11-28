@@ -3,11 +3,12 @@ import type { AgentFarmProfileEntry } from '../../../shared/types/agentFarmProfi
 import type { OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
 import { profileDisplayName } from './profileAvatar';
 import { isTemporarilyShownProfile } from '../../../shared/agentProfiles';
+import { pinnedFirst } from '../components/profiles/profilePins';
 
 /**
  * What Create New's To offers (T-63), in this order: Claude and Codex on their own, the machine's
  * listed Agent Farm profiles, and the other agents, which start directly with no profile (A-1).
- * Pinned profiles go first once the Profiles tab can pin them.
+ * Profiles pinned in the Profiles tab go first, in pin order.
  */
 export interface SessionChoice {
   key: string;
@@ -42,12 +43,14 @@ export function modelDisplayName(model: string): string {
   return model;
 }
 
-export function sessionChoices({ agents, profiles, profilesUnavailable }: {
+export function sessionChoices({ agents, profiles, profilesUnavailable, pins = [] }: {
   /** The agents the machine can run a Session with, in config order. */
   agents: readonly string[];
   profiles: readonly AgentFarmProfileEntry[];
   /** Why profiles can't start on that machine now (chat tabs off, WSL); undefined when they can. */
   profilesUnavailable?: string;
+  /** Pinned profiles (`plugin/profile`), which come first in pin order (T-63, build-6 feedback item 2). */
+  pins?: readonly string[];
 }): SessionChoice[] {
   const runsThroughAgentFarm = (agent: string) => !!agentConfig(agent)?.chat?.profileModel;
   const plain = agents.filter(runsThroughAgentFarm).map((agent): SessionChoice => {
@@ -68,7 +71,9 @@ export function sessionChoices({ agents, profiles, profilesUnavailable }: {
   const others = agents.filter(agent => !runsThroughAgentFarm(agent) && isConfiguredAgent(agent)).map((agent): SessionChoice => ({
     key: `other:${agent}`, group: 'other', label: agentLabel(agent), detail: 'Starts directly · no profiles or Agent Farm', agent,
   }));
-  return [...plain, ...named, ...others];
+  const pinned = (choice: SessionChoice) => !!choice.profileRef && pins.includes(choice.profileRef.split(':')[0]);
+  const pinnedChoices = pinnedFirst(named.filter(pinned), pins, choice => choice.profileRef);
+  return [...pinnedChoices, ...plain, ...named.filter(choice => !pinned(choice)), ...others];
 }
 
 export function filterSessionChoices(choices: readonly SessionChoice[], query: string): SessionChoice[] {

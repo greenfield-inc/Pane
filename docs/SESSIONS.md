@@ -74,7 +74,8 @@ open **Create New** instead of the dialogs below. It asks, in order:
    (until T-83) To shows only a short list of installed profiles,
    `greenfield/orchestrator`, `greenfield/business` and `greenfield/seo`
    (`shared/agentProfiles.ts`); any other installed profile isn't offered yet.
-   It starts on the last choice made here.
+   Profiles pinned in the Profiles tab (`pinnedProfiles` in config.json) come
+   first. It starts on the last choice made here.
 2. **Name** (optional): left empty, the Session is named from its first message.
 3. **Message** (optional): the agent's first message, sent once as a one-time
    opening prompt. PNG, JPEG, WebP and GIF images up to 5 MB (a chat's limit)
@@ -110,7 +111,9 @@ A project's `+` opens Create New as a Pane in that project, on this computer.
 Session rows show the profile's avatar at the row's left padding (a profile's
 initials on a tint, `--color-avatar-1` to `--color-avatar-8`; Claude's or Codex's
 logo for the agent on its own and for older Sessions; another agent's initial).
-A Session with Panes shows its expand chevron in the avatar's place on hover or
+A photo set in the Profiles tab replaces the initials (yours, stored on this
+computer in `<PANE_DIR>/agent-farm/avatars/`, overrides a plugin's own
+`avatar.png`). A Session with Panes shows its expand chevron in the avatar's place on hover or
 keyboard focus. While it works, a grey spinner sits on the right, before the
 approvals count and, in All machines, the machine mark; an idle row shows none.
 With Profiles off, New, the `+` and the rows are as described below.

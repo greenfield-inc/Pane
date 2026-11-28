@@ -57,6 +57,7 @@ import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
 import { useApprovalsNav } from './approvals/useApprovalsNav';
 import { toggleApprovals } from './approvals/approvalsNavigation';
 import { TodosRailButton } from './todos/TodosNavRow';
+import { ProfilesRailButton } from './profiles/ProfilesNavRow';
 import { useTodosMachines, useTodosRefresh } from '../stores/todosStore';
 import { useAnyLoopRunning } from './loops/loopRunView';
 import { useRestartToUpdateStore } from '../stores/restartToUpdateStore';
@@ -411,6 +412,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
   const hasSshHosts = useSshHostsStore((state) => state.rows.length > 0);
   const missionControlEnabled = useConfigStore((state) => isMissionControlEnabled(state.config));
   const todosEnabled = useConfigStore((state) => isTodosEnabled(state.config));
+  const profilesRailOn = useConfigStore((state) => isProfilesEnabled(state.config));
   const paneChatStatus = useSessionAgentDisplayStatus(PANE_CHAT_SESSION_ID);
   const orchestrationAvailability = useOrchestrationSessionStore((state) => state.availability);
   const loadOrchestrationSessions = useOrchestrationSessionStore((state) => state.load);
@@ -784,6 +786,12 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
             {todosEnabled && (
               <Tooltip content="To-dos" side="right">
                 <TodosRailButton buttonClass={COMPACT_RAIL_BUTTON} activeClass={COMPACT_RAIL_ACTIVE} idleClass={COMPACT_RAIL_IDLE} />
+              </Tooltip>
+            )}
+
+            {window.electronAPI?.profiles && profilesRailOn && (
+              <Tooltip content="Profiles" side="right">
+                <ProfilesRailButton buttonClass={COMPACT_RAIL_BUTTON} activeClass={COMPACT_RAIL_ACTIVE} idleClass={COMPACT_RAIL_IDLE} />
               </Tooltip>
             )}
 

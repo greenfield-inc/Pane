@@ -27,6 +27,8 @@ const MANIFEST_FILE = 'pane-manifest.json';
 const TELEMETRY_MARKER_FILE = 'pane-telemetry.json';
 /** Written while Pane installs one bundled plugin, naming it; still there at the next start means that install never finished. */
 const INSTALLING_FILE = 'pane-installing.json';
+/** Where Restore keeps an edited plugin and its receipt while the bundled copy installs. */
+const RESTORE_DIR = 'pane-restore';
 /** The folders of a plugin Agent Farm's install receipt covers, besides plugin.yaml (Agent Farm's plugins.js). */
 const RECEIPT_SECTIONS = ['profiles', 'agents', 'skills', 'instructions', 'references'];
 /** Where Pane writes its own plugin's source before installing it (agentFarmProfiles.ts). */
@@ -188,9 +190,9 @@ const uninstallOutput = boundary.object({
 });
 
 /** Runs one Agent Farm command and returns its stdout. */
-type AgentFarmRunner = (process: AgentFarmProcess) => Promise<string>;
+export type AgentFarmRunner = (process: AgentFarmProcess) => Promise<string>;
 
-const runAgentFarm: AgentFarmRunner = async ({ executable, args, env, cwd }) => {
+export const runAgentFarm: AgentFarmRunner = async ({ executable, args, env, cwd }) => {
   const { stdout } = await execFileAsync(executable, args, { env, cwd, timeout: 120_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
   return stdout;
 };
@@ -391,7 +393,7 @@ async function installedVersionOf(configRoot: string, name: string): Promise<str
  * or a first install that never finished), or unreadable when its plugin folder is there but
  * Pane can't read the receipt that would tell an edit apart: the folder is kept (review F-10).
  */
-async function installedState(configRoot: string, name: string): Promise<{ version: string } | 'edited' | { unreadable: string } | undefined> {
+export async function installedState(configRoot: string, name: string): Promise<{ version: string } | 'edited' | { unreadable: string } | undefined> {
   const receipt = await readReceipt(configRoot, name);
   if (receipt.state === 'missing') return undefined;
   if (receipt.state === 'unreadable') return existsSync(path.join(configRoot, 'plugins', name)) ? { unreadable: receipt.reason } : undefined;
@@ -406,6 +408,17 @@ async function installedState(configRoot: string, name: string): Promise<{ versi
  * plugins' half-copied files: the one Pane was installing then (pane-installing.json), and those
  * with no receipt. The config root is Pane's, so nothing else is installing.
  */
+/** Renames `from` to `to` when `from` exists; true when it moved. */
+async function moveIfPresent(from: string, to: string): Promise<boolean> {
+  try {
+    await fs.rename(from, to);
+    return true;
+  } catch (error) {
+    if (decodeOptionalBoundary(error, boundary.object({ code: boundary.string }))?.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 async function clearUnfinishedInstall(configRoot: string, plugins: readonly string[]): Promise<void> {
   await fs.rm(path.join(configRoot, '.plugins', 'install.lock'), { recursive: true, force: true });
   for (const name of plugins) {
@@ -468,7 +481,10 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
   const previous = await fs.readFile(manifestPath, 'utf8').then((text) => decodeOptionalBoundary(JSON.parse(text), manifestSchema)).catch(() => undefined);
   // Pane's own plugin must also still be exactly what Pane writes: an edit there is replaced.
   const installed = previous && BUNDLED_AGENT_FARM_PLUGINS.every((name) => existsSync(path.join(configRoot, 'plugins', name))) && await panePluginInstalled(configRoot);
-  if (previous && installed && previous.hash === hash && BUNDLED_AGENT_FARM_PLUGINS.every((name) => name in previous.plugins)) {
+  // An install that never finished may have recreated the plugin's folder, so its marker wins over the fast path (review F-1).
+  const installingPath = path.join(configRoot, INSTALLING_FILE);
+  const unfinished: string[] = await fs.readFile(installingPath, 'utf8').then((text) => decodeOptionalBoundary(JSON.parse(text), boundary.array(boundary.string)) ?? []).catch(() => []);
+  if (previous && installed && previous.hash === hash && unfinished.length === 0 && BUNDLED_AGENT_FARM_PLUGINS.every((name) => name in previous.plugins)) {
     const retired: readonly string[] = RETIRED_AGENT_FARM_PLUGINS;
     const dropped = Object.keys(previous.plugins).filter((name) => retired.includes(name));
     const plugins = Object.fromEntries(Object.entries(previous.plugins).filter(([name]) => !dropped.includes(name)));
@@ -490,10 +506,8 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
   log(`[AgentFarm] Setting up bundled Agent Farm ${bundle.version} in ${configRoot} (${!previous ? 'first start' : previous.hash !== hash ? `bundle changed from ${previous.agentFarmVersion}` : 'a plugin changed or is missing here'}).`);
   const plugins: Record<string, string> = {};
   const edited: string[] = [];
-  const installingPath = path.join(configRoot, INSTALLING_FILE);
   try {
     await fs.mkdir(configRoot, { recursive: true });
-    const unfinished: string[] = await fs.readFile(installingPath, 'utf8').then((text) => decodeOptionalBoundary(JSON.parse(text), boundary.array(boundary.string)) ?? []).catch(() => []);
     const install: string[] = [];
     const clear: string[] = [];
     // Bundled plugins whose install receipt can't be read (review F-10).
@@ -528,9 +542,7 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
       // Names only the plugin being installed, and only until it succeeds: one that finished
       // has a receipt that guards its later edits, even when a plugin after it fails (review F-1).
       await fs.writeFile(installingPath, `${JSON.stringify([name])}\n`);
-      // No name installs the package's default plugin, greenfield.
-      const args = name === 'greenfield' ? ['plugin', 'install'] : ['plugin', 'install', name];
-      const stdout = await run(bundledAgentFarmProcess(bundle, args, configRoot));
+      const stdout = await run(bundledAgentFarmProcess(bundle, bundledInstallArgs(name), configRoot));
       plugins[name] = installedVersion(stdout) ?? 'unknown';
       await fs.rm(installingPath, { force: true });
     }
@@ -550,4 +562,52 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
   status = { state: 'ready', configRoot, version: bundle.version, plugins, edited };
   log(`[AgentFarm] Bundled Agent Farm ${bundle.version} set up: ${Object.entries(plugins).map(([name, version]) => `${name} ${version}`).join(', ')}.`);
   return status;
+}
+
+/** The `plugin install` arguments for a bundled plugin: no name installs the package's default, greenfield. */
+function bundledInstallArgs(name: string): string[] {
+  return name === 'greenfield' ? ['plugin', 'install'] : ['plugin', 'install', name];
+}
+
+/**
+ * Restore Pane's version (T-63, A-3): replaces a bundled plugin someone edited with the copy this
+ * Pane ships, and records in the manifest that Pane updates replace it again. The edited copy and
+ * its receipt are moved aside first and put back when the install fails, so a timeout or a full
+ * disk leaves your edits as they were (review F-1); the error is then thrown. Only a crash between
+ * the two leaves the plugin to the next start, which reinstalls it as you asked, and the moved
+ * copy stays in pane-restore/ until the next Restore.
+ */
+export async function reinstallBundledPlugin(paneDir: string, name: string, bundle: BundledAgentFarm, run: AgentFarmRunner = runAgentFarm): Promise<string> {
+  const configRoot = agentFarmConfigRoot(paneDir);
+  const live = { plugin: path.join(configRoot, 'plugins', name), receipt: path.join(configRoot, '.plugins', `${name}.json`) };
+  const aside = path.join(configRoot, RESTORE_DIR, name);
+  const moved = { plugin: path.join(aside, 'plugin'), receipt: path.join(aside, 'receipt.json') };
+  await fs.rm(aside, { recursive: true, force: true });
+  await fs.mkdir(aside, { recursive: true });
+  const installingPath = path.join(configRoot, INSTALLING_FILE);
+  await fs.writeFile(installingPath, `${JSON.stringify([name])}\n`);
+  const hadPlugin = await moveIfPresent(live.plugin, moved.plugin);
+  const hadReceipt = await moveIfPresent(live.receipt, moved.receipt);
+  let version: string;
+  try {
+    await clearUnfinishedInstall(configRoot, [name]);
+    version = installedVersion(await run(bundledAgentFarmProcess(bundle, bundledInstallArgs(name), configRoot))) ?? 'unknown';
+  } catch (error) {
+    // Put your copy back over whatever the failed install left; the marker stays if that fails too.
+    await clearUnfinishedInstall(configRoot, [name]);
+    if (hadPlugin) await fs.rename(moved.plugin, live.plugin);
+    if (hadReceipt) await fs.rename(moved.receipt, live.receipt);
+    await fs.rm(installingPath, { force: true });
+    await fs.rm(aside, { recursive: true, force: true });
+    throw error;
+  }
+  await fs.rm(installingPath, { force: true });
+  await fs.rm(aside, { recursive: true, force: true });
+  const manifestPath = path.join(configRoot, MANIFEST_FILE);
+  const manifest = await fs.readFile(manifestPath, 'utf8').then((text) => decodeOptionalBoundary(JSON.parse(text), manifestSchema)).catch(() => undefined);
+  if (manifest) {
+    const next = { ...manifest, plugins: { ...manifest.plugins, [name]: version }, edited: (manifest.edited ?? []).filter((entry) => entry !== name) };
+    await fs.writeFile(manifestPath, `${JSON.stringify(next, null, 2)}\n`);
+  }
+  return version;
 }
