@@ -3,7 +3,7 @@ import { isReadOnlyHost, useReadOnlyHost } from '../stores/readOnlyHostStore';
 import { useActiveMachineStore } from '../stores/activeMachineStore';
 import { NewDialog } from './NewDialog';
 import { onOpenNewDialogRequest } from '../utils/openNewDialog';
-import { onOpenNewSessionRequest } from '../utils/openNewSession';
+import { onOpenNewPaneRequest, onOpenNewSessionRequest } from '../utils/openNewSession';
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
@@ -396,7 +396,9 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
   const [projects, setProjects] = useState<Project[]>([]);
   const [showNewDialog, setShowNewDialog] = useState(false);
   // Profiles on (T-63): New Session (the + beside Sessions, Search, the shortcut) opens Create New as a Session.
-  const [newDialogMode, setNewDialogMode] = useState<'session' | undefined>(undefined);
+  const [newDialogMode, setNewDialogMode] = useState<'session' | 'pane' | undefined>(undefined);
+  // A project's + (Profiles on): Create New as a Pane in that project.
+  const [newDialogProjectId, setNewDialogProjectId] = useState<number | undefined>(undefined);
   const [compactSessionMenu, setCompactSessionMenu] = useState<CompactSessionMenuState | null>(null);
   const activeProjectId = useNavigationStore((state) => state.activeProjectId);
   const activeView = useNavigationStore((state) => state.activeView);
@@ -434,6 +436,12 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
     if (isReadOnlyHost()) return;
     if (!isProfilesEnabled(useConfigStore.getState().config)) return;
     setNewDialogMode('session');
+    setShowNewDialog(true);
+  }), []);
+  useEffect(() => onOpenNewPaneRequest(projectId => {
+    if (!isProfilesEnabled(useConfigStore.getState().config)) return;
+    setNewDialogMode('pane');
+    setNewDialogProjectId(projectId);
     setShowNewDialog(true);
   }), []);
 
@@ -981,7 +989,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
           </div>
         </div>
 
-        {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} machines={machines} onSwitchMachine={selectMachine} initialMode={newDialogMode} onClose={() => { setShowNewDialog(false); setNewDialogMode(undefined); }} />}
+        {showNewDialog && <NewDialog projects={projects} defaultProjectId={newDialogProjectId ?? sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} fromProject={newDialogProjectId !== undefined} machines={machines} onSwitchMachine={selectMachine} initialMode={newDialogMode} onClose={() => { setShowNewDialog(false); setNewDialogMode(undefined); setNewDialogProjectId(undefined); }} />}
 
         <CompactSessionMenu
           menu={compactSessionMenu}
@@ -1149,7 +1157,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
 
         </div>
     </div>
-    {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} machines={machines} onSwitchMachine={selectMachine} initialMode={newDialogMode} onClose={() => { setShowNewDialog(false); setNewDialogMode(undefined); }} />}
+    {showNewDialog && <NewDialog projects={projects} defaultProjectId={newDialogProjectId ?? sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} fromProject={newDialogProjectId !== undefined} machines={machines} onSwitchMachine={selectMachine} initialMode={newDialogMode} onClose={() => { setShowNewDialog(false); setNewDialogMode(undefined); setNewDialogProjectId(undefined); }} />}
     </>
   );
 }

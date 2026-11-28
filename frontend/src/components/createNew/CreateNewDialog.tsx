@@ -1,10 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { ChevronDown, ChevronLeft, FileImage, Paperclip, X } from 'lucide-react';
-import { CONFIGURED_AGENT_IDS } from '../../../../shared/agents';
+import { CONFIGURED_AGENT_IDS, isConfiguredAgent } from '../../../../shared/agents';
 import type { AgentFarmProfileList } from '../../../../shared/types/agentFarmProfiles';
 import type { CustomCommandResume } from '../../../../shared/types/customCommandResume';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
-import { nextOrchestrationSessionName, type OrchestrationSessionCreateInput } from '../../../../shared/types/orchestrationSession';
+import { nextOrchestrationSessionName, type OrchestrationSessionCreateInput, type SessionRuntimes } from '../../../../shared/types/orchestrationSession';
 import type { ProjectEnvironment } from '../../../../shared/types/panels';
 import { DEFAULT_SESSION_PROFILE } from '../../../../shared/types/sessionProfile';
 import { DEFAULT_PANE_CHAT_AGENT } from '../../../../shared/types/paneChat';
@@ -27,6 +27,7 @@ import {
   readBranches,
   readProfiles,
   readRepositories,
+  readRuntimes,
   readSessionNames,
   rememberNewMachine,
   startingNewMachineId,
@@ -60,6 +61,10 @@ import {
   type ImageAttachment,
 } from './createNewMemory';
 import { ToField } from './ToField';
+import { imagesBlocked, textBlocked, type FirstMessageTarget } from './firstMessageDelivery';
+import { MAX_IMAGE_BYTES } from '../chatTab/chatAttachments';
+import { addDraftAttachment } from '../chatTab/chatDrafts';
+import { chatTabViewer } from '../../../../shared/chatTabViewer';
 
 const ENVIRONMENT_BY_OS = { macOS: 'macos', Windows: 'windows', Linux: 'linux' } satisfies Record<MachineOs, ProjectEnvironment>;
 
@@ -94,17 +99,29 @@ function useMachineProfiles(machine: NewMachine | undefined): ProfilesRead | nul
   return read?.machineId === machineId ? read : null;
 }
 
-/** This computer's WSL distributions, which More options offers as Run in. */
-function useLocalDistributions(): string[] {
-  const [distributions, setDistributions] = useState<string[]>([]);
+/**
+ * The Run on machine's runtimes: its WSL distributions, which More options offers as Run agent in,
+ * and how its Sessions take a first message. null while being read; `{ distributions: [] }` when
+ * the machine couldn't say.
+ */
+function useMachineRuntimes(machine: NewMachine | undefined): SessionRuntimes | null {
+  const [read, setRead] = useState<{ machineId: string; runtimes: SessionRuntimes } | null>(null);
+  const machineId = machine?.id;
+  const machineName = machine?.name;
+  const current = machine?.current;
   useEffect(() => {
+    if (!machineId || !machineName) return;
     let live = true;
-    void window.electronAPI?.orchestrationSessions?.runtimes?.().then(result => {
-      if (live && result.success) setDistributions(result.data?.distributions ?? []);
-    }).catch(() => undefined);
+    const request = current
+      ? window.electronAPI?.orchestrationSessions?.runtimes?.() ?? Promise.resolve({ success: true, data: { distributions: [] } })
+      : readRuntimes({ id: machineId, name: machineName });
+    request.then(
+      result => { if (live) setRead({ machineId, runtimes: result.success && result.data ? result.data : { distributions: [] } }); },
+      () => { if (live) setRead({ machineId, runtimes: { distributions: [] } }); },
+    );
     return () => { live = false; };
-  }, []);
-  return distributions;
+  }, [machineId, machineName, current]);
+  return read && read.machineId === machineId ? read.runtimes : null;
 }
 
 /** Opens the first new Pane once it is listed; one still being set up opens itself when it arrives. */
@@ -122,7 +139,8 @@ interface SessionSettings {
   launchCommand: string;
   customResume: CustomCommandResume | null;
   profile: string;
-  wslDistribution: string;
+  /** Run agent in: a WSL distribution of the machine it was picked on; another machine runs natively. */
+  wsl: { machineId: string; distribution: string } | null;
 }
 
 function initialSettings(config: AppConfig | null): SessionSettings {
@@ -131,7 +149,7 @@ function initialSettings(config: AppConfig | null): SessionSettings {
     startPinned: config?.defaultSessionPinned ?? false,
     ...defaultLaunch(config, config?.defaultOrchestratorAgent ?? DEFAULT_PANE_CHAT_AGENT),
     profile: config?.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE,
-    wslDistribution: '',
+    wsl: null,
   };
 }
 
@@ -143,7 +161,7 @@ const CREATE_LABELS = { session: 'Create session', pane: 'Create pane' } satisfi
  * Create's menu switches between a Session and a Pane and is remembered; More options holds every
  * setting the old dialogs had. No hotkey hints and no Session/Pane toggle on screen.
  */
-export function CreateNewDialog({ projects, defaultProjectId, machines: entries, onSwitchMachine, onClose, initialMode }: NewDialogProps) {
+export function CreateNewDialog({ projects, defaultProjectId, machines: entries, onSwitchMachine, onClose, initialMode, fromProject }: NewDialogProps) {
   const formId = useId();
   const nameId = useId();
   const messageId = useId();
@@ -164,17 +182,29 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
   const states = useMachineStates();
   const currentId = entries.find(entry => entry.active)?.id ?? LOCAL_MACHINE_ID;
   const machines = useMemo(() => newMachines(states ?? [], entries, currentId), [states, entries, currentId]);
-  const [pickedId, setPickedId] = useState<string | null>(null);
-  const machine = machines.find(candidate => candidate.id === pickedId && candidate.status === 'online')
-    ?? machines.find(candidate => candidate.id === startingNewMachineId(machines));
+  // A project's + opens on this computer, where that project is.
+  const [pickedId, setPickedId] = useState<string | null>(() => fromProject ? currentId : null);
+  // The draft stays on the machine it was shown with: once the list is known, the default is fixed,
+  // and a machine that drops offline holds Create until it is back or another is picked (F-1).
+  const startingId = startingNewMachineId(machines);
+  useEffect(() => {
+    if (pickedId === null && states !== null && startingId) setPickedId(startingId);
+  }, [pickedId, states, startingId]);
+  const machine = machines.find(candidate => candidate.id === (pickedId ?? startingId));
+  const machineUnavailable = machine && !machine.current && machine.status !== 'online'
+    ? `${machine.name} is ${machine.status === 'connecting' ? 'reconnecting' : 'offline'}. Create waits for it, or pick another machine in Run on.`
+    : undefined;
   const orderedMachines = [...machines.filter(candidate => candidate.current), ...machines.filter(candidate => !candidate.current)];
   const onOtherMachine = machine !== undefined && !machine.current;
 
   // Session: To, name, message and images; More options holds the old dialog's settings.
   const [settings, setSettings] = useState<SessionSettings>(() => initialSettings(config));
   const launchEdited = useRef(false);
-  const distributions = useLocalDistributions();
-  const wsl = !onOtherMachine && !!settings.wslDistribution;
+  const runtimes = useMachineRuntimes(machine);
+  const distributions = runtimes?.distributions ?? [];
+  // A distribution picked on another machine, or one this machine no longer lists, runs natively.
+  const wslDistribution = settings.wsl && settings.wsl.machineId === machine?.id && distributions.includes(settings.wsl.distribution) ? settings.wsl.distribution : '';
+  const wsl = !!wslDistribution;
   const profilesRead = useMachineProfiles(machine);
   const environment = machine && !machine.current && machine.os ? ENVIRONMENT_BY_OS[machine.os] : undefined;
   const profilesUnavailable = wsl ? 'Profiles run in chat tabs, which don\'t run in WSL. Set Run in to Windows in More options to start one.'
@@ -205,12 +235,30 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
   const [name, setName] = useState('');
   const [message, setMessage] = useState('');
   const [images, setImages] = useState<ImageAttachment[]>([]);
+  const [readingImages, setReadingImages] = useState(0);
   const [dragging, setDragging] = useState(false);
-  // Images go with the first message through the chat tab, which runs here with Chat tabs on.
-  const attachBlocked = onOtherMachine ? `Images can be attached when the Session runs on this computer. Pick it in Run on, or attach them in the Session's chat.`
-    : config?.chatTabsEnabled !== true ? 'Images go to a chat tab. Turn on Chat tabs in Settings › AI & Agents to attach them.'
-      : wsl ? 'A Session in WSL runs in a terminal, which takes no images.'
-        : undefined;
+
+  // The launch the create sends (F-5). A profile brings its own. Settings left alone are the chosen
+  // agent's defaults, which main fills in; with a first message, a default custom resume is left
+  // out, since a resumed conversation can't take one.
+  const agent = to?.agent || (config?.defaultOrchestratorAgent ?? DEFAULT_PANE_CHAT_AGENT);
+  const shownLaunch = launchEdited.current ? { launchCommand: settings.launchCommand, customResume: settings.customResume }
+    : defaultLaunch(config, isConfiguredAgent(agent) ? agent : DEFAULT_PANE_CHAT_AGENT);
+  const text = message.trim();
+  const launch: Pick<OrchestrationSessionCreateInput, 'launchCommand' | 'customResume'> = to?.profileRef ? { launchCommand: '', customResume: null }
+    : launchEdited.current ? shownLaunch
+      : text || images.length > 0 ? { customResume: null } : {};
+  const deliveryTarget: FirstMessageTarget = {
+    here: !onOtherMachine, machineName: machine?.name ?? 'the machine', runtimes, chatTabsHere: config?.chatTabsEnabled === true, wsl, agent,
+    profile: !!to?.profileRef, launchCommand: launch.launchCommand ?? shownLaunch.launchCommand, customResume: launch.customResume ?? null,
+  };
+  // Images go with the first message through the new Session's chat; text rides on the create.
+  const attachBlocked = imagesBlocked(deliveryTarget);
+  const createBlocked = machineUnavailable
+    ?? (readingImages > 0 ? 'Reading the attached images…' : undefined)
+    ?? (images.length > 0 ? attachBlocked : undefined)
+    ?? (text && launch.customResume && !to?.profileRef ? 'A Session that resumes with a custom command can\'t take a first message. Clear Resume in More options, or remove the message.' : undefined)
+    ?? (text && images.length === 0 ? textBlocked(deliveryTarget) : undefined);
 
   // Pane: a project on the Run on machine, then CreatePaneForm's own fields.
   const [chosenRepository, setChosenRepository] = useState<{ machineId: string; id: number; name: string } | null>(null);
@@ -260,34 +308,46 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
   const addImages = async (files: readonly File[]) => {
     if (attachBlocked) { setError(attachBlocked); return; }
     const refused = files.filter(file => !isAttachableImage(file));
+    // The chat's own limit, checked before anything is read.
+    const tooLarge = files.filter(file => isAttachableImage(file) && file.size > MAX_IMAGE_BYTES);
+    const accepted = files.filter(file => isAttachableImage(file) && file.size <= MAX_IMAGE_BYTES);
+    const reasons = [
+      refused.length ? `${refused.map(file => file.name).join(', ')} ${refused.length === 1 ? 'isn\'t' : 'aren\'t'} attached: a Session's first message takes PNG, JPEG, WebP or GIF images.` : '',
+      tooLarge.length ? `${tooLarge.map(file => file.name).join(', ')} ${tooLarge.length === 1 ? 'isn\'t' : 'aren\'t'} attached: larger than ${formatSize(MAX_IMAGE_BYTES)}, the most a chat sends as an image. Attach ${tooLarge.length === 1 ? 'it' : 'them'} in the Session's chat, which sends a larger file as a file.` : '',
+    ].filter(Boolean);
+    if (accepted.length === 0) { setError(reasons.length ? reasons.join(' ') : null); return; }
+    // Create waits for these reads, so nothing is left out of the first message (F-2).
+    setReadingImages(count => count + 1);
     try {
-      const read = await Promise.all(files.filter(isAttachableImage).map(readImageAttachment));
+      const read = await Promise.all(accepted.map(readImageAttachment));
       setImages(current => [...current, ...read]);
-      setError(refused.length ? `${refused.map(file => file.name).join(', ')} ${refused.length === 1 ? 'isn\'t' : 'aren\'t'} attached: a Session's first message takes PNG, JPEG, WebP or GIF images.` : null);
+      setError(reasons.length ? reasons.join(' ') : null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'An image could not be read. Attach it again.');
+    } finally {
+      setReadingImages(count => count - 1);
     }
   };
 
   const createSession = async () => {
     if (busy || !machine) return;
     if (!to) { setError('Pick who the Session is to: an agent or a profile.'); toRef.current?.focus(); return; }
+    // The draft stays as it is until it can all be delivered (F-1, F-2, F-4).
+    if (createBlocked) { setError(createBlocked); return; }
     setBusy(true);
     setError(null);
     const typedName = name.trim();
-    const text = message.trim();
-    const sendImages = images.length > 0 && !attachBlocked;
+    const sendImages = images.length > 0;
     const input: Omit<OrchestrationSessionCreateInput, 'name'> = {
       ...sessionChoiceInput(to),
       isPinned: settings.startPinned,
       goal: settings.goal.trim() || undefined,
-      launchCommand: settings.launchCommand,
-      customResume: settings.customResume,
+      ...launch,
       profile: settings.profile,
     };
     if (wsl) {
       input.runtime = 'wsl';
-      input.wslDistribution = settings.wslDistribution;
+      input.wslDistribution = wslDistribution;
     }
     // A message with images goes through the chat once it's open; text alone rides with the create.
     const opening = sendImages ? undefined : firstMessagePrompt(text);
@@ -317,13 +377,20 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
       if (launchEdited.current && JSON.stringify(config?.defaultSessionResume ?? null) !== JSON.stringify(settings.customResume)) defaults.defaultSessionResume = settings.customResume;
       if (Object.keys(defaults).length > 0) void updateConfig(defaults).catch(() => undefined);
       if (sendImages) {
+        const chat = window.electronAPI.chatTab;
         try {
-          if (view.panel.type !== 'chat') throw new Error('the Session runs in a terminal, which takes no images');
-          await window.electronAPI.chatTab.send(view.panel.id, { operationId: crypto.randomUUID(), text, images: images.map(image => ({ mimeType: image.mimeType, data: image.data })) });
+          if (view.panel.type !== 'chat') throw new Error('the Session started in a terminal, which takes no images');
+          await chat.send(view.panel.id, { operationId: crypto.randomUUID(), text, images: images.map(image => ({ mimeType: image.mimeType, data: image.data })) });
         } catch (cause) {
+          // The draft isn't lost: in a chat it waits, unsent, in the Session's composer.
+          const kept = view.panel.type === 'chat';
+          if (kept) {
+            chatTabViewer(chat, view.panel.id).setDraft(text);
+            await Promise.all(images.map(image => addDraftAttachment(chat, view.panel.id, image.file))).catch(() => undefined);
+          }
           useErrorStore.getState().showError({
             title: 'Session created; first message not sent',
-            error: `The Session was created, but its first message and images weren't sent: ${cause instanceof Error ? cause.message : 'Pane did not say why'}. Send them from the Session's chat.`,
+            error: `The Session was created, but its first message wasn't sent: ${cause instanceof Error ? cause.message : 'Pane did not say why'}. ${kept ? 'It is waiting, unsent, in the Session\'s chat: send it from there.' : `Send it from the Session: ${text || 'your images'}`}`,
           });
         }
       }
@@ -365,7 +432,7 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
         value={machine?.id ?? ''}
         disabled={busy}
         onChange={event => { setPickedId(event.target.value); setError(null); }}
-        onKeyDown={event => { if (event.key === 'Enter' && mode === 'session') { event.preventDefault(); void createSession(); } }}
+        onKeyDown={event => { if (event.key === 'Enter' && mode === 'session' && screen === 'main') { event.preventDefault(); void createSession(); } }}
         className="h-8 min-w-0 max-w-[16rem] rounded-md border border-border-primary bg-bg-primary pl-2 pr-7 text-sm text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
       >
         {orderedMachines.map(candidate => {
@@ -475,9 +542,17 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
         </div>
       </div>
       {settings.startPinned && <p className="text-xs text-text-tertiary">Starts pinned. Change it in More options.</p>}
-      {error && <p role="alert" className="text-sm text-status-error">{error}</p>}
+      {error ? <p role="alert" className="text-sm text-status-error">{error}</p>
+        : createBlocked && <p role="status" data-testid="create-new-blocked" className="text-sm text-text-secondary">{createBlocked}</p>}
     </ModalBody>
   );
+
+  // The first change to the launch starts from what the fields showed: the chosen agent's defaults.
+  const editLaunch = (patch: Partial<Pick<SessionSettings, 'launchCommand' | 'customResume'>>) => {
+    const base = launchEdited.current ? {} : shownLaunch;
+    launchEdited.current = true;
+    setSettings(current => ({ ...current, ...base, ...patch }));
+  };
 
   const sessionOptions = (
     <ModalBody className="space-y-5">
@@ -490,28 +565,31 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
         </div>
         <Toggle checked={settings.startPinned} aria-label="Start pinned" size="sm" onChange={checked => setSettings(current => ({ ...current, startPinned: checked }))} />
       </div>
-      {distributions.length > 0 && !onOtherMachine && (
+      {distributions.length > 0 && machine && (
         <div className="space-y-2">
           <label htmlFor={`${formId}-runtime`} className="text-label font-medium text-text-primary">Run agent in</label>
-          <select id={`${formId}-runtime`} value={settings.wslDistribution} onChange={event => setSettings(current => ({ ...current, wslDistribution: event.target.value }))}
+          <select id={`${formId}-runtime`} value={wslDistribution} onChange={event => {
+            const distribution = event.target.value;
+            setSettings(current => ({ ...current, wsl: distribution ? { machineId: machine.id, distribution } : null }));
+          }}
             className="w-full rounded border border-border-primary bg-surface-primary px-3 py-2 text-sm text-text-primary focus:ring-2 focus:ring-interactive">
             <option value="">Windows</option>
             {distributions.map(distribution => <option key={distribution} value={distribution}>WSL · {distribution}</option>)}
           </select>
-          {settings.wslDistribution && <p className="text-xs text-text-secondary">The agent must be installed in this distribution.</p>}
+          {wslDistribution && <p className="text-xs text-text-secondary">The agent must be installed in this distribution.</p>}
         </div>
       )}
       <div className="space-y-3">
         <div className="text-sm font-medium text-text-primary">Launch command and behavior</div>
         <p className="text-xs text-text-secondary">For a Session that starts an agent on its own; a profile brings its own launch.</p>
         <SessionLaunchFields
-          resume={settings.customResume}
-          onResumeChange={value => { launchEdited.current = true; setSettings(current => ({ ...current, customResume: value })); }}
-          command={settings.launchCommand}
+          resume={shownLaunch.customResume}
+          onResumeChange={value => editLaunch({ customResume: value })}
+          command={shownLaunch.launchCommand}
           profile={settings.profile}
           customCommands={config?.customCommands}
-          onCommandChange={value => { launchEdited.current = true; setSettings(current => ({ ...current, launchCommand: value })); }}
-          onProfileChange={value => { launchEdited.current = true; setSettings(current => ({ ...current, profile: value })); }}
+          onCommandChange={value => editLaunch({ launchCommand: value })}
+          onProfileChange={value => setSettings(current => ({ ...current, profile: value }))}
         />
       </div>
     </ModalBody>
@@ -529,10 +607,10 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
       </select>
     </div>
   );
-  const paneNotice = (text: string) => <>
+  const paneNotice = (notice: string) => <>
     {header}
-    <ModalBody><p className="text-sm text-text-secondary">{text}</p></ModalBody>
-    {footer(createButton({ type: 'button', onClick: () => undefined }, true, false, text))}
+    <ModalBody><p className="text-sm text-text-secondary">{notice}</p></ModalBody>
+    {footer(screen === 'main' && createButton({ type: 'button', onClick: () => undefined }, true, false, notice))}
   </>;
 
   return (
@@ -544,7 +622,7 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
         {mode === 'session' ? <>
           {header}
           {screen === 'main' ? sessionMain : sessionOptions}
-          {footer(createButton({ type: 'button', onClick: () => void createSession() }, busy || !machine, busy))}
+          {footer(screen === 'main' && createButton({ type: 'button', onClick: () => void createSession() }, busy || !machine || !!createBlocked, busy, createBlocked))}
         </>
           : !machine ? <>{header}<ModalBody>{null}</ModalBody></>
             : repositoriesError ? paneNotice(repositoriesError)
@@ -554,7 +632,7 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
                     header={header} repositoryPicker={projectPicker} optionsScreen={screen === 'options'}
                     otherMachine={otherMachine} onSessionCreated={() => rememberNewMachine(machine.id)}
                     onBranchDropdownOpenChange={setBranchDropdownOpen} onSubmittingChange={setBusy}
-                    renderFooter={({ formId: paneFormId, submitting, blocked }: CreatePaneFooterState) => footer(createButton({ type: 'submit', form: paneFormId }, submitting || !!blocked, submitting, blocked))} />}
+                    renderFooter={({ formId: paneFormId, submitting, blocked }: CreatePaneFooterState) => footer(screen === 'main' && createButton({ type: 'submit', form: paneFormId }, submitting || !!(machineUnavailable ?? blocked), submitting, machineUnavailable ?? blocked))} />}
       </div>
     </Modal>
   );

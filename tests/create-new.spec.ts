@@ -341,3 +341,186 @@ test('a Session with Panes shows its expand chevron in the avatar\'s place on ho
   await expect(page.getByRole('button', { name: 'Collapse Parent Panes', exact: true })).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#orchestration-session-panes-sessions-parent')).toBeVisible();
 });
+
+// Codex review of #1695 (F-1 to F-8).
+
+const machineRuns = (page: Page) => page.evaluate(() => {
+  // SAFETY: installElectronApiMock installs this controller before the app loads.
+  const mockWindow = window as typeof window & { __paneTestElectronMock: { getMachineRuns: () => Array<{ machineId: string; command: JsonObject }> } };
+  return mockWindow.__paneTestElectronMock.getMachineRuns();
+});
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+const BUILD_ONLINE = { id: 'build', label: 'build-box', kind: 'remote', status: 'online', offlineSince: null } as const;
+
+test('Run on stays on the machine the draft was shown with: one that drops offline holds Create until it is back (F-1)', async ({ page }) => {
+  await openApp(page, {
+    machineConnections: {
+      machines: [{ id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null }, BUILD_ONLINE],
+      reads: { build: { 'orchestration-sessions:list': { success: true, data: { sessions: [] } } } },
+    },
+    machines: { machineRunAnswers: { build: { 'create-session': { success: true, data: { session: { id: 'remote-session' } } } } } },
+  });
+  await page.getByTestId('new-orchestration-session').click();
+  const runOn = dialog(page).getByRole('combobox', { name: 'Run on', exact: true });
+  await runOn.selectOption({ label: 'build-box' });
+  await dialog(page).getByRole('textbox', { name: 'Message', exact: true }).fill('Rebuild the cache.');
+  const setBuild = (status: 'online' | 'offline') => page.evaluate(state => {
+    // SAFETY: installElectronApiMock installs this controller before the app loads.
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { emitMachineEvent: (event: JsonObject) => void } };
+    mockWindow.__paneTestElectronMock.emitMachineEvent({ type: 'machines', machines: [
+      { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
+      { id: 'build', label: 'build-box', kind: 'remote', status: state, offlineSince: state === 'offline' ? '2026-11-27T10:00:00' : null },
+    ] });
+  }, status);
+  await setBuild('offline');
+  // Run on doesn't fall back to this computer, and Return sends nothing anywhere.
+  await expect(runOn).toHaveValue('build');
+  await expect(dialog(page).getByTestId('create-new-submit')).toBeDisabled();
+  await expect(dialog(page).getByTestId('create-new-blocked')).toHaveText('build-box is offline. Create waits for it, or pick another machine in Run on.');
+  await dialog(page).getByRole('textbox', { name: 'Message', exact: true }).press('Enter');
+  await expect(dialog(page)).toBeVisible();
+  await expect(dialog(page).getByRole('textbox', { name: 'Message', exact: true })).toHaveValue('Rebuild the cache.');
+  expect(await createInputs(page)).toEqual([]);
+  expect((await machineRuns(page)).filter(run => run.command.type === 'create-session')).toEqual([]);
+  await setBuild('online');
+  await expect(dialog(page).getByTestId('create-new-submit')).toBeEnabled();
+  await dialog(page).getByTestId('create-new-submit').click();
+  await expect(dialog(page)).toHaveCount(0);
+  expect((await machineRuns(page)).filter(run => run.command.type === 'create-session')).toHaveLength(1);
+});
+
+test('attached images hold Create while the Session can\'t take them, and a too-large image is refused before it is read (F-2)', async ({ page }, testInfo) => {
+  await openApp(page, { distributions: ['Ubuntu-24.04'] });
+  await page.getByTestId('new-orchestration-session').click();
+  const fileInput = dialog(page).locator('input[type="file"]');
+  await fileInput.setInputFiles([{ name: 'huge.png', mimeType: 'image/png', buffer: Buffer.alloc(5 * 1024 * 1024 + 1) }]);
+  await expect(dialog(page).getByRole('alert')).toContainText('huge.png isn\'t attached: larger than 5.0 MB');
+  await expect(dialog(page).getByRole('list', { name: 'Attachments' })).toHaveCount(0);
+  await fileInput.setInputFiles([{ name: 'screenshot.png', mimeType: 'image/png', buffer: PNG }]);
+  await expect(dialog(page).getByRole('list', { name: 'Attachments' })).toContainText('screenshot.png');
+  await dialog(page).getByRole('textbox', { name: 'Message', exact: true }).fill('What is wrong here?');
+  await expect(dialog(page).getByTestId('create-new-submit')).toBeEnabled();
+  // WSL runs a terminal: the image stays listed and Create waits.
+  await dialog(page).getByRole('button', { name: 'More options', exact: true }).click();
+  await dialog(page).getByLabel('Run agent in').selectOption('Ubuntu-24.04');
+  await dialog(page).getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(dialog(page).getByRole('list', { name: 'Attachments' })).toContainText('screenshot.png');
+  await expect(dialog(page).getByTestId('create-new-submit')).toBeDisabled();
+  await expect(dialog(page).getByTestId('create-new-blocked')).toContainText('A Session in WSL runs in a terminal');
+  await dialog(page).screenshot({ path: testInfo.outputPath('f2-images-held-in-wsl.png') });
+  await dialog(page).getByRole('button', { name: 'More options', exact: true }).click();
+  await dialog(page).getByLabel('Run agent in').selectOption('');
+  await dialog(page).getByRole('button', { name: 'Back', exact: true }).click();
+  // Pi has no chat, so it can't take them either.
+  await to(page).focus();
+  await page.keyboard.type('pi');
+  await page.keyboard.press('Enter');
+  await expect(to(page)).toHaveValue('Pi');
+  await expect(dialog(page).getByTestId('create-new-blocked')).toContainText('Pi runs in a terminal');
+  await dialog(page).getByRole('textbox', { name: 'Message', exact: true }).press('Enter');
+  await expect(dialog(page)).toBeVisible();
+  expect(await createInputs(page)).toEqual([]);
+  await dialog(page).getByRole('button', { name: 'Remove screenshot.png', exact: true }).click();
+  await expect(dialog(page).getByTestId('create-new-submit')).toBeEnabled();
+});
+
+test('a first message a PowerShell or cmd terminal can\'t take holds Create and stays editable (F-4)', async ({ page }, testInfo) => {
+  await openApp(page, { initialConfig: { chatTabsEnabled: false } });
+  await page.addInitScript(() => {
+    window.electronAPI.orchestrationSessions.runtimes = async () => ({ success: true, data: { distributions: [], promptAtLaunch: false, chatTabs: false } });
+  });
+  await page.reload();
+  await dismissStartupDialogs(page);
+  await page.getByTestId('new-orchestration-session').click();
+  const message = dialog(page).getByRole('textbox', { name: 'Message', exact: true });
+  await message.fill('Draft the release notes.');
+  await expect(dialog(page).getByTestId('create-new-blocked')).toContainText('PowerShell or cmd');
+  await dialog(page).screenshot({ path: testInfo.outputPath('f4-message-held-for-powershell.png') });
+  await message.press('Enter');
+  await expect(dialog(page).getByRole('alert')).toContainText('PowerShell or cmd');
+  await expect(message).toHaveValue('Draft the release notes.');
+  expect(await createInputs(page)).toEqual([]);
+  // Without a message it creates as before.
+  await message.fill('');
+  await dialog(page).getByTestId('create-new-submit').click();
+  await expect(dialog(page)).toHaveCount(0);
+  expect(await createInputs(page)).toHaveLength(1);
+});
+
+test('launch settings follow the chosen agent: unedited defaults are main\'s, a profile sends none, and an edited resume says it can\'t take a message (F-5)', async ({ page }) => {
+  const resume = { mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} -- --resume {sessionId}' };
+  await openApp(page, { initialConfig: { defaultSessionResume: resume } });
+  await page.getByTestId('new-orchestration-session').click();
+  // Codex, unedited, with a message: main picks the launch; the default custom resume doesn't come along.
+  await page.keyboard.type('codex');
+  await page.keyboard.press('Enter');
+  await dialog(page).getByRole('textbox', { name: 'Message', exact: true }).fill('Tidy the README.');
+  await dialog(page).getByTestId('create-new-submit').click();
+  await expect(dialog(page)).toHaveCount(0);
+  const [plain] = await createInputs(page);
+  expect(plain).toMatchObject({ agent: 'codex', customResume: null });
+  expect(plain).not.toHaveProperty('launchCommand');
+  // A profile with a message: no launch fields that main would validate before the profile replaces them.
+  await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
+  await page.keyboard.type('orch');
+  await page.keyboard.press('Enter');
+  await dialog(page).getByRole('textbox', { name: 'Message', exact: true }).fill('Plan the week.');
+  await dialog(page).getByTestId('create-new-submit').click();
+  await expect(dialog(page)).toHaveCount(0);
+  expect((await createInputs(page))[1]).toMatchObject({ agentProfile: 'greenfield/orchestrator', launchCommand: '', customResume: null });
+  // An edited launch with a custom resume and a message: Create says why before anything is created.
+  await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
+  await page.keyboard.type('claude');
+  await page.keyboard.press('Enter');
+  await dialog(page).getByRole('button', { name: 'More options', exact: true }).click();
+  await dialog(page).getByLabel('Custom command and arguments', { exact: true }).fill('claude --verbose');
+  await dialog(page).getByRole('button', { name: 'Back', exact: true }).click();
+  await dialog(page).getByRole('textbox', { name: 'Message', exact: true }).fill('Continue.');
+  await expect(dialog(page).getByTestId('create-new-blocked')).toContainText('can\'t take a first message. Clear Resume in More options');
+  expect(await createInputs(page)).toHaveLength(2);
+});
+
+test('Create is only on the main screen; Back returns to it (F-6)', async ({ page }) => {
+  await openApp(page);
+  await page.getByTestId('new-orchestration-session').click();
+  await dialog(page).getByRole('button', { name: 'More options', exact: true }).click();
+  await expect(dialog(page).getByRole('heading', { name: 'Session options', exact: true })).toBeVisible();
+  await expect(dialog(page).getByTestId('create-new-submit')).toHaveCount(0);
+  await expect(dialog(page).getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+  await dialog(page).getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(dialog(page).getByTestId('create-new-submit')).toBeVisible();
+});
+
+test('a Windows machine\'s WSL distributions are offered in More options and reach its create (F-7)', async ({ page }) => {
+  await openApp(page, {
+    machineConnections: {
+      machines: [{ id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null }, BUILD_ONLINE],
+      reads: { build: {
+        'orchestration-sessions:runtimes': { success: true, data: { distributions: ['Ubuntu-22.04'], promptAtLaunch: true, chatTabs: true } },
+        'orchestration-sessions:list': { success: true, data: { sessions: [] } },
+      } },
+    },
+    machines: { machineRunAnswers: { build: { 'create-session': { success: true, data: { session: { id: 'remote-session' } } } } } },
+  });
+  await page.getByTestId('new-orchestration-session').click();
+  await dialog(page).getByRole('combobox', { name: 'Run on', exact: true }).selectOption({ label: 'build-box' });
+  await dialog(page).getByRole('button', { name: 'More options', exact: true }).click();
+  await dialog(page).getByLabel('Run agent in').selectOption('Ubuntu-22.04');
+  await dialog(page).getByRole('button', { name: 'Back', exact: true }).click();
+  await dialog(page).getByTestId('create-new-submit').click();
+  await expect(dialog(page)).toHaveCount(0);
+  const [run] = (await machineRuns(page)).filter(entry => entry.command.type === 'create-session');
+  expect(run).toMatchObject({ machineId: 'build', command: { input: { runtime: 'wsl', wslDistribution: 'Ubuntu-22.04' } } });
+});
+
+test('a project\'s + opens Create New as a Pane in that project, on this computer (F-8)', async ({ page }) => {
+  await openApp(page, { projects: [
+    { id: 1, name: 'Pane fixtures', path: '/tmp/pane-fixtures', active: true },
+    { id: 2, name: 'Refunds', path: '/tmp/refunds', active: false },
+  ] });
+  await page.getByRole('button', { name: 'New pane in Refunds', exact: true }).click();
+  await expect(dialog(page)).toHaveAttribute('data-mode', 'pane');
+  await expect(dialog(page).getByRole('heading', { name: 'New Pane', exact: true })).toBeVisible();
+  await expect(dialog(page).getByLabel('Project', { exact: true })).toHaveValue('2');
+  await expect(page.getByRole('dialog', { name: 'Create Pane' })).toHaveCount(0);
+});

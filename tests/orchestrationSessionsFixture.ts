@@ -332,7 +332,7 @@ export async function installSessionsFixture(
         createInputs.push(clone(input));
         // As main does: a field the caller leaves out takes the app's Session default.
         const config = (await window.electronAPI.config.get()).data;
-        const launchCommand = input.launchCommand ?? config?.defaultSessionCommand;
+        const launchCommand = input.launchCommand ?? config?.defaultSessionCommand ?? '';
         const profile = input.profile ?? config?.defaultSessionProfile;
         const customResume = input.customResume !== undefined ? input.customResume : config?.defaultSessionResume ?? undefined;
         const id = `created-session-${nextId++}`;

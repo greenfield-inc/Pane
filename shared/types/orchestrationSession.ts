@@ -283,6 +283,16 @@ export interface OrchestrationSessionOverview {
   terminalReason?: string;
 }
 
+/** `orchestration-sessions:runtimes`: where a new Session can run on a machine, and how its first message gets there. */
+export interface SessionRuntimes {
+  /** The WSL distributions a Session can run in; none outside Windows. */
+  distributions: string[];
+  /** A terminal agent takes an opening prompt on its launch line (a POSIX shell, or WSL); PowerShell and cmd don't. Absent from Pane before T-63. */
+  promptAtLaunch?: boolean;
+  /** Chat tabs are on there, so a Session that can run in one opens in a chat. Absent from Pane before T-63. */
+  chatTabs?: boolean;
+}
+
 export interface OrchestrationSessionCreateInput {
   /** Omit for the native host. 'windows' is accepted as a legacy alias for native. */
   runtime?: 'windows' | 'wsl';

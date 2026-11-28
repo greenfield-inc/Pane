@@ -57,6 +57,8 @@ export interface ImageAttachment {
   name: string;
   size: number;
   mimeType: string;
+  /** The picked file, which goes into the chat's draft if the first send fails. */
+  file: File;
   /** Base64, without the `data:` prefix. */
   data: string;
 }
@@ -75,7 +77,7 @@ export async function readImageAttachment(file: File): Promise<ImageAttachment> 
   }
   let binary = '';
   for (let start = 0; start < bytes.length; start += 0x8000) binary += String.fromCharCode(...bytes.subarray(start, start + 0x8000));
-  return { id: crypto.randomUUID(), name: file.name || 'pasted-image', size: file.size, mimeType: file.type, data: btoa(binary) };
+  return { id: crypto.randomUUID(), name: file.name || 'pasted-image', size: file.size, mimeType: file.type, file, data: btoa(binary) };
 }
 
 export function formatSize(bytes: number): string {

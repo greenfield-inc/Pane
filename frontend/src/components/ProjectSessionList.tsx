@@ -5,7 +5,8 @@ import { Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Arch
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
-import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
+import { isMissionControlEnabled, isProfilesEnabled, useConfigStore } from '../stores/configStore';
+import { requestOpenNewPane } from '../utils/openNewSession';
 import { SETTINGS_PREFERENCE_KEYS, normalizeSidebarPaneRowLayout, type SidebarPaneRowLayout } from '../types/settings';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { AddProjectDialog } from './AddProjectDialog';
@@ -254,6 +255,11 @@ export function ProjectSessionList({
   }, [navigateToSessions, setActiveSession, setSidebarNavigationScope]);
 
   const handleNewSession = (project: Project) => {
+    // Profiles on (T-63): Create New as a Pane, with this project picked.
+    if (isProfilesEnabled(useConfigStore.getState().config)) {
+      requestOpenNewPane(project.id);
+      return;
+    }
     setCreateForProject(project);
     setShowCreateDialog(true);
   };

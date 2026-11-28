@@ -42,6 +42,8 @@ import { Bone, Skeleton, TextBone, LoadingStatus, useSkeletonHold } from './ui/S
 export interface NewDialogProps {
   /** Create New (Profiles on) only: open as New Session (the + beside Sessions), else as last used. */
   initialMode?: 'session' | 'pane';
+  /** Create New only: opened from a project's +, so it starts on this computer with `defaultProjectId` picked. */
+  fromProject?: boolean;
   /** The repositories of the machine the app is on. */
   projects: Project[];
   defaultProjectId?: number;
