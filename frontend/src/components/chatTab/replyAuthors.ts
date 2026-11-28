@@ -7,13 +7,15 @@ import type { ChatTurn } from '../../../../shared/chatTabPresentation';
  * A reply that nothing names (a divider saved before dividers named profiles) is left out, so it
  * shows no photo rather than a guessed one.
  *
- * `current` is trusted only when the turns reach the live end of the conversation and the tab is
- * not restarting; otherwise pass undefined, and replies after the last divider take its profile.
+ * Replies after the last divider take the profile it names; `current` (the tab's own profile)
+ * stands in only when no divider names one, because a Switch publishes its launch before the
+ * replay brings its divider back. Pass `current` only when the turns reach the live end of the
+ * conversation; otherwise undefined.
  */
 export function replyAuthors(turns: readonly ChatTurn[], current: string | undefined): Map<string, string> {
   const authors = new Map<string, string>();
   // Walked from the end: each divider says who wrote the replies above it.
-  let author = current ?? previousSwitchedTo(turns, turns.length);
+  let author = previousSwitchedTo(turns, turns.length) ?? current;
   for (let index = turns.length - 1; index >= 0; index--) {
     const turn = turns[index];
     if (turn.divider) {

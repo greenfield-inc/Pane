@@ -830,9 +830,10 @@ the agent's photo: on its tab in place of the agent mark, on each divider (the n
 profile's), and beside each reply when the chat pane is at least 800 px wide;
 narrower, the photo and the profile's name sit at the top of the chat instead. Each
 reply keeps the photo of the profile that wrote it, read from the dividers around it.
-The tab's own profile names the newest replies only while the chat shows the live end
-of the conversation and isn't restarting; otherwise they take the last divider's. A
-reply nothing names (before a divider saved without its profiles) shows no photo.
+Replies after the last divider take the profile it names; the tab's own profile, as
+the agent's current run started with it, stands in only when no divider names one and
+the chat shows the live end of that run's conversation. A reply nothing names (before
+a divider saved without its profiles) shows no photo.
 
 ## Older clients
 

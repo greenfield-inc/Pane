@@ -259,10 +259,15 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   };
   const working = view?.status === 'working' || view?.status === 'blocked';
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
-  // The tab's profile names the newest replies only when the window reaches the live end and the tab isn't
-  // restarting: a Switch publishes its launch before the replay brings back its divider (QA #1789).
-  const liveEnd = !snapshot.hasNewer && view?.status !== 'starting';
-  const authors = useMemo(() => photo ? replyAuthors(turns, liveEnd ? photo.current : undefined) : undefined, [liveEnd, photo, turns]);
+  // The tab's profile names the newest replies only when the window shows the live end of the conversation
+  // the view describes, and it is the profile this run of the agent started with: a Switch publishes its
+  // launch before the agent restarts, and the restart's view before its replayed transcript (QA #1789).
+  const [runProfile, setRunProfile] = useState({ generation: view?.generation, current: photo?.current });
+  // Taken at a new run, or once the profile is first known (Profiles' config can load after the chat).
+  if (runProfile.generation !== view?.generation || (!runProfile.current && photo?.current)) setRunProfile({ generation: view?.generation, current: photo?.current });
+  const liveEnd = !snapshot.hasNewer && view?.status !== 'starting' && snapshot.transcript?.generation === view?.generation;
+  const trusted = liveEnd ? runProfile.current : undefined;
+  const authors = useMemo(() => photo ? replyAuthors(turns, trusted) : undefined, [photo, trusted, turns]);
   const waiting = useMemo(() => waitingToolIds(view?.permissions, view?.questions), [view?.permissions, view?.questions]);
   const notes = useMemo(() => workerNotes(turns, workers ?? []), [turns, workers]);
   const agentsWorking = useMemo(() => workingOverride ?? workingAgents(workers), [workingOverride, workers]);

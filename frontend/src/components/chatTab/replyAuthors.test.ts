@@ -55,6 +55,12 @@ describe('replyAuthors (T-63 round 5: each reply keeps the photo of the profile 
     expect(authors([user('u1', 'Hi'), say('a1', 'Unknown.')], undefined)).toEqual(['Unknown. → none']);
   });
 
+  it('trusts the last divider over a tab profile that has moved on before the divider arrived', () => {
+    // QA #1789 round 2: a Switch publishes the new launch before the replayed transcript (with its divider) arrives.
+    const messages = [user('u1', 'Hi'), say('a1', 'Old.'), end('t1'), divider('d1', { profile: 'lab/two', previous: 'lab/one' }), user('u2', 'Next'), say('a2', 'Two.')];
+    expect(authors(messages, 'lab/three')).toEqual(['Old. → lab/one', 'Two. → lab/two']);
+  });
+
   it('shows no photo when the tab has no profile to show', () => {
     expect(authors([user('u1', 'Hi'), say('a1', 'One.')], undefined)).toEqual(['One. → none']);
   });
