@@ -17,7 +17,7 @@ import {
   useOrchestrationSessionStore,
   type OrchestrationSessionAvailability,
 } from '../stores/orchestrationSessionStore';
-import type { OrchestrationSessionProfileSwitchRequest, OrchestrationSessionRecord, OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionProfileSwitchRequest, OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 import { isConfiguredAgent } from '../../../shared/agents';
 import type { OrchestrationSessionArchivedPanes, OrchestrationSessionUpdateInput } from '../../../shared/types/orchestrationSession';
 import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '../../../shared/types/orchestrationSession';
@@ -173,7 +173,7 @@ export function OrchestrationSessionNav({
   const [sessionMenu, setSessionMenu] = useState<SessionContextMenuState | null>(null);
   const [movingSessionId, setMovingSessionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [confirmSwitch, setConfirmSwitch] = useState<{ session: OrchestrationSessionRecord; choice: ProfileSwitchChoice } | null>(null);
+  const [confirmSwitch, setConfirmSwitch] = useState<{ session: OrchestrationSessionSummary; choice: ProfileSwitchChoice } | null>(null);
   const [switchToast, setSwitchToast] = useState<{ key: number; sessionId: string; message: string; avatar: { ref?: string; agent: string }; undo?: OrchestrationSessionProfileSwitchRequest } | null>(null);
   // Profiles turned off (here or in another window): a waiting confirmation or Undo goes with it (review F-10).
   useEffect(() => {
@@ -456,7 +456,7 @@ export function OrchestrationSessionNav({
   }, [sessionMenu]);
 
   /** Switch profile (T-63): at once with Undo, unless the conversation can't go on, which asks first. */
-  const runSwitch = useCallback(async (session: OrchestrationSessionRecord, choice: ProfileSwitchChoice, undoable: boolean) => {
+  const runSwitch = useCallback(async (session: OrchestrationSessionSummary, choice: ProfileSwitchChoice, undoable: boolean) => {
     // Already running it: nothing to switch.
     if (choice.effect === 'current') return;
     setActionError(null);
@@ -479,7 +479,7 @@ export function OrchestrationSessionNav({
     }
   }, []);
 
-  const requestSwitch = useCallback((session: OrchestrationSessionRecord, choice: ProfileSwitchChoice) => {
+  const requestSwitch = useCallback((session: OrchestrationSessionSummary, choice: ProfileSwitchChoice) => {
     if (choice.effect === 'new-conversation') setConfirmSwitch({ session, choice });
     else void runSwitch(session, choice, true);
   }, [runSwitch]);
@@ -493,7 +493,7 @@ export function OrchestrationSessionNav({
     catch (cause) { setActionError(`The switch was not undone. ${ipcErrorMessage(cause, 'The host did not answer.')}`); }
   }, [switchToast]);
 
-  const reloadProfile = useCallback(async (session: OrchestrationSessionRecord) => {
+  const reloadProfile = useCallback(async (session: OrchestrationSessionSummary) => {
     setActionError(null);
     try { await useOrchestrationSessionStore.getState().reloadProfile(session.id); }
     catch (cause) { setActionError(`${session.name}'s profile was not reloaded. ${ipcErrorMessage(cause, 'The host did not answer.')}`); }
@@ -872,8 +872,8 @@ interface SessionContextMenuProps {
   onArchive: () => void;
   onPin: () => void;
   onMoveToHost: () => void;
-  onSwitchProfile: (session: OrchestrationSessionRecord, choice: ProfileSwitchChoice) => void;
-  onReloadProfile: (session: OrchestrationSessionRecord) => void;
+  onSwitchProfile: (session: OrchestrationSessionSummary, choice: ProfileSwitchChoice) => void;
+  onReloadProfile: (session: OrchestrationSessionSummary) => void;
 }
 
 function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost, onSwitchProfile, onReloadProfile }: SessionContextMenuProps) {

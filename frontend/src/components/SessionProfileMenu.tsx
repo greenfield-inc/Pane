@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Check, ChevronRight, RotateCw } from 'lucide-react';
 import type { AgentFarmProfileList } from '../../../shared/types/agentFarmProfiles';
-import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
 import { ProfileAvatar } from './profiles/ProfileAvatar';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
@@ -27,9 +27,9 @@ function useLocalProfiles(open: boolean): { list?: AgentFarmProfileList; error?:
 
 interface SessionProfileMenuItemsProps {
   /** The Session the menu is for; undefined while the menu is closed. */
-  session: OrchestrationSessionRecord | undefined;
-  onSwitch: (session: OrchestrationSessionRecord, choice: ProfileSwitchChoice) => void;
-  onReload: (session: OrchestrationSessionRecord) => void;
+  session: OrchestrationSessionSummary | undefined;
+  onSwitch: (session: OrchestrationSessionSummary, choice: ProfileSwitchChoice) => void;
+  onReload: (session: OrchestrationSessionSummary) => void;
   /** Closes the whole menu. */
   onClose: () => void;
 }
@@ -104,7 +104,7 @@ export function SessionProfileMenuItems({ session, onSwitch, onReload, onClose }
 }
 
 function SwitchProfileSubmenu({ session, x, y, flipY, autoFocus, onBack, onPick }: {
-  session: OrchestrationSessionRecord; x: number; y: number; flipY: number; autoFocus: boolean;
+  session: OrchestrationSessionSummary; x: number; y: number; flipY: number; autoFocus: boolean;
   onBack: () => void; onPick: (choice: ProfileSwitchChoice) => void;
 }) {
   const read = useLocalProfiles(true);
@@ -192,7 +192,7 @@ function SwitchProfileSubmenu({ session, x, y, flipY, autoFocus, onBack, onPick 
 
 /** Asks first when a switch can't keep the conversation (A-2): between Claude and Codex, or Codex profiles. */
 export function ProfileSwitchConfirm({ pending, onCancel, onConfirm }: {
-  pending: { session: OrchestrationSessionRecord; choice: ProfileSwitchChoice } | null;
+  pending: { session: OrchestrationSessionSummary; choice: ProfileSwitchChoice } | null;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -215,7 +215,7 @@ export function ProfileSwitchConfirm({ pending, onCancel, onConfirm }: {
 }
 
 /** The amber dot on a Session row whose profile changed since it took it: Reload profile takes the new one. */
-export function ProfileChangedDot({ session }: { session: Pick<OrchestrationSessionRecord, 'agentProfileChanged'> }) {
+export function ProfileChangedDot({ session }: { session: Pick<OrchestrationSessionSummary, 'agentProfileChanged'> }) {
   if (!session.agentProfileChanged) return null;
   return (
     <span className="pointer-events-none flex h-3 w-3 flex-shrink-0 items-center justify-center" data-testid="session-profile-changed" title="Profile changed: right-click › Reload profile">

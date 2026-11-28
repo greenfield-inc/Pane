@@ -317,7 +317,7 @@ describe('OrchestrationSessionManager', () => {
         { ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false, defaultVariant: 'claude', variants: [{ name: 'claude', model: 'claude-opus-5-5' }, { name: 'codex', model: 'gpt-6-astra' }, { name: 'fast', model: 'claude-haiku-5-5' }] },
         { ref: 'greenfield/product-researcher', plugin: 'greenfield', version: '0.0.46', harness: 'codex', hidden: false },
       ] })),
-      harness: vi.fn(async (ref: string) => (ref === 'greenfield/orchestrator:codex' ? 'codex' : undefined)),
+      harness: vi.fn(async (ref: string) => (ref === 'greenfield/orchestrator:codex' ? 'codex' : ref === 'greenfield/orchestrator:fast' ? 'claude' : undefined)),
     });
     const withChatTabs = async (run: (fixture: ReturnType<typeof createFixture>, port: ReturnType<typeof agentFarm>) => Promise<void>, installed?: string[], profiles = true) => {
       const fixture = createFixture();
@@ -564,13 +564,12 @@ describe('OrchestrationSessionManager', () => {
         expect(named.panel.state.customState).toMatchObject({ launch: { kind: 'profile', profile: 'greenfield/orchestrator', fromSession: true } });
       }));
 
-      // Review F-9: Undo names the agent the Session ran, so a profile variant the host can't tell on its own comes back.
-      it('switches back to a non-default Claude variant given the agent it ran', async () => withChatTabs(async fixture => {
+      // Review F-9: Undo names the agent the Session ran; the host reads a variant's own agent from Agent Farm (PR 2, review F-4).
+      it('switches back to a non-default Claude variant', async () => withChatTabs(async fixture => {
         fixture.manager.attachChatTabs(chatTabs());
         const created = await fixture.manager.create({ name: 'Fast', agent: 'claude', agentProfile: 'greenfield/orchestrator:fast' });
         const switched = await switchTo(fixture, created.session.id, 'pane/claude', 'kept');
         expect(switched.previous).toEqual({ agent: 'claude', ref: 'greenfield/orchestrator:fast' });
-        await expect(switchTo(fixture, created.session.id, 'greenfield/orchestrator:fast', 'kept')).rejects.toMatchObject({ code: 'SESSION_PROFILE_AGENT_REQUIRED' });
         const undone = await switchTo(fixture, created.session.id, switched.previous.ref ?? '', 'kept', switched.previous.agent);
         expect(undone).toMatchObject({ effect: 'kept', session: { agent: 'claude', agentProfile: { ref: 'greenfield/orchestrator:fast' } } });
       }));
