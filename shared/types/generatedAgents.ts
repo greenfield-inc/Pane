@@ -64,7 +64,8 @@ export const AGENTS_CONFIG = {
         "registryIds": [
           "claude-acp"
         ],
-        "profileModel": "claude-opus-5-5"
+        "profileModel": "claude-opus-5-5",
+        "profileSwitchKeepsConversation": true
       },
       "models": {
         "flag": "--model",

@@ -213,3 +213,39 @@ describe('orchestration-sessions:snapshots', () => {
     expect(result).toEqual({ success: false, error: expect.stringContaining('since') });
   });
 });
+
+// Review F-1: Switch and Reload profile are the desktop menu's, and a switch carries what the person agreed to.
+describe('orchestration-sessions:switch-profile and reload-profile', () => {
+  function registerWith(manager: { switchProfile?: () => Promise<object>; reloadProfile?: () => Promise<object> }): PaneCommandRegistry {
+    const registry = new PaneCommandRegistry();
+    registerOrchestrationSessionHandlers(
+      // SAFETY: The handlers only call ipcMain.handle, and this test invokes the registry directly.
+      { handle: () => undefined } as IpcMain,
+      // SAFETY: These channels read only orchestrationSessionManager.switchProfile and reloadProfile.
+      { orchestrationSessionManager: manager } as AppServices,
+      registry,
+    );
+    return registry;
+  }
+  const request = { ref: 'greenfield/reviewer', agent: 'codex', expect: { agent: 'claude', ref: 'pane/claude', effect: 'new-conversation' } };
+
+  it('refuses a remote caller and changes nothing', async () => {
+    const switchProfile = vi.fn(async () => ({}));
+    const reloadProfile = vi.fn(async () => ({}));
+    const registry = registerWith({ switchProfile, reloadProfile });
+    expect(await registry.invokeRemote('orchestration-sessions:switch-profile', [{ sessionId: 's' }, request])).toMatchObject({ success: false, error: expect.stringContaining('only from Pane on the computer it runs on. The Session was not switched.') });
+    expect(await registry.invokeRemote('orchestration-sessions:reload-profile', [{ sessionId: 's' }])).toMatchObject({ success: false, error: expect.stringContaining('Nothing was reloaded.') });
+    expect(switchProfile).not.toHaveBeenCalled();
+    expect(reloadProfile).not.toHaveBeenCalled();
+  });
+
+  it('passes a local switch with its consent through, and refuses one without it', async () => {
+    const switchProfile = vi.fn(async () => ({}));
+    const registry = registerWith({ switchProfile });
+    expect(await registry.invoke('orchestration-sessions:switch-profile', [{ sessionId: 's' }, request])).toMatchObject({ success: true });
+    expect(switchProfile).toHaveBeenCalledWith({ sessionId: 's' }, request);
+    expect(await registry.invoke('orchestration-sessions:switch-profile', [{ sessionId: 's' }, 'greenfield/reviewer'])).toMatchObject({ success: false });
+    expect(await registry.invoke('orchestration-sessions:switch-profile', [{ sessionId: 's' }, { ref: 'greenfield/reviewer' }])).toMatchObject({ success: false });
+    expect(switchProfile).toHaveBeenCalledTimes(1);
+  });
+});

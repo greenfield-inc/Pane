@@ -53,6 +53,7 @@ import type {
   OrchestrationSessionCreateInput,
   OrchestrationSessionArchiveSelection,
   OrchestrationSessionSelector,
+  OrchestrationSessionProfileSwitchRequest,
   SessionActivity,
   OrchestrationSessionUpdateInput,
 } from '../../shared/types/orchestrationSession';
@@ -638,6 +639,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:update', selector, input),
     reorder: (sessionIds: string[]): Promise<IPCResponse> => invokeIpc('orchestration-sessions:reorder', { sessionIds }, SESSION_LIST_SUMMARY),
     setAgent: (selector: OrchestrationSessionSelector, agent: PaneChatAgent): Promise<IPCResponse> => invokeIpc('orchestration-sessions:set-agent', selector, agent),
+    switchProfile: (selector: OrchestrationSessionSelector, request: OrchestrationSessionProfileSwitchRequest): Promise<IPCResponse> => invokeIpc('orchestration-sessions:switch-profile', selector, request),
+    reloadProfile: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:reload-profile', selector),
     associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:associate', selector, association),
     detach: (selector: OrchestrationSessionSelector, paneId?: string): Promise<IPCResponse> => invokeIpc('orchestration-sessions:detach', selector, paneId),
     overview: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:overview', selector),

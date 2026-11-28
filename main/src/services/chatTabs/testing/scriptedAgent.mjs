@@ -40,6 +40,7 @@
 // SCRIPTED_AGENT_OWN_TURN_AFTER_LOAD=1 runs a silent turn of its own shortly after each load.
 // SCRIPTED_AGENT_SKILLS=1 lists the skills simplify and audit, and answers every prompt with the parts it was sent.
 // SCRIPTED_AGENT_NO_STEERING=1 does not offer steering; SCRIPTED_AGENT_STEER_FAILS=1 answers each steer `failed` (as codex-acp can); SCRIPTED_AGENT_SIGNED_OUT=1 refuses every session with ACP authRequired; SCRIPTED_AGENT_LIST_FAILS=1 refuses session/list.
+// SCRIPTED_AGENT_SLOW_CLOSE_MS=<ms> answers session/close only after that long (a slow shutdown).
 import { agent, methods, ndJsonStream, RequestError } from '@agentclientprotocol/sdk';
 import { Readable, Writable } from 'node:stream';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -143,7 +144,7 @@ const app = agent()
     const page = all.slice(start, start + 2);
     return start + 2 < all.length ? { sessions: page, nextCursor: String(start + 2) } : { sessions: page };
   })
-  .onRequest(methods.agent.session.close, () => ({}))
+  .onRequest(methods.agent.session.close, () => new Promise(resolve => setTimeout(() => resolve({}), Number(process.env.SCRIPTED_AGENT_SLOW_CLOSE_MS ?? 0))))
   .onRequest('_session/async_task/stop', { parse: value => value }, async ({ params, client }) => {
     const session = sessions.get(params.sessionId);
     if (liveTasks.get(params.asyncTaskId) === params.sessionId && liveTasks.delete(params.asyncTaskId)) {

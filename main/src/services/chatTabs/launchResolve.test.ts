@@ -119,6 +119,7 @@ describe('a plain profile tab with Profiles off', () => {
     expect(withoutPaneProfile(state({ kind: 'profile', profile: 'greenfield/orchestrator', fromSession: true }), () => false).launch).toEqual({ kind: 'agent' });
     expect(withoutPaneProfile(state({ kind: 'profile', profile: 'greenfield/orchestrator', fromSession: true, fullAccess: true }), () => false).launch).toEqual({ kind: 'agent', fullAccess: true });
     expect(withoutPaneProfile(state({ kind: 'profile', profile: 'greenfield/orchestrator', fromSession: true }), () => true).launch).toEqual({ kind: 'profile', profile: 'greenfield/orchestrator', fromSession: true });
+    expect(withoutPaneProfile(state({ kind: 'profile', profile: 'team/legacy', args: { review: 'on' } }), () => false).launch).toEqual({ kind: 'profile', profile: 'team/legacy', args: { review: 'on' } });
   });
 });
 

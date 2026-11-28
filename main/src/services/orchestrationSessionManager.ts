@@ -15,11 +15,11 @@ import { getChatTabManager } from './chatTabs';
 import { sessionChatLaunch } from './chatTabs/launch';
 import { agentFarmConfigRoot, listPaneAgentFarmProfiles, paneAgentFarmHarness } from './agentFarm/bundledAgentFarm';
 import { installedPluginHash, profilePlugin } from './agentFarm/agentFarmProfiles';
-import { plainProfileAgent, plainProfileRef } from '../../../shared/agentProfiles';
+import { plainProfileAgent, plainProfileRef, profileDisplayName, profileSwitchEffect } from '../../../shared/agentProfiles';
 import { profilesEnabled } from './agentFarm/profilesFeature';
 import type { AgentFarmProfileList, SessionAgentProfile } from '../../../shared/types/agentFarmProfiles';
 import type { SessionAdoption } from './chatTabs/switchToChat';
-import type { ChatPanelState, ChatTabLaunch } from '../../../shared/types/chatTab';
+import type { ChatConversationExport, ChatDivider, ChatPanelState, ChatTabLaunch, ChatTabRelaunch } from '../../../shared/types/chatTab';
 import type { NotifySession } from '../../../shared/types/notify';
 
 /** What a Session needs from the host's chat tabs. */
@@ -27,6 +27,16 @@ export interface SessionChatTabs {
   ensure(panelId: string): Promise<void>;
   isRunning(panelId: string): boolean;
   agentState(panelId: string): AgentState;
+  /** Reload or Switch profile: restart on a new launch once the agent's reply ends (T-63). */
+  relaunch(panelId: string, request: ChatTabRelaunch): void;
+  /**
+   * Saves the whole conversation in the Session folder for a new conversation to read: `transcript` is
+   * the file, absent when the conversation has nothing in it. Throws when it can't be saved whole.
+   */
+  exportConversation(panelId: string): ChatConversationExport;
+  stop(panelId: string, reason: { message: string; next: string }): Promise<void>;
+  /** The agent is in a reply. */
+  replying(panelId: string): boolean;
 }
 
 /** What a Session needs from Pane's own Agent Farm (T-63). */
@@ -67,6 +77,8 @@ import {
   type OrchestrationSessionListResult,
   type OrchestrationSessionSummary,
   type OrchestrationSessionOverview,
+  type OrchestrationSessionProfileSwitch,
+  type OrchestrationSessionProfileSwitchRequest,
   type OrchestrationSessionRecord,
   type OrchestrationSessionSelector,
   type OrchestrationSessionStatus,
@@ -92,6 +104,7 @@ import { agentReportData, readPanelAgentReport } from './agentReport';
 import { paneChatFirstPrompt } from './paneChatMigrateOffer';
 import { readOnlyPaneCaller } from '../daemon/commandRegistry';
 import { PaneError, reasonOf } from '../../../shared/paneError';
+import { transcriptPrompt } from './chatTabs/transcriptFile';
 import type { SessionMoveMark } from '../../../shared/types/sessionMove';
 import { releaseMoveHolds } from './sessionMove/restore';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
@@ -112,6 +125,8 @@ const PANE_CHAT_AGENTS: readonly PaneChatAgent[] = CONFIGURED_AGENT_IDS;
 
 const ORCHESTRATION_SESSION_TITLE = 'Session';
 const ORCHESTRATION_BOOTSTRAP_VERSION = 2;
+/** How often listing Sessions hashes their profiles' plugins again, for the changed mark (T-63). */
+const PLUGIN_HASH_INTERVAL_MS = 10_000;
 
 function getOrchestrationPanelId(sessionId: string, agent: PaneChatAgent): string {
   return `${ORCHESTRATION_SESSION_PANEL_PREFIX}${sessionId}_${agent}`;
@@ -164,7 +179,10 @@ export class OrchestrationSessionManager extends EventEmitter {
   async list(options?: OrchestrationSessionListOptions): Promise<OrchestrationSessionListResult<OrchestrationSessionSummary>> {
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
-      return this.listed(this.store.read(), options);
+      const data = this.store.read();
+      // A profile edited since shows its changed mark once the hashes are read (an event follows).
+      void this.refreshPluginHashes().catch(error => console.warn(`[Sessions] Could not check Sessions' profiles for changes: ${reasonOf(error)}`));
+      return this.listed(data, options);
     });
   }
 
@@ -644,6 +662,171 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   /**
+   * Switch profile (T-63): the Session's agent runs `ref` from its next start, which waits for the
+   * current reply. Between profiles of an agent that keeps its conversations (Claude) the conversation
+   * goes on (session/load); otherwise (Claude and Codex, or Codex profiles, whose homes Agent Farm keeps
+   * per profile) a new conversation starts in the Session's tab for that agent and is given the old
+   * transcript. The Session's folder, Panes, to-dos and approvals stay. Undo is a switch back.
+   *
+   * `request.expect` is what the person agreed to; the switch is refused when the Session or the
+   * switch's effect changed since (review F-1), and when the outgoing conversation can't be saved
+   * whole for a new one (review F-3).
+   */
+  async switchProfile(selector: OrchestrationSessionSelector, request: OrchestrationSessionProfileSwitchRequest, source: 'user' | 'agent' = 'user'): Promise<OrchestrationSessionProfileSwitch> {
+    const outcome = 'The Session was not switched.';
+    const ref = request.ref;
+    this.refuseProfilesOff(outcome);
+    const target = await this.profileTarget(ref, request.agent, outcome);
+    return withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      const data = this.store.read();
+      const current = this.findSession(data, selector);
+      const fromPanel = this.profileChatPanel(current, 'switched');
+      const previous = { agent: current.agent, ref: current.agentProfile?.ref };
+      const effect = profileSwitchEffect(previous, { agent: target.agent, ref });
+      if (effect === 'current') return { session: this.withComputed(clone(current)), previous, effect };
+      // What the person saw when they chose must still hold: a new conversation is never started unasked.
+      if (request.expect.agent !== previous.agent || (request.expect.ref ?? undefined) !== previous.ref || request.expect.effect !== effect) {
+        throw new PaneError('SESSION_PROFILE_CHANGED', `${current.name} changed since you chose ${profileDisplayName(ref)}${effect === 'new-conversation' ? ', and the switch would now start a new conversation' : ''}. ${outcome}`, 'Open the Session\'s menu and choose the profile again.');
+      }
+      this.assertAgentSupported(target.agent, current.runtime);
+      const agentChanging = target.agent !== current.agent;
+      const toPanel = agentChanging ? panelManager.getPanel(current.panelIds[target.agent]) : fromPanel;
+      if (toPanel && toPanel.type !== 'chat') {
+        throw new PaneError('SESSION_PROFILE_TERMINAL', `${current.name}'s ${configuredAgent(target.agent).title} tab is a terminal, which can't run a profile. ${outcome}`, `Start a new Session with ${profileDisplayName(ref)}.`);
+      }
+      const name = profileDisplayName(ref);
+      // A new conversation is given the transcript as it stands, so the reply in progress must end first.
+      if (effect === 'new-conversation' && this.chatTabs().replying(fromPanel.id)) {
+        throw new PaneError('SESSION_PROFILE_BUSY', `${current.name}'s ${configuredAgent(current.agent).title} is still replying. ${outcome}`, `Switch to ${name} again when the reply ends, or press Stop first.`);
+      }
+      const next: OrchestrationSessionRecord = {
+        ...current, agent: target.agent, agentProfile: target.profile,
+        revision: current.revision + 1, updatedAt: new Date().toISOString(), activity: [...current.activity],
+      };
+      if (agentChanging) { next.launchCommand = ''; next.customResume = undefined; next.resume = undefined; }
+      // A launch command that runs its own Agent Farm profile gives way to the switched one, args and all (review F-2).
+      const own = this.chatLaunch(current);
+      if (own && 'launch' in own && own.launch.kind === 'profile' && own.launch.fromSession !== true) next.launchCommand = '';
+      const chat = this.chatLaunch(next);
+      if (!chat || !('launch' in chat)) {
+        throw new PaneError('SESSION_PROFILE_UNSUPPORTED', `Profiles run in chat tabs, and ${current.name} can't run one now${chat && 'terminalReason' in chat ? `: ${chat.terminalReason}` : '.'} ${outcome}`, 'Turn on Chat tabs in Settings > AI & Agents, then try again.');
+      }
+      const reason = agentChanging
+        ? `${configuredAgent(target.agent).title} can't continue a ${configuredAgent(current.agent).title} conversation, so Pane started a new one when this Session switched to ${name}.`
+        : `${configuredAgent(target.agent).title} keeps each profile's conversations apart, so Pane started a new one when this Session switched to ${name}.`;
+      // The outgoing conversation is saved before anything changes; a failure, or history not at hand, refuses the switch (review F-3).
+      let transcript: string | undefined;
+      if (effect === 'new-conversation') {
+        try { transcript = this.chatTabs().exportConversation(fromPanel.id).transcript; }
+        catch (error) {
+          throw new PaneError('SESSION_PROFILE_TRANSCRIPT', `${current.name}'s conversation could not be saved for ${name} (${reasonOf(error).replace(/\.$/, '')}). ${outcome}`, error instanceof PaneError && error.next ? error.next : 'Try the switch again.');
+        }
+      }
+      const divider = effect === 'kept' ? `Switched to ${name} · conversation kept`
+        : `Switched to ${name} · new ${configuredAgent(target.agent).title} conversation${transcript ? ', given the transcript' : ''}`;
+      next.activity.push(this.activity('updated', `${divider}.`, source));
+      this.trimActivity(next);
+      this.store.write(replaceSession(data, next));
+      const relaunch: ChatTabRelaunch = { launch: chat.launch, divider };
+      if (effect === 'new-conversation') relaunch.newConversation = transcript ? { transcript, reason } : { reason };
+      if (!agentChanging) {
+        this.chatTabs().relaunch(fromPanel.id, relaunch);
+      } else {
+        if (toPanel) this.chatTabs().relaunch(toPanel.id, relaunch);
+        else await this.ensurePanelForAgent(next, false, { divider: { leading: true, text: divider, at: new Date().toISOString() }, transcript, reason });
+        void this.chatTabs().stop(fromPanel.id, { message: `${current.name} now runs ${name}, in its ${configuredAgent(target.agent).title} tab.`, next: `Switch the Session back to a ${configuredAgent(current.agent).title} profile to use this tab again.` })
+          .catch(error => console.warn(`[Sessions] ${current.name}'s ${configuredAgent(current.agent).title} tab did not stop: ${reasonOf(error)}`));
+      }
+      this.pluginHashes.set(profilePlugin(ref), target.profile.hash);
+      this.emitChanged(next, 'updated');
+      return { session: this.withComputed(clone(next)), previous, effect };
+    });
+  }
+
+  /**
+   * Reload profile (T-63): the Session's agent takes its profile's saved files at its next start, which
+   * waits for the current reply, and continues the conversation.
+   */
+  async reloadProfile(selector: OrchestrationSessionSelector, source: 'user' | 'agent' = 'user'): Promise<OrchestrationSessionRecord> {
+    this.refuseProfilesOff('Nothing was reloaded.');
+    return withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      const data = this.store.read();
+      const current = this.findSession(data, selector);
+      const outcome = 'Nothing was reloaded.';
+      const panel = this.profileChatPanel(current, 'reloaded');
+      const profile = current.agentProfile;
+      if (!profile) throw new PaneError('SESSION_PROFILE_NONE', `${current.name} started before Sessions had profiles, so it has none to reload. ${outcome}`, 'Use Switch profile to give it one.');
+      const hash = await this.agentFarm().pluginHash(profilePlugin(profile.ref));
+      if (hash === undefined) throw new PaneError('SESSION_PROFILE_UNKNOWN', `The plugin of ${profile.ref} isn't installed in this computer's Pane. ${outcome}`, 'Restart Pane so it sets up its Agent Farm, or switch the Session to another profile.');
+      const name = profileDisplayName(profile.ref);
+      const next: OrchestrationSessionRecord = {
+        ...current, agentProfile: { ref: profile.ref, hash },
+        revision: current.revision + 1, updatedAt: new Date().toISOString(), activity: [...current.activity],
+      };
+      const chat = this.chatLaunch(next);
+      if (!chat || !('launch' in chat)) throw new PaneError('SESSION_PROFILE_UNSUPPORTED', `Profiles run in chat tabs, which are off on this computer. ${outcome}`, 'Turn on Chat tabs in Settings > AI & Agents, then try again.');
+      const divider = `Reloaded ${name} · conversation kept`;
+      next.activity.push(this.activity('updated', `${divider}.`, source));
+      this.trimActivity(next);
+      this.store.write(replaceSession(data, next));
+      this.chatTabs().relaunch(panel.id, { launch: chat.launch, divider });
+      this.pluginHashes.set(profilePlugin(profile.ref), hash);
+      this.emitChanged(next, 'updated');
+      return this.withComputed(clone(next));
+    });
+  }
+
+  /** Switch and Reload exist only with Profiles on (T-63); off, Sessions behave as on main. */
+  private refuseProfilesOff(outcome: string): void {
+    if (this.profilesOn()) return;
+    throw new PaneError('SESSION_PROFILE_UNSUPPORTED', `Profiles is off on this computer, so a Session's profile can't change. ${outcome}`, 'Turn on Profiles in Settings > Advanced > Experimental, then try again.');
+  }
+
+  /** The Session's agent tab, a chat tab, for a Switch or Reload; refused for one that can't change profile now. */
+  private profileChatPanel(record: OrchestrationSessionRecord, done: 'switched' | 'reloaded'): ToolPanel {
+    const outcome = done === 'switched' ? 'The Session was not switched.' : 'Nothing was reloaded.';
+    if (record.archived === true) throw new PaneError('SESSION_ARCHIVED', `${record.name} is archived. ${outcome}`, 'Restore it first.');
+    if (record.move) throw new PaneError('ERR_SESSION_MOVING', `${record.name} ${record.move.state === 'moved' ? `moved to ${record.move.machine}` : record.move.state === 'arriving' ? `is arriving from ${record.move.machine}` : `is moving to ${record.move.machine}`}. ${outcome}`, record.move.state === 'moved' ? `Change it on ${record.move.machine}.` : 'Wait for the move to finish.');
+    const panel = panelManager.getPanel(record.panelIds[record.agent]);
+    if (panel?.type !== 'chat') {
+      throw new PaneError('SESSION_PROFILE_TERMINAL', `${record.name} runs its agent in a terminal, which can't change profile. ${outcome}`, 'Start a new Session with the profile, or switch this Session to chat first.');
+    }
+    return panel;
+  }
+
+  /** Each profile plugin's newest hash, for the changed mark; refreshed when Sessions are listed (see refreshPluginHashes). */
+  private readonly pluginHashes = new Map<string, string>();
+  private pluginHashesCheckedAt = 0;
+  private pluginHashesChecking?: Promise<void>;
+
+  /**
+   * Hashes the plugins live Sessions run, at most every few seconds, and announces the Sessions whose
+   * profile changed since (T-63). PR 5's Save calls it after a save, with `force`.
+   */
+  refreshPluginHashes(force = false): Promise<void> {
+    // With Profiles off nothing shows the mark, so no plugin is read.
+    if (!this.profilesOn()) return Promise.resolve();
+    if (this.pluginHashesChecking) return this.pluginHashesChecking;
+    if (!force && Date.now() - this.pluginHashesCheckedAt < PLUGIN_HASH_INTERVAL_MS) return Promise.resolve();
+    this.pluginHashesCheckedAt = Date.now();
+    this.pluginHashesChecking = (async () => {
+      const sessions = this.store.read().sessions.filter(session => session.archived !== true && session.agentProfile);
+      const plugins = [...new Set(sessions.map(session => profilePlugin(session.agentProfile!.ref)))];
+      const changed = new Set<string>();
+      for (const plugin of plugins) {
+        const hash = await this.agentFarm().pluginHash(plugin).catch(() => undefined);
+        if (hash === undefined || this.pluginHashes.get(plugin) === hash) continue;
+        this.pluginHashes.set(plugin, hash);
+        changed.add(plugin);
+      }
+      for (const session of sessions) if (changed.has(profilePlugin(session.agentProfile!.ref))) this.emitChanged(session, 'updated');
+    })().finally(() => { this.pluginHashesChecking = undefined; });
+    return this.pluginHashesChecking;
+  }
+
+  /**
    * Switch to chat: the Session whose agent runs in `fromPanelId` now runs it in the chat tab
    * `toPanelId`, which becomes its permanent tab. Any other tab is left alone.
    *
@@ -994,19 +1177,23 @@ export class OrchestrationSessionManager extends EventEmitter {
 
   /**
    * Adds what a read computes, never stored: `paused` when its chat and every Pane in it are paused,
-   * and `openedAt`, its chat Pane's last view.
+   * `openedAt`, its chat Pane's last view, and `agentProfileChanged` when the profile's plugin changed
+   * since the Session's agent took it (T-63).
    */
   private withComputed<Session extends OrchestrationSessionSummary>(record: Session): Session {
+    const profile = record.agentProfile;
+    const newest = profile && this.profilesOn() ? this.pluginHashes.get(profilePlugin(profile.ref)) : undefined;
+    const agentProfileChanged = newest !== undefined && newest !== profile?.hash ? true as const : undefined;
     const viewedAt = this.sessionManager.getSession(record.internalSessionId)?.lastViewedAt;
     const openedMs = viewedAt ? parseSessionTimestampMs(viewedAt) : NaN;
     const openedAt = Number.isNaN(openedMs) ? undefined : new Date(openedMs).toISOString();
     let latest: TerminalPausedMark | undefined;
     for (const paneId of this.pausablePaneIdsOf(record)) {
       const mark = this.sessionManager.getSession(paneId)?.paused;
-      if (!mark) return { ...record, paused: undefined, openedAt };
+      if (!mark) return { ...record, paused: undefined, openedAt, agentProfileChanged };
       if (!latest || mark.at > latest.at) latest = mark;
     }
-    return { ...record, paused: latest, openedAt };
+    return { ...record, paused: latest, openedAt, agentProfileChanged };
   }
 
   /**
@@ -1389,7 +1576,8 @@ export class OrchestrationSessionManager extends EventEmitter {
     }
   }
 
-  private async ensurePanelForAgent(record: OrchestrationSessionRecord, terminal = false): Promise<ToolPanel> {
+  /** `switched`: a Switch profile opens this tab: its conversation starts with the divider and is given the transcript. */
+  private async ensurePanelForAgent(record: OrchestrationSessionRecord, terminal = false, switched?: { divider: ChatDivider; transcript?: string; reason: string }): Promise<ToolPanel> {
     if (!Object.values(record.panelIds).some(id => this.agentStarted(id))) {
       prepareSessionWorkspace(record.id, record.profile, record);
       // A profile written while Profiles was on doesn't follow the agent once it is off.
@@ -1408,8 +1596,9 @@ export class OrchestrationSessionManager extends EventEmitter {
     if (chat && 'launch' in chat && agentConfig(record.agent)?.chat) {
       const workspace = sessionRuntimePath(sessionWorkspacePath(record.id), record);
       const state: ChatPanelState = { agent: record.agent, launch: chat.launch, cwd: workspace, status: 'starting', orchestrationSessionId: record.id, sessionFolder: workspace };
-      const opening = this.firstPrompt(record);
+      const opening = switched ? switched.transcript && transcriptPrompt(switched.transcript, switched.reason) : this.firstPrompt(record);
       if (opening) state.initialInput = opening;
+      if (switched) state.dividers = [switched.divider];
       const panel = await panelManager.createPanel({
         id: panelId, sessionId: record.internalSessionId, type: 'chat',
         title: `${record.name} · ${configuredAgent(record.agent).title}`,
@@ -1442,9 +1631,12 @@ export class OrchestrationSessionManager extends EventEmitter {
     // T-63: a Session with a profile runs it through Agent Farm; the agent on its own is pane/<agent>,
     // which keeps the full access its launch command gave it. A launch command's own profile stays as it is.
     // With Profiles off (Settings › Advanced), a saved profile is ignored and the agent starts as on main.
-    if (!record.agentProfile || !this.profilesOn() || !('launch' in result) || result.launch.kind !== 'agent') return result;
+    // A launch command's profile other than the Session's (a Switch, review F-2) gives way to the Session's.
+    if (!record.agentProfile || !this.profilesOn() || !('launch' in result)) return result;
+    if (result.launch.kind === 'profile' && result.launch.profile === record.agentProfile.ref) return result;
+    // Marked as Pane's choice, so the tab starts its agent on its own again once Profiles is off (review F-5).
     const launch: ChatTabLaunch = { kind: 'profile', profile: record.agentProfile.ref, fromSession: true };
-    if (result.launch.fullAccess === true || result.launch.mode) launch.fullAccess = true;
+    if (result.launch.fullAccess === true || (result.launch.kind === 'agent' && result.launch.mode)) launch.fullAccess = true;
     return { launch };
   }
 
@@ -1493,6 +1685,17 @@ export class OrchestrationSessionManager extends EventEmitter {
     if (promoted || input.resume) refuse('SESSION_PROFILE_UNSUPPORTED', `A Session that continues an earlier conversation can't start with the profile ${ref}.`, 'Create the Session without a profile.');
     if (input.runtime === 'wsl') refuse('SESSION_PROFILE_UNSUPPORTED', `Profiles run in chat tabs, which don't run in WSL, so the Session can't start with ${ref}.`, 'Create a native Session, or leave out the profile.');
     if (this.configManager.getConfig().chatTabsEnabled !== true) refuse('SESSION_PROFILE_UNSUPPORTED', `Profiles run in chat tabs, which are off on this computer, so the Session can't start with ${ref}.`, 'Turn on Chat tabs in Settings > AI & Agents, then try again.');
+    const target = await this.profileTarget(ref, input.agent, 'No Session was created.');
+    if (terminal(target.agent)) return refuse('SESSION_PROFILE_UNSUPPORTED', `This app can't show the chat tab a profile runs in, so the Session can't start with ${ref}.`, 'Create the Session from the desktop app, or leave out the profile.');
+    return target;
+  }
+
+  /**
+   * The agent a profile runs and its plugin's hash, for a new Session or a Switch (T-63); refused with
+   * `outcome` ("No Session was created.") when the profile isn't here or Pane can't run its agent.
+   */
+  private async profileTarget(ref: string, agentHint: PaneChatAgent | undefined, outcome: string): Promise<{ profile: SessionAgentProfile; agent: PaneChatAgent }> {
+    const refuse = (code: string, message: string, next: string): never => { throw new PaneError(code, `${message} ${outcome}`, next); };
     const [qualified, variant] = ref.split(':');
     const plain = plainProfileAgent(qualified);
     let agent: PaneChatAgent | undefined = plain;
@@ -1509,13 +1712,13 @@ export class OrchestrationSessionManager extends EventEmitter {
       const otherVariant = !!variant && variant !== entry.defaultVariant;
       const harness = otherVariant ? await this.agentFarm().harness(ref) : entry.harness;
       if (!harness) return refuse('SESSION_PROFILE_UNKNOWN', `Pane couldn't read which agent the variant ${ref} runs from its Agent Farm.`, 'Restart Pane so it sets up its Agent Farm, then try again.');
-      if (otherVariant && input.agent && normalizePaneChatAgent(input.agent) !== harness) {
-        refuse('SESSION_PROFILE_AGENT_MISMATCH', `The variant ${ref} runs ${harness}, not ${input.agent}.`, `Pass agent ${harness}, or leave out agent so the profile picks it.`);
+      if (otherVariant && agentHint && normalizePaneChatAgent(agentHint) !== harness) {
+        refuse('SESSION_PROFILE_AGENT_MISMATCH', `The variant ${ref} runs ${harness}, not ${agentHint}.`, `Pass agent ${harness}, or leave out agent so the profile picks it.`);
       }
       agent = normalizePaneChatAgent(harness);
       if (!agentConfig(agent)?.chat?.adapter || agent !== harness) refuse('SESSION_PROFILE_UNSUPPORTED', `The profile ${ref} runs ${harness}, which Pane can't start through Agent Farm.`, 'Pick a Claude or Codex profile.');
     }
-    if (!agent || terminal(agent)) return refuse('SESSION_PROFILE_UNSUPPORTED', `This app can't show the chat tab a profile runs in, so the Session can't start with ${ref}.`, 'Create the Session from the desktop app, or leave out the profile.');
+    if (!agent) return refuse('SESSION_PROFILE_UNSUPPORTED', `Pane can't tell which agent ${ref} runs.`, 'Pick a Claude or Codex profile.');
     const hash = await this.agentFarm().pluginHash(profilePlugin(ref));
     if (hash === undefined) return refuse('SESSION_PROFILE_UNKNOWN', `The plugin of ${ref} isn't installed in this computer's Pane.`, 'Restart Pane so it sets up its Agent Farm, or install the plugin, then try again.');
     return { profile: { ref, hash }, agent };

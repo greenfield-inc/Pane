@@ -12,12 +12,13 @@ const report = boundary.object({
   ...agentReportOptionFields,
   reportedAt: boundary.string,
 });
+const launchSchema = boundary.union(
+  boundary.object({ kind: boundary.literal('agent'), mode: boundary.optional(boundary.string), fullAccess: boundary.optional(boundary.literal(true)) }),
+  boundary.object({ kind: boundary.literal('profile'), profile: boundary.nonEmptyString, args: boundary.optional(boundary.record(boundary.string)), fullAccess: boundary.optional(boundary.literal(true)), fromSession: boundary.optional(boundary.literal(true)) }),
+);
 const schema: BoundarySchema<ChatPanelState> = boundary.object({
   agent: boundary.nonEmptyString,
-  launch: boundary.union(
-    boundary.object({ kind: boundary.literal('agent'), mode: boundary.optional(boundary.string), fullAccess: boundary.optional(boundary.literal(true)) }),
-    boundary.object({ kind: boundary.literal('profile'), profile: boundary.nonEmptyString, args: boundary.optional(boundary.record(boundary.string)), fullAccess: boundary.optional(boundary.literal(true)), fromSession: boundary.optional(boundary.literal(true)) }),
-  ),
+  launch: launchSchema,
   cwd: boundary.string,
   acpSessionId: boundary.optional(boundary.string),
   status: boundary.enumeration('starting', 'idle', 'working', 'blocked', 'stopped'),
@@ -51,6 +52,16 @@ const schema: BoundarySchema<ChatPanelState> = boundary.object({
     sessionId: boundary.string,
     turns: boundary.array(boundary.object({ after: boundary.string, stopReason: boundary.string, startedAt: boundary.string, endedAt: boundary.string })),
   })),
+  relaunch: boundary.optional(boundary.object({
+    launch: launchSchema,
+    divider: boundary.string,
+    newConversation: boundary.optional(boundary.object({ transcript: boundary.optional(boundary.string), reason: boundary.string })),
+  })),
+  dividers: boundary.optional(boundary.array(boundary.object({
+    sessionId: boundary.optional(boundary.string), after: boundary.optional(boundary.string), leading: boundary.optional(boundary.literal(true)),
+    text: boundary.string, at: boundary.string,
+  }))),
+  loadFallback: boundary.optional(boundary.object({ file: boundary.string })),
 });
 
 /** A chat panel's saved state, or undefined when the row does not hold one. */

@@ -16,6 +16,8 @@ import type {
   OrchestrationSessionArchiveResult,
   OrchestrationSessionArchiveSelection,
   OrchestrationSessionOverview,
+  OrchestrationSessionProfileSwitch,
+  OrchestrationSessionProfileSwitchRequest,
   OrchestrationSessionRecord,
   OrchestrationSessionSelector,
   OrchestrationSessionUpdateInput,
@@ -133,6 +135,14 @@ export class API {
     async setAgent(selector: OrchestrationSessionSelector, agent: PaneChatAgent): Promise<IPCResponse<OrchestrationSessionView<Session>>> {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.orchestrationSessions.setAgent(selector, agent);
+    },
+    async switchProfile(selector: OrchestrationSessionSelector, request: OrchestrationSessionProfileSwitchRequest): Promise<IPCResponse<OrchestrationSessionProfileSwitch>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.orchestrationSessions.switchProfile(selector, request);
+    },
+    async reloadProfile(selector: OrchestrationSessionSelector): Promise<IPCResponse<OrchestrationSessionRecord>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.orchestrationSessions.reloadProfile(selector);
     },
     async associate(selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput): Promise<IPCResponse<OrchestrationSessionRecord>> {
       if (!isElectron()) throw new Error('Electron API not available');

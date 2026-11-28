@@ -83,7 +83,51 @@ export interface ChatPanelState {
   paused?: TerminalPausedMark;
   /** How recent turns of `sessionId` ended, so the time rows survive the history replay of a restart. */
   turnTimes?: { sessionId: string; turns: ChatTurnTime[] };
+  /** A Reload or Switch profile waiting for the agent to finish its reply (T-63). */
+  relaunch?: ChatTabRelaunch;
+  /** Lines across the conversation where its profile changed, put back after a restart's replay (T-63). */
+  dividers?: ChatDivider[];
+  /**
+   * Set by a Reload or Switch that keeps the conversation, until the next start ends: when the agent can't
+   * load the conversation then, a new one starts and is given the transcript saved privately in `file`,
+   * in Pane's own chat-tabs folder (the fail-safe, T-63). The file is deleted once the start ends.
+   */
+  loadFallback?: { file: string };
 }
+
+/** A conversation saved for a new one to read (T-63): `transcript` is the file, absent when nothing was said. */
+export interface ChatConversationExport { transcript?: string }
+
+/** A launch change that waits for the agent to finish its reply: Reload or Switch profile (T-63). */
+export interface ChatTabRelaunch {
+  launch: ChatTabLaunch;
+  /** The divider drawn where it happened. */
+  divider: string;
+  /**
+   * Start a new conversation. `transcript`: the outgoing conversation, already saved, which the new one
+   * is given to read first. Absent only when the outgoing conversation had nothing in it: the tab never
+   * gives the new conversation its own earlier one in its place. `reason` says why it could not continue.
+   */
+  newConversation?: { transcript?: string; reason: string };
+}
+
+/**
+ * A line across the chat where the Session's profile changed (T-63). Saved with the tab so a restart's
+ * history replay puts it back after the message it followed.
+ */
+export interface ChatDivider {
+  /** The conversation it belongs to; absent until the new conversation it opens is created. */
+  sessionId?: string;
+  /** The message it follows, by the id the agent replays it with; absent: at the start (`leading`) or the end. */
+  after?: string;
+  /** Before the conversation's first message: a new conversation given a transcript. */
+  leading?: true;
+  text: string;
+  at: string;
+}
+
+/** The content of the transcript row a divider is drawn from. */
+export interface ChatDividerContent { type: 'pane_divider'; text: string; at: string }
 
 /** A turn's time row, saved after the id of the last message the turn created. */
 export interface ChatTurnTime { after: string; stopReason: string; startedAt: string; endedAt: string }

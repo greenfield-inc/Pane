@@ -24,6 +24,8 @@ export interface TerminalPopoverProps {
   className?: string;
   onMouseEnter?: React.MouseEventHandler<HTMLDivElement>;
   onMouseLeave?: React.MouseEventHandler<HTMLDivElement>;
+  /** A submenu of another popover: a click in it doesn't close that popover. */
+  submenu?: boolean;
 }
 
 export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
@@ -36,43 +38,52 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
   className,
   onMouseEnter,
   onMouseLeave,
+  submenu = false,
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0 });
 
-  // Smart positioning to keep popover on screen
+  // Smart positioning to keep popover on screen, again whenever its content changes size (a list that loads).
   useLayoutEffect(() => {
     if (!visible || !ref.current) return;
+    const element = ref.current;
+    const place = () => {
+      const rect = element.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
+      const viewportWidth = window.innerWidth;
 
-    const rect = ref.current.getBoundingClientRect();
-    const viewportHeight = window.innerHeight;
-    const viewportWidth = window.innerWidth;
+      let top = y;
+      let left = x;
 
-    let top = y;
-    let left = x;
+      // Flip up if near bottom
+      if (top + rect.height > viewportHeight - 10) {
+        top = flipY - rect.height;
+      }
 
-    // Flip up if near bottom
-    if (top + rect.height > viewportHeight - 10) {
-      top = flipY - rect.height;
-    }
+      // Keep on screen horizontally
+      if (left + rect.width > viewportWidth - 10) {
+        left = viewportWidth - rect.width - 10;
+      }
 
-    // Keep on screen horizontally
-    if (left + rect.width > viewportWidth - 10) {
-      left = viewportWidth - rect.width - 10;
-    }
+      // Don't go off left edge
+      if (left < 10) {
+        left = 10;
+      }
 
-    // Don't go off left edge
-    if (left < 10) {
-      left = 10;
-    }
+      // Don't go off top edge
+      if (top < 10) {
+        top = 10;
+      }
 
-    // Don't go off top edge
-    if (top < 10) {
-      top = 10;
-    }
-
-    setPosition({ top, left });
-  }, [visible, x, y, flipY]);
+      setPosition(current => current.top === top && current.left === left ? current : { top, left });
+    };
+    place();
+    // A submenu fills in after it opens (Switch profile's list), so it is placed again as it grows.
+    if (!submenu) return;
+    const observer = new ResizeObserver(place);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [visible, x, y, flipY, submenu]);
 
   useEffect(() => {
     if (!visible) return;
@@ -80,6 +91,8 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
     const handleClickOutside = (e: MouseEvent) => {
       // SAFETY: The registered DOM/custom-event source establishes this target and detail shape.
       if (ref.current && !ref.current.contains(e.target as Node)) {
+        // A submenu's own popover is part of this one.
+        if (!submenu && e.target instanceof Element && e.target.closest('[data-terminal-popover-submenu]')) return;
         onClose();
       }
     };
@@ -101,7 +114,7 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleEscape);
     };
-  }, [visible, onClose]);
+  }, [visible, onClose, submenu]);
 
   if (!visible) return null;
 
@@ -109,6 +122,7 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
     <div
       ref={ref}
       data-terminal-popover
+      data-terminal-popover-submenu={submenu || undefined}
       className={cn('fixed z-[10001] w-56 max-w-[calc(100vw-20px)] max-h-[calc(100vh-20px)] overflow-y-auto bg-surface-primary border border-border-primary rounded-lg shadow-dropdown-elevated p-1', className)}
       style={{ left: position.left, top: position.top }}
       onMouseEnter={onMouseEnter}
@@ -126,6 +140,8 @@ TerminalPopover.displayName = 'TerminalPopover';
 export interface PopoverButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'default' | 'primary' | 'danger';
   children: React.ReactNode;
+  /** React 19 passes it through to the button. */
+  ref?: React.Ref<HTMLButtonElement>;
 }
 
 const popoverButtonVariants = {

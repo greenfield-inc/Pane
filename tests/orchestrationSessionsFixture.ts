@@ -41,6 +41,7 @@ export type UiSessionFixture = {
   agent: 'claude' | 'codex' | 'cursor';
   /** The Agent Farm profile the Session runs (T-63); the row shows its avatar. */
   agentProfile?: { ref: string; hash: string };
+  agentProfileChanged?: true;
   launchCommand?: string;
   customResume?: CustomCommandResume | null;
   profile?: string;
@@ -233,6 +234,7 @@ export async function installSessionsFixture(
     let selectCalls = 0;
     const selectedIds: string[] = [];
     const createInputs: JsonObject[] = [];
+    const profileCalls: Array<{ action: 'switch' | 'reload'; sessionId: string; ref?: string; agent?: string }> = [];
     let overviewCalls = 0;
     let nextOrchestrationUpdateError: string | null = null;
     type ArchiveSelection = { archivePaneIds: string[]; forcePaneIds: string[] };
@@ -438,6 +440,37 @@ export async function installSessionsFixture(
         changed('reordered');
         return success({ sessions: clone(sessions), selectedSessionId });
       },
+      // T-63: Switch profile and Reload profile, as the host answers them.
+      switchProfile: async (selector: Selector, request: { ref: string; agent?: string; expect: { agent: string; ref?: string; effect: string } }) => {
+        const record = find(selector);
+        const ref = request.ref;
+        profileCalls.push(request.agent ? { action: 'switch', sessionId: record.id, ref, agent: request.agent } : { action: 'switch', sessionId: record.id, ref });
+        const list = await window.electronAPI.chatTab.profiles();
+        const agent = ref.startsWith('pane/') ? ref.slice('pane/'.length) : request.agent ?? list.profiles.find(entry => entry.ref === ref)?.harness ?? record.agent;
+        const previous = { agent: record.agent, ref: record.agentProfile?.ref };
+        const effect = previous.ref === ref ? 'current' : agent !== record.agent || agent === 'codex' ? 'new-conversation' : 'kept';
+        // As the host: what the person saw must still hold (review F-1).
+        if (effect !== 'current' && (request.expect.agent !== previous.agent || request.expect.ref !== previous.ref || request.expect.effect !== effect)) {
+          return { success: false, error: 'The Session changed since you chose. The Session was not switched.' };
+        }
+        // SAFETY: the fixture's profiles run the configured agents.
+        record.agent = agent as SessionRecord['agent'];
+        record.agentProfile = { ref, hash: 'fixture' };
+        delete record.agentProfileChanged;
+        record.revision += 1;
+        persistState();
+        changed('updated');
+        return success({ session: clone(record), previous, effect });
+      },
+      reloadProfile: async (selector: Selector) => {
+        const record = find(selector);
+        profileCalls.push({ action: 'reload', sessionId: record.id });
+        delete record.agentProfileChanged;
+        record.revision += 1;
+        persistState();
+        changed('updated');
+        return success(clone(record));
+      },
       setAgent: async (selector: Selector, agent: SessionRecord['agent']) => {
         const record = find(selector);
         record.agent = agent;
@@ -505,6 +538,7 @@ export async function installSessionsFixture(
       getOrchestrationSelectCalls: () => selectCalls,
       getOrchestrationSelectedIds: () => [...selectedIds],
       getOrchestrationCreateInputs: () => clone(createInputs),
+      getProfileCalls: () => clone(profileCalls),
       getOrchestrationViewRequests: () => clone(viewRequests),
       getOrchestrationOverviewCalls: () => overviewCalls,
       setOrchestrationOverviewPanes: (sessionId: string, panes: UiPaneOverviewFixture[]) => {

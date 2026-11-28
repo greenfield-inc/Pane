@@ -4232,3 +4232,174 @@ test('A Session opens behind one skeleton of its workspace: bones only past 150 
   await expect(page.locator('[data-skeleton="waiting"]')).toHaveCount(0);
   await expect(page.locator('[data-skeleton="visible"]').first()).toBeAttached();
 });
+
+const profileCalls = (page: Page) => page.evaluate(() => {
+  // SAFETY: installSessionsFixture adds this control before the app loads.
+  const mockWindow = window as typeof window & { __paneTestElectronMock: { getProfileCalls: () => Array<{ action: string; sessionId: string; ref?: string }> } };
+  return mockWindow.__paneTestElectronMock.getProfileCalls();
+});
+
+for (const theme of ['light', 'night-owl']) {
+  test(`Switch profile switches at once with Undo, asks first across agents, and Reload clears the changed dot (T-63, J7, J8, ${theme})`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1400, height: 900 });
+    const profile = (ref: string, harness: string, hidden = false) => ({ ref, plugin: ref.split('/')[0], version: '1.0.0', harness, hidden });
+    await installSessionsFixture(page, [
+      { ...sessionFixture('plan', 'Session profiles plan', '', '', '2026-09-16T12:00:00.000Z'), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h' }, agentProfileChanged: true },
+      { ...sessionFixture('blog', 'Weekend blog post', '', '', '2026-09-16T12:01:00.000Z'), agentProfile: { ref: 'pane/claude', hash: 'h' } },
+    ], [], {
+      initialConfig: { theme, chatTabsEnabled: true, sessionProfilesEnabled: true },
+      agentFarmProfiles: { profiles: [
+        profile('pane/claude', 'claude', true), profile('pane/codex', 'codex', true),
+        profile('greenfield/orchestrator', 'claude'), profile('greenfield/planner', 'claude'), profile('greenfield/reviewer', 'codex'),
+        // A default install has many profiles: the submenu must still fit the window (QA F1).
+        ...Array.from({ length: 20 }, (_, index) => profile(`extra/p${index}`, 'claude')),
+      ] },
+    });
+    await gotoApp(page);
+    await dismissStartupDialogs(page);
+    const row = page.getByTestId('orchestration-session-plan');
+    const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}-${theme}.png`) });
+
+    // A changed profile shows the amber dot on the row and in the menu.
+    await expect(row.getByTestId('session-profile-changed')).toBeVisible();
+    await row.click({ button: 'right' });
+    const reload = page.getByTestId('session-reload-profile');
+    await expect(reload).toContainText('Reload profile');
+    await expect(reload.getByText('changed')).toHaveCount(1);
+    await page.getByTestId('session-switch-profile').hover();
+    const submenu = page.getByTestId('session-switch-profile-menu');
+    await expect(submenu).toBeVisible();
+    await expect(submenu.getByText('Profiles on this computer')).toBeVisible();
+    await expect(submenu.getByRole('menuitemradio', { name: /Greenfield orchestrator/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(submenu.getByTestId('session-switch-choice-profile:greenfield/reviewer')).toContainText('greenfield/reviewer · new conversation');
+    await expect(submenu.getByTestId('session-switch-choice-agent:codex')).toContainText('no profile · new conversation');
+    await expect(submenu.getByTestId('session-switch-choice-profile:extra/p19')).toBeAttached();
+    const fits = await page.getByTestId('session-switch-profile-menu').evaluate(node => {
+      const box = node.closest('[data-terminal-popover]')!.getBoundingClientRect();
+      return box.top >= 0 && box.bottom <= window.innerHeight;
+    });
+    expect(fits).toBe(true);
+    await shot('j15-switch-submenu');
+
+    // A Claude profile: at once, with Undo.
+    await submenu.getByRole('textbox', { name: 'Filter profiles' }).fill('plan');
+    await expect(submenu.getByRole('menuitemradio')).toHaveCount(1);
+    await submenu.getByRole('textbox', { name: 'Filter profiles' }).press('Enter');
+    await expect(submenu).toHaveCount(0);
+    const toast = page.getByRole('status').filter({ hasText: 'now runs Greenfield planner' });
+    await expect(toast).toContainText('Session profiles plan now runs Greenfield planner · conversation kept');
+    await expect(row.getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Profile Greenfield planner');
+    await shot('j7-switch-undo-toast');
+    await toast.getByRole('button', { name: 'Undo' }).click();
+    // Undo names the agent the Session ran before, so a profile variant comes back too (review F-9).
+    await expect.poll(() => profileCalls(page)).toEqual([
+      { action: 'switch', sessionId: 'plan', ref: 'greenfield/planner', agent: 'claude' },
+      { action: 'switch', sessionId: 'plan', ref: 'greenfield/orchestrator', agent: 'claude' },
+    ]);
+    await expect(row.getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Profile Greenfield orchestrator');
+
+    // Codex: asks first, and Cancel changes nothing. By keyboard: Shift+F10, then → opens the submenu.
+    await row.focus();
+    await page.keyboard.press('Shift+F10');
+    await page.getByTestId('session-switch-profile').focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(submenu.getByRole('textbox', { name: 'Filter profiles' })).toBeFocused();
+    await page.keyboard.type('review');
+    await page.keyboard.press('Enter');
+    const sheet = page.getByRole('dialog', { name: 'Start a new Codex conversation?' });
+    await expect(sheet).toContainText('Codex can\'t continue a Claude conversation, so a new one starts here and is given this transcript to read first.');
+    await expect(sheet).toContainText('Same Session, folder, Panes and to-dos.');
+    await shot('j8-cross-agent-confirm');
+    await sheet.getByRole('button', { name: 'Cancel' }).click();
+    await expect(sheet).toHaveCount(0);
+    expect((await profileCalls(page)).length).toBe(2);
+    await row.click({ button: 'right' });
+    await page.getByTestId('session-switch-profile').click();
+    await page.keyboard.type('review');
+    await page.keyboard.press('Enter');
+    await sheet.getByRole('button', { name: 'Switch' }).click();
+    await expect.poll(async () => (await profileCalls(page)).at(-1)).toEqual({ action: 'switch', sessionId: 'plan', ref: 'greenfield/reviewer', agent: 'codex' });
+    // No Undo for a new conversation.
+    await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(0);
+
+    // Reload clears the changed mark; a Session with nothing new says "up to date".
+    await expect(row.getByTestId('session-profile-changed')).toHaveCount(0);
+    const blog = page.getByTestId('orchestration-session-blog');
+    await blog.click({ button: 'right' });
+    await expect(page.getByTestId('session-reload-profile')).toContainText('up to date');
+    // The icon keeps its width beside the note (QA F2).
+    expect((await layoutBox(page.getByTestId('session-reload-profile').locator('svg'))).width).toBe(16);
+    await shot('j15-session-menu');
+    await page.getByTestId('session-reload-profile').click();
+    await expect.poll(async () => (await profileCalls(page)).at(-1)).toEqual({ action: 'reload', sessionId: 'blog' });
+  });
+}
+
+// Review F-10: another window turns Profiles off while a confirmation or an Undo waits.
+test('a waiting Switch confirmation and Undo go away when Profiles turns off (T-63 PR 4)', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  const profile = (ref: string, harness: string, hidden = false) => ({ ref, plugin: ref.split('/')[0], version: '1.0.0', harness, hidden });
+  await installSessionsFixture(page, [
+    { ...sessionFixture('plan', 'Session profiles plan', '', '', '2026-09-16T12:00:00.000Z'), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h' } },
+  ], [], {
+    initialConfig: { chatTabsEnabled: true, sessionProfilesEnabled: true },
+    agentFarmProfiles: { profiles: [profile('pane/claude', 'claude', true), profile('greenfield/orchestrator', 'claude'), profile('greenfield/planner', 'claude'), profile('greenfield/reviewer', 'codex')] },
+  });
+  await gotoApp(page);
+  await dismissStartupDialogs(page);
+  const row = page.getByTestId('orchestration-session-plan');
+  const turnProfiles = (on: boolean) => page.evaluate(async (value) => {
+    // SAFETY: installSessionsFixture builds on the base mock, which has these controls.
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { emitHostClientsChanged: (clients: never[]) => void } };
+    await window.electronAPI.config.update({ sessionProfilesEnabled: value });
+    // Main announces the new config to every window.
+    mockWindow.__paneTestElectronMock.emitHostClientsChanged([]);
+  }, on);
+  const pick = async (filter: string) => {
+    await row.click({ button: 'right' });
+    await page.getByTestId('session-switch-profile').click();
+    await page.keyboard.type(filter);
+    await page.keyboard.press('Enter');
+  };
+
+  await pick('review');
+  const sheet = page.getByRole('dialog', { name: 'Start a new Codex conversation?' });
+  await expect(sheet).toBeVisible();
+  await turnProfiles(false);
+  await expect(sheet).toHaveCount(0);
+
+  await turnProfiles(true);
+  await pick('plan');
+  const toast = page.getByRole('status').filter({ hasText: 'now runs Greenfield planner' });
+  await expect(toast.getByRole('button', { name: 'Undo' })).toBeVisible();
+  await turnProfiles(false);
+  await expect(toast).toHaveCount(0);
+  expect((await profileCalls(page)).length).toBe(1);
+});
+
+for (const theme of ['light', 'night-owl']) {
+  test(`Switch profile and Reload profile stay out of the Session menu with Profiles off, as on main (T-63 PR 4, ${theme})`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1400, height: 900 });
+    // A Session that took a profile while Profiles was on, whose plugin has changed since.
+    await installSessionsFixture(page, [
+      { ...sessionFixture('plan', 'Session profiles plan', '', '', '2026-09-16T12:00:00.000Z'), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h' }, agentProfileChanged: true },
+    ], [], {
+      initialConfig: { theme, chatTabsEnabled: true, sessionProfilesEnabled: false },
+      agentFarmProfiles: { profiles: [{ ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '1.0.0', harness: 'claude', hidden: false }] },
+    });
+    await gotoApp(page);
+    await dismissStartupDialogs(page);
+    const row = page.getByTestId('orchestration-session-plan');
+    await expect(row.getByTestId('session-profile-changed')).toHaveCount(0);
+    await row.click({ button: 'right' });
+    const menu = page.getByRole('menu', { name: 'Session actions for Session profiles plan' });
+    // Switch to chat carries a note under it (here, that the mock can't preview); only the item's start matters.
+    await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Pause Session', 'Rename Session…', /^Switch to chat…/, 'Move to machine…', 'Archive Session']);
+    await expect(page.getByTestId('session-switch-profile')).toHaveCount(0);
+    await expect(page.getByTestId('session-reload-profile')).toHaveCount(0);
+    // main's 192px menu.
+    expect((await layoutBox(menu.locator('xpath=..'))).width).toBe(192);
+    await page.screenshot({ path: testInfo.outputPath(`menu-profiles-off-${theme}.png`) });
+    expect(await profileCalls(page)).toEqual([]);
+  });
+}
