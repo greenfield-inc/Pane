@@ -1271,6 +1271,153 @@ describe('RemotePaneClientController', () => {
   });
 });
 
+describe('RemotePaneClientController switches fast (T-128)', () => {
+  it('skips the connection checklist for a machine that answered in the last 30 s, and runs it for one that did not', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const config = createDefaultRemoteDaemonConfig();
+    const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [{ id: `public:${server.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: server.baseUrl, token: 'test-token' }] };
+    config.client.computers = [studio];
+    const controller = createController();
+    let checklistShown = false;
+    controller.initialize({ configManager: createConfigManagerStub(config), rendererEventSink: { send() {
+      if (controller.getConnectionState().check) checklistShown = true;
+    } } });
+    let fresh = true;
+    const asked: Array<[string, number]> = [];
+    controller.setRecentAnswers((computerId, ms) => {
+      asked.push([computerId, ms]);
+      return fresh ? { routeId: studio.routes[0].id, baseUrl: server.baseUrl } : null;
+    });
+
+    await controller.activateProfile(primaryProfile(studio));
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(asked).toEqual([['studio-mac', 30_000]]);
+    expect(checklistShown).toBe(false);
+
+    await controller.switchToLocalMode();
+    fresh = false;
+    await controller.activateProfile(primaryProfile(studio));
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(checklistShown).toBe(true);
+    await controller.switchToLocalMode();
+  });
+
+  it('dials the address the machine\'s live connection uses, without a Tailscale lookup, and looks it up only when that dial fails', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const tailscale = { id: 'tailscale:https://studio-mac.tail1234.ts.net:8443', kind: 'tailscale' as const, source: 'found' as const, baseUrl: 'https://studio-mac.tail1234.ts.net:8443', token: 'test-token', tailnetMachine: 'studio-mac', tailnetDomain: 'tail1234.ts.net' };
+    const studio = { id: 'studio-mac', label: 'studio-mac', routes: [tailscale] };
+    const config = createDefaultRemoteDaemonConfig();
+    config.client.computers = [studio];
+    const controller = createController();
+    let lookups = 0;
+    let probes = 0;
+    let checklistShown = false;
+    controller.initialize({
+      configManager: createConfigManagerStub(config),
+      rendererEventSink: { send() {
+        if (controller.getConnectionState().check) checklistShown = true;
+      } },
+      resolveTailnetMachineUrl: async () => { lookups += 1; return server.baseUrl; },
+      checkDependencies: { lookupTailnetMachine: async () => { probes += 1; return { kind: 'not-found', reason: 'not in this test' }; } },
+    });
+    let liveUrl = server.baseUrl;
+    controller.setRecentAnswers(() => ({ routeId: tailscale.id, baseUrl: liveUrl }));
+
+    await controller.activateProfile(primaryProfile(studio));
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(lookups).toBe(0);
+    expect(controller.getConnectionState().activeBaseUrl).toBe(server.baseUrl);
+
+    await controller.switchToLocalMode();
+    // The live connection's address stopped answering between its heartbeat and the switch.
+    liveUrl = 'http://127.0.0.1:1';
+    await controller.activateProfile(primaryProfile(studio));
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(lookups).toBe(1);
+    // Review F-6: the first dial's failure isn't diagnosed while the retry dials; only the retry's
+    // own failure would show the checklist.
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(probes).toBe(0);
+    expect(checklistShown).toBe(false);
+    await controller.switchToLocalMode();
+  });
+
+  // #1767 Bug 1 in the rig: a config write while the switch dialed (config still said this
+  // computer) disconnected the switch's connection, and the one dialed after it told the
+  // renderer the host had not changed, so the landing never armed.
+  it('keeps the switch\'s own connection through a config write that lands while it dials', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const config = createDefaultRemoteDaemonConfig();
+    const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [{ id: `public:${server.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: server.baseUrl, token: 'test-token' }] };
+    config.client.computers = [studio];
+    const configManager = createConfigManagerStub(config);
+    const controller = createController();
+    const restores: boolean[] = [];
+    let wrote = false;
+    controller.initialize({
+      configManager,
+      rendererIds: () => [10],
+      rendererEventSink: { send(channel, payload) {
+        if (!wrote && controller.getConnectionState().status === 'connecting') {
+          wrote = true;
+          // Something unrelated saves config while the switch dials; it still says this computer.
+          queueMicrotask(() => configManager.setRemoteConfig(configManager.getConfig().remoteDaemon));
+        }
+        if (channel === 'remote-daemon:resync-required') {
+          restores.push(decodeBoundary(payload, boundary.object({ hostChanged: boundary.boolean })).hostChanged);
+        }
+      } },
+    });
+    controller.setRecentAnswers(() => ({ routeId: studio.routes[0].id, baseUrl: server.baseUrl }));
+
+    // As the switch's IPC handler does: hold syncs, switch, commit the host to config, resync.
+    const release = controller.holdConfigSync();
+    await controller.activateProfile(primaryProfile(studio));
+    expect(wrote).toBe(true);
+    // Another write after the switch connected, before the handler commits: still this computer.
+    configManager.setRemoteConfig(configManager.getConfig().remoteDaemon);
+    configManager.setRemoteConfig({ ...config, client: { ...config.client, mode: 'remote', activeProfileId: studio.id } });
+    controller.commitActivation();
+    release();
+
+    await waitFor(() => restores.length > 0);
+    expect(restores[0]).toBe(true);
+    await controller.switchToLocalMode();
+  });
+
+  it('a switch cancelled part-way leaves the window on its old machine, with no checklist left open', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const config = createDefaultRemoteDaemonConfig();
+    const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [{ id: `public:${server.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: server.baseUrl, token: 'test-token' }] };
+    config.client = { ...config.client, mode: 'remote', activeProfileId: 'studio-mac', computers: [studio] };
+    const controller = createController();
+    controller.initialize({
+      configManager: createConfigManagerStub(config),
+      rendererEventSink: { send() {} },
+      // The other machine's Tailscale lookup never answers.
+      checkDependencies: { lookupTailnetMachine: () => new Promise(() => undefined) },
+    });
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(controller.cancelActivation('build-box')).toBe(false);
+
+    const switching = controller.activateProfile({
+      id: 'build-box', label: 'build-box', baseUrl: 'https://build-box.tail1234.ts.net:8443', token: '', transport: 'http+sse', tailnetMachine: 'build-box', tailnetDomain: 'tail1234.ts.net',
+    });
+    await waitFor(() => controller.getConnectionState().check?.outcome === 'running');
+    // Only a cancel for the machine being switched to stops it (review F-4).
+    expect(controller.cancelActivation('studio-mac')).toBe(false);
+    expect(controller.cancelActivation('build-box')).toBe(true);
+
+    await expect(switching).rejects.toMatchObject({ code: 'ERR_REMOTE_SWITCH_CANCELLED' });
+    expect(controller.getConnectionState()).toMatchObject({ status: 'connected', activeProfileId: 'studio-mac', check: null });
+    await controller.switchToLocalMode();
+  });
+});
+
 describe('RemotePaneClientController links to host ports', () => {
   const cleanups: Array<() => Promise<void> | void> = [];
   afterEach(async () => {

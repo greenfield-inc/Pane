@@ -12,6 +12,7 @@ type ClientOptions = Parameters<CreateMachineClient>[1];
 interface FakeClient extends MachineClient {
   options: ClientOptions;
   invoke: ReturnType<typeof vi.fn<MachineClient['invoke']>>;
+  lastHeardAt: ReturnType<typeof vi.fn<MachineClient['lastHeardAt']>>;
 }
 
 function profile(id: string): RemotePaneConnectionProfile {
@@ -49,6 +50,8 @@ function setup(ids: string[]) {
         resume: vi.fn(),
         openPortStream: vi.fn(),
         measureLatency: vi.fn(async () => 4),
+        lastHeardAt: vi.fn<MachineClient['lastHeardAt']>(() => null),
+        profile: { ...saved, baseUrl: `https://${saved.id}.tail1234.ts.net:8443` },
       };
       clients.set(saved.id, client);
       return client;
@@ -249,6 +252,24 @@ describe('MachineConnections', () => {
     expect(first).toEqual({ ms: 4, routeId: 'relay:https://bb.runpane.net' });
     expect(second).toEqual(first);
     expect(client('build-box').measureLatency).toHaveBeenCalledTimes(1);
+  });
+
+  it('says a machine answered recently only while it is online and heard from inside the window, and names its route', () => {
+    const { machines, client } = setup(['build-box']);
+    const heard = client('build-box').lastHeardAt;
+    expect(machines.answeredWithin('build-box', 30_000)).toBeNull();
+    client('build-box').options.onConnectionStateChange?.('connected', undefined, { routeId: 'lan:https://bb.local' });
+    // Online, but not one event or heartbeat yet.
+    expect(machines.answeredWithin('build-box', 30_000)).toBeNull();
+    heard.mockReturnValue(Date.now());
+    vi.advanceTimersByTime(29_000);
+    expect(machines.answeredWithin('build-box', 30_000)).toEqual({ routeId: 'lan:https://bb.local', baseUrl: 'https://build-box.tail1234.ts.net:8443' });
+    vi.advanceTimersByTime(2_000);
+    expect(machines.answeredWithin('build-box', 30_000)).toBeNull();
+    heard.mockReturnValue(Date.now());
+    client('build-box').options.onConnectionStateChange?.('reconnecting');
+    expect(machines.answeredWithin('build-box', 30_000)).toBeNull();
+    expect(machines.answeredWithin('nowhere', 30_000)).toBeNull();
   });
 
   it('refuses a write to an offline machine before sending it', async () => {

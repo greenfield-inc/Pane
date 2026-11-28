@@ -928,6 +928,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       invokeIpc('remote-daemon:run-check-fix', { checkId, stage }),
     dismissCheck: (checkId: number): Promise<IPCResponse<RemotePaneConnectionState>> =>
       invokeIpc('remote-daemon:dismiss-check', { checkId }),
+    cancelSwitch: (computerId: string): Promise<IPCResponse<{ cancelled: boolean }>> =>
+      invokeIpc('remote-daemon:cancel-switch', computerId),
     onSetupProgress: (callback: (progress: RemoteHostSetupProgress) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, progress: RemoteHostSetupProgress) => callback(progress);
       ipcRenderer.on('remote-daemon:setup-progress', wrappedCallback);

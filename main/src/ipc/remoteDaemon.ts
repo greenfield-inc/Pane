@@ -122,17 +122,24 @@ export function registerRemoteDaemonHandlers(
       resyncRenderer: boolean;
     },
   ): Promise<RemoteDaemonConfig> {
-    const current = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
-    const result = await transition(current);
-    const next = normalizeRemoteDaemonConfig(result.next);
+    // A switch owns the connection until its config is written: a config write from elsewhere
+    // meanwhile still names the old machine and must not close the switch's connection.
+    const releaseSync = remotePaneClientController.holdConfigSync();
+    try {
+      const current = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
+      const result = await transition(current);
+      const next = normalizeRemoteDaemonConfig(result.next);
 
-    await configManager.updateConfig({ remoteDaemon: next });
-    if (result.resyncRenderer) {
-      if (next.client.mode === 'remote') remotePaneClientController.commitActivation();
-      else requestRendererRemoteResync();
+      await configManager.updateConfig({ remoteDaemon: next });
+      if (result.resyncRenderer) {
+        if (next.client.mode === 'remote') remotePaneClientController.commitActivation();
+        else requestRendererRemoteResync();
+      }
+
+      return next;
+    } finally {
+      releaseSync();
     }
-
-    return next;
   }
 
   ipcMain.handle('remote-daemon:get-config', async () => {
@@ -679,6 +686,16 @@ export function registerRemoteDaemonHandlers(
       return { success: true, data: remotePaneClientController.dismissCheck(checkId) };
     } catch (error) {
       return { success: false, error: getErrorMessage(error, 'Failed to close the connection checklist') };
+    }
+  });
+
+  // Out of band: a switch waiting on another's probes asks for them to stop, so it runs now (T-128, D-6).
+  ipcMain.handle('remote-daemon:cancel-switch', async (_event, computerId: PaneCommandValue) => {
+    try {
+      const id = decodeBoundary(computerId, boundary.nonEmptyString);
+      return { success: true, data: { cancelled: remotePaneClientController.cancelActivation(id) } };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error, 'Failed to cancel the machine switch') };
     }
   });
 

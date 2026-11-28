@@ -4,6 +4,7 @@ import { API } from '../utils/api';
 import { useConfigStore } from '../stores/configStore';
 import { buildMachineList, machineOsFromPlatform, type MachineEntry, type MachineOs } from '../utils/machineList';
 import { useConnectionPresence } from './useConnectionPresence';
+import { createLatestSwitch } from '../utils/latestSwitch';
 import type { TailnetMachineList } from '../../../shared/types/workspaceAccess';
 import type { RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
 import type { ComputerRoutesReport } from '../../../shared/types/remoteComputers';
@@ -22,9 +23,19 @@ interface UseMachinesOptions {
   wrapConnect?: <T>(connect: () => Promise<T>) => Promise<T>;
 }
 
-// Main does not serialize client transitions, so one switch at a time across the
-// sidebar and Settings, which each hold their own copy of this hook.
+// One switch at a time across the sidebar and Settings, which each hold their own copy of this
+// hook. A press during a switch waits and then runs, and a newer press replaces it (T-128, D-6).
 const useSwitching = create<{ id: string | null }>(() => ({ id: null }));
+// A press for another machine stops the switch still checking an older one, so the newer one starts now (D-6).
+const machineSwitches = createLatestSwitch(
+  (press: { machineId: string; computerId: string | undefined; job: () => Promise<MachineSelectOutcome> }) => press.job(),
+  {
+    // Only this sidebar's own switch, to the saved computer it named (review F-4).
+    cancel: (running, next) => {
+      if (running.computerId && running.machineId !== next.machineId) void API.remoteDaemon.cancelSwitch(running.computerId).catch(() => undefined);
+    },
+  },
+);
 
 function errorText(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message ? cause.message : fallback;
@@ -108,9 +119,7 @@ export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMach
     [connectionState, computers, tailnet, localName, localOs, connectionPresence, marks, machineStates],
   );
 
-  const select = useCallback(async (machine: MachineEntry, password?: string): Promise<MachineSelectOutcome> => {
-    if (machine.action === 'none' || useSwitching.getState().id) return { ok: true };
-    if (machine.action === 'password' && password === undefined) return { ok: false, needsPassword: true };
+  const switchTo = useCallback(async (machine: MachineEntry, password?: string): Promise<MachineSelectOutcome> => {
     const connect = wrapConnect ?? (<T,>(run: () => Promise<T>) => run());
     const failure = `Could not connect to ${machine.name}.`;
     useSwitching.setState({ id: machine.id });
@@ -140,6 +149,14 @@ export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMach
       if (mounted.current) void refresh();
     }
   }, [fetchConfig, refresh, wrapConnect]);
+
+  const select = useCallback(async (machine: MachineEntry, password?: string): Promise<MachineSelectOutcome> => {
+    if (machine.action === 'none') return { ok: true };
+    if (machine.action === 'password' && password === undefined) return { ok: false, needsPassword: true };
+    const result = await machineSwitches.request({ machineId: machine.id, computerId: machine.kind === 'local' ? undefined : machine.computer?.id, job: () => switchTo(machine, password) });
+    // A newer press replaced this one: it says nothing, and the newer one reports for both.
+    return result.superseded ? { ok: true } : result.value;
+  }, [switchTo]);
 
   return { machines, tailnet, listError, refreshing, refresh, select, switchingId };
 }
