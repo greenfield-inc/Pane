@@ -1,17 +1,25 @@
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { EventEmitter } from 'events';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IpcMain, IpcMainInvokeEvent } from 'electron';
 import { readProfilesSwitchFrom } from '../services/agentFarm/profilesFeature';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { PROFILE_SYNC_CHANNELS, PROFILE_SYNC_OFF_CODE } from '../../../shared/types/profileSync';
-import { registerProfileHandlers } from './profiles';
+import { profileSync, registerProfileHandlers } from './profiles';
 import type { AppServices } from './types';
+import type { ConfigManager } from '../services/configManager';
+import type { AppConfig } from '../types/config';
 
 /** The Profiles tab's channels (T-63 PR 5) behind the Profiles switch (D-474). */
 
 type Handler = Parameters<IpcMain['handle']>[1];
+
+function partial<Contract>(value: Partial<Contract>): Contract {
+  // SAFETY: each fixture supplies every member the profile handlers and sync service read (getConfig, the config-updated event).
+  return value as Contract;
+}
 
 const temporary: string[] = [];
 afterEach(() => {
@@ -87,5 +95,25 @@ describe('the Profiles channels', () => {
     expect(existsSync(path.join(paneDir, 'agent-farm', 'sync.json'))).toBe(false);
     on = true;
     expect(await registry.invoke(PROFILE_SYNC_CHANNELS.state, [{}])).toMatchObject({ plugins: {} });
+  });
+
+  it('starts syncing as soon as the switch goes back on (PR 6 QA)', async () => {
+    const paneDir = mkdtempSync(path.join(tmpdir(), 'pane-profiles-ipc-'));
+    temporary.push(paneDir);
+    let on = true;
+    readProfilesSwitchFrom(() => ({ sessionProfilesEnabled: on }));
+    const configManager = partial<ConfigManager>(Object.assign(new EventEmitter(), { getConfig: () => partial<AppConfig>({ sessionProfilesEnabled: on, machineId: 'a-id' }) }));
+    registerProfileHandlers({ handle: () => undefined }, partial<AppServices>({ configManager }), paneDir);
+    const service = profileSync();
+    if (!service) throw new Error('expected the profile sync service');
+    const request = vi.spyOn(service.coordinator, 'request');
+    service.start(null);
+    request.mockClear();
+    on = false;
+    configManager.emit('config-updated');
+    on = true;
+    configManager.emit('config-updated');
+    expect(request).toHaveBeenCalledTimes(1);
+    service.stop();
   });
 });
