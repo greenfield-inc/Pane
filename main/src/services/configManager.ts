@@ -5,6 +5,7 @@ import { DEFAULT_PANE_CHAT_AGENT, normalizePaneChatAgent } from '../../../shared
 import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../shared/types/appearance';
 import { DEFAULT_AUTO_PAUSE_HOURS, DEFAULT_CHAT_RELEASE_MINUTES } from '../../../shared/types/autoPause';
 import { DEFAULT_BACKGROUND_ACTIVITY } from '../../../shared/types/backgroundActivity';
+import { DEFAULT_PORT_PROBES_ENABLED, parsePortRanges } from '../../../shared/types/portProbes';
 import { createDefaultRemoteDaemonConfig, needsComputersConversion, normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { customLinkSchema, type CustomLink } from '../../../shared/types/customLinks';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
@@ -180,6 +181,8 @@ export class ConfigManager extends EventEmitter {
       keepAwakeWhilePluggedIn: false,
       keepAwakeOnBattery: false,
       backgroundActivity: DEFAULT_BACKGROUND_ACTIVITY,
+      portProbesEnabled: DEFAULT_PORT_PROBES_ENABLED,
+      portProbeExcludedPorts: '',
       resumePausedOnOpen: false,
       autoPauseEnabled: true,
       autoPauseAfterHours: DEFAULT_AUTO_PAUSE_HOURS,
@@ -570,6 +573,8 @@ export class ConfigManager extends EventEmitter {
 
   async updateConfig(updates: Partial<AppConfig>): Promise<AppConfig> {
     if (updates.defaultSessionResume) validateCustomCommandResume(updates.defaultSessionResume);
+    // Throws a PaneError naming the entry Settings cannot read, before anything is saved.
+    if (updates.portProbeExcludedPorts !== undefined) parsePortRanges(updates.portProbeExcludedPorts);
     for (const command of updates.customCommands ?? []) {
       if (command.resume) validateCustomCommandResume(command.resume);
     }

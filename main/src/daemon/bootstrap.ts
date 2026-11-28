@@ -94,6 +94,7 @@ import { panelManager } from '../services/panelManager';
 import { pausedMarkOf, type TerminalPanelState } from '../../../shared/types/panels';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { createListeningPortMonitor } from '../services/listeningPorts';
+import { portProbeSettingsOf } from '../../../shared/types/portProbes';
 import { BackgroundActivity } from '../services/backgroundActivity';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
 import { PhonePreviewHost } from './phonePreviews';
@@ -724,6 +725,16 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   // Terminal panels, agent CLIs (Claude, Codex) and chat tab agents all run processes inside a Pane.
   // Chat tab agents talk over stdio, not a PTY; their updates count as output too.
   const paneProcessManagers = () => [terminalPanelManager, ...CliToolRegistry.getInstance().getAllManagers(), getChatTabManager()];
+  // Settings › General › Ports. A hand-edited list that does not parse turns probes off; say so once per list.
+  let reportedProbeListError: string | undefined;
+  const portProbes = () => {
+    const settings = portProbeSettingsOf(configManager.getConfig());
+    if (settings.error && settings.error !== reportedProbeListError) {
+      console.warn(`[ListeningPorts] probes_off: portProbeExcludedPorts in config.json could not be read, so no port is probed until it is fixed. ${settings.error}`);
+    }
+    reportedProbeListError = settings.error;
+    return settings;
+  };
   const listeningPortMonitor = createListeningPortMonitor({
     terminalPanes: () => paneProcessManagers().flatMap(manager =>
       [...manager.getSessionPids()].flatMap(([sessionId, pids]) => {
@@ -734,11 +745,20 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     // Remote clients over the paired or the Tailscale transport. This desktop's own ports lists
     // ask for a read while they are on screen (useListeningPorts).
     watched: () => [remoteTransportController.getServer(), workspaceHost].some(server => server?.hasEventSubscriber('ports:changed')),
+    probes: portProbes,
     onChange: snapshot => {
       latestPorts = snapshot;
       publishPorts();
       void phonePreviews.update(snapshot);
     },
+  });
+  // A changed probe setting shows in the Ports list at once, not at the next output.
+  let probeSettingsKey = JSON.stringify(portProbeSettingsOf(configManager.getConfig()));
+  configManager.on('config-updated', () => {
+    const next = JSON.stringify(portProbeSettingsOf(configManager.getConfig()));
+    if (next === probeSettingsKey) return;
+    probeSettingsKey = next;
+    void listeningPortMonitor.refresh().catch(error => console.warn('[ListeningPorts] refresh_failed:', error));
   });
   // Ports pause while nobody is looking and catch up the moment someone is.
   backgroundActivity?.on('change', (away: boolean) => listeningPortMonitor.setPaused(away));

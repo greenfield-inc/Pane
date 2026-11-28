@@ -13,7 +13,7 @@ export const LISTENING_PORT_GROUP_ORDER: readonly ListeningPortGroup[] = ['pane-
 /** How often a shown ports list is read again while the host's terminals are quiet. */
 export const PORTS_QUIET_INTERVAL_MS = 60_000;
 
-/** `web` answered an HTTP request when first seen; `tcp` did not. */
+/** `web` answered an HTTP request when first seen; `tcp` did not, or was not asked (`unprobed`). */
 export type ListeningPortKind = 'web' | 'tcp';
 
 export interface ListeningPort {
@@ -23,6 +23,8 @@ export interface ListeningPort {
   process: string;
   group: ListeningPortGroup;
   kind: ListeningPortKind;
+  /** Set when probes are off or exclude this port: nothing connected to it, so `kind` is `tcp` unchecked. */
+  unprobed?: true;
   /** The Pane whose terminal or agent tab started the process, for `pane-terminal` ports. */
   sessionId?: string;
   paneName?: string;
@@ -61,6 +63,7 @@ const listeningPortsSnapshotSchema: BoundarySchema<ListeningPortsSnapshot> = bou
     process: boundary.string,
     group: boundary.enumeration(...LISTENING_PORT_GROUP_ORDER),
     kind: boundary.enumeration('web', 'tcp'),
+    unprobed: boundary.optional(boundary.literal(true)),
     sessionId: boundary.optional(boundary.string),
     paneName: boundary.optional(boundary.string),
     phoneUrl: boundary.optional(boundary.string),

@@ -112,6 +112,10 @@ export interface AppConfig {
   keepAwakeOnBattery?: boolean;
   // When Pane pauses its own background checks (ports, usage) while nobody is looking (default balanced)
   backgroundActivity?: BackgroundActivityProfile;
+  // Ports list: send HEAD / to each listener to tell web servers apart (default on), except on
+  // these ports and ranges, e.g. "5173, 9000-9100" (parsePortRanges, shared/types/portProbes.ts)
+  portProbesEnabled?: boolean;
+  portProbeExcludedPorts?: string;
   // Pause: selecting a paused Pane or Session chat resumes it (default off)
   resumePausedOnOpen?: boolean;
   // Machine health thresholds and switches (defaults in MACHINE_HEALTH_DEFAULTS, shared/types/machineHealth.ts)
@@ -265,6 +269,8 @@ export interface UpdateConfigRequest {
   keepAwakeWhilePluggedIn?: boolean;
   keepAwakeOnBattery?: boolean;
   backgroundActivity?: AppConfig['backgroundActivity'];
+  portProbesEnabled?: AppConfig['portProbesEnabled'];
+  portProbeExcludedPorts?: AppConfig['portProbeExcludedPorts'];
   resumePausedOnOpen?: boolean;
   machineHealth?: MachineHealthSettings;
   autoPauseEnabled?: boolean;
