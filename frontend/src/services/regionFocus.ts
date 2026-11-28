@@ -595,7 +595,7 @@ export function handleSidebarListKey(event: KeyboardEvent): void {
       // Session's box, which takes focus, and the Session engages there.
       const machineId = item.getAttribute(SESSION_CURSOR_MACHINE_ATTRIBUTE);
       const sessionId = item.getAttribute(SESSION_CURSOR_ATTRIBUTE);
-      if (event.key.length === 1 && cursorFollowEnabled() && sessionId && machineId && machineId !== windowMachineId() && takesTyping({ machineId, sessionId })) {
+      if (event.key.length === 1 && cursorFollowEnabled() && sessionId && machineId && takesTyping({ machineId, sessionId }, windowMachineId())) {
         event.preventDefault();
         const target = { machineId, sessionId };
         holdRemoteText(target, (useRemoteEngage.getState().held[engageKey(target)]?.text ?? '') + event.key);

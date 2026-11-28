@@ -63,6 +63,14 @@ async function setup(switchMachine: (machineId: string) => Promise<MachineSelect
 
 const target = { machineId: 'build', sessionId: 'b' };
 
+/** The page as the engage reads it: what has focus, and the chat box a selector finds. */
+interface StubPage {
+  body: object;
+  activeElement: object;
+  querySelector: (selector: string) => object | null;
+  querySelectorAll: () => never[];
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
@@ -242,7 +250,7 @@ describe('typing, Enter or a click engages, and what was typed arrives once (T-1
     // clears that chat (its Session remounts).
     const body = {};
     const box = { value: 'engage-typed-17958' };
-    const page = { body, activeElement: box as object, querySelector: (selector: string) => (selector.includes('data-chat-composer') ? box : null), querySelectorAll: () => [] };
+    const page: StubPage = { body, activeElement: box, querySelector: selector => (selector.includes('data-chat-composer') ? box : null), querySelectorAll: () => [] };
     vi.stubGlobal('document', page);
     link.noteWindowHostReset();
     stopTaking();
@@ -272,7 +280,7 @@ describe('typing, Enter or a click engages, and what was typed arrives once (T-1
     handover.chatTabShown('panel-b');
     const body = {};
     const box = { value: 'hi there' };
-    const page = { body, activeElement: body as object, querySelector: (selector: string) => (selector.includes('data-chat-composer') ? box : null), querySelectorAll: () => [] };
+    const page: StubPage = { body, activeElement: body, querySelector: selector => (selector.includes('data-chat-composer') ? box : null), querySelectorAll: () => [] };
     vi.stubGlobal('document', page);
     // Focus moved on (a click elsewhere): the reset is not about the text there.
     link.noteWindowHostReset();
@@ -404,10 +412,44 @@ describe('typed text is never lost (review 1781 SF-3)', () => {
   it('a Session the mirror holds no chat for does not take typing on its row (it keeps Enter)', async () => {
     const { engage } = await setup(async () => ({ ok: true }));
     expect(engage.takesTyping(target)).toBe(true);
+    // With the window on that machine its rows are the window's own: they keep their keys.
+    expect(engage.takesTyping(target, 'build')).toBe(false);
     const remote = await import('../stores/remoteSessionView');
     // SAFETY: engaging reads only the record name and chat tab id; this Session has no chat in the mirror.
     remote.useRemoteSessionView.setState({ entries: { [remote.remoteSessionKey('build', 'b')]: { readAt: 0, snapshot: { session: { id: 'b', name: 'Release' } } as never } } });
     expect(engage.takesTyping(target)).toBe(false);
+  });
+
+  it('Enter or a click on a row the mirror was never read for: keys typed on the row go into the held box, and the chat there takes them once it paints (base rig)', async () => {
+    const switched = deferred<MachineSelectOutcome>();
+    const { engage, handover, taken, state } = await setup(() => switched.promise);
+    const remote = await import('../stores/remoteSessionView');
+    // The cursor never showed this row (a click, or focus that came another way): nothing of it is read yet.
+    remote.useRemoteSessionView.setState({ entries: {} });
+    expect(engage.takesTyping(target)).toBe(false);
+
+    engage.engageRemoteSession(target, 'click');
+    // Its held view is on screen with its box: the row's keys go there now.
+    expect(engage.takesTyping(target)).toBe(true);
+    engage.holdRemoteText(target, 'engage-enter');
+    engage.engageRemoteSession(target, 'type');
+    expect(state().engaging).toMatchObject({ ...target, cause: 'type' });
+
+    switched.resolve({ ok: true });
+    await vi.waitFor(() => expect(state().engaging?.switched).toBe(true));
+    // The window is on that machine now, so its row is the window's own, yet it still takes the keys until the engage lands.
+    expect(engage.takesTyping(target, 'build')).toBe(true);
+    // The window's own Session list (the host's, after the switch) names the Session's chat.
+    const { useOrchestrationSessionStore } = await import('../stores/orchestrationSessionStore');
+    // SAFETY: the engage reads only the record's id, agent and chat tab ids.
+    useOrchestrationSessionStore.setState({ sessions: [{ id: 'b', agent: 'claude', panelIds: { claude: 'panel-b' } } as never] });
+    engage.holdRemoteText(target, 'engage-enter-1');
+    handover.chatTabShown('panel-b');
+    // It lands as the chat paints, not on the live view's 3 s fallback.
+    expect(taken).toEqual([expect.objectContaining({ text: 'engage-enter-1', focused: true, send: false })]);
+    expect(state().engaging).toBeUndefined();
+    // Landed: the window's own row keeps its keys again.
+    expect(engage.takesTyping(target, 'build')).toBe(false);
   });
 
   it('text that lands with no chat to take it stays held, with a note saying where it is', async () => {

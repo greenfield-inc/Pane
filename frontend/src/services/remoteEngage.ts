@@ -23,6 +23,7 @@ import { latestMachineSwitchTicket, withdrawMachineSwitch } from '../hooks/useMa
 import { showActionError } from '../stores/errorStore';
 import { switchFailureReason } from '../utils/switchErrorText';
 import { useWindowLink } from '../stores/windowLink';
+import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { chatDraftTakerMounted, handOverChatDraft, onChatDraftTaker, onChatTabShown } from '../utils/chatDraftHandover';
 import { useAllMachinesStore, isMachineDimmed } from '../stores/allMachinesStore';
 import { cachedRemoteSession, heldRemoteChat, remoteSessionKey } from '../stores/remoteSessionView';
@@ -208,7 +209,8 @@ function listen(): void {
   });
   onChatTabShown(panelId => {
     const engaging = useRemoteEngage.getState().engaging;
-    if (!engaging || engaging.panelId !== panelId) return;
+    if (!engaging || engagedChatPanel(engaging) !== panelId) return;
+    if (engaging.panelId !== panelId) useRemoteEngage.setState({ engaging: { ...engaging, panelId } });
     if (engaging.switched) land();
     else shownMeanwhile.add(panelId);
   });
@@ -300,12 +302,31 @@ function mirroredChatPanel(target: EngageTarget): string | undefined {
 }
 
 /**
- * Whether typing on the Session's sidebar row goes into its message box (T-132): only when the
- * mirror holds its chat, so there is a box to show it in and a chat there to take it. Otherwise
- * the row keeps Enter, and no key is taken that nothing would show (review 1781 SF-3).
+ * The Session's chat tab as the window's own Session list names it, once the window is on that
+ * machine: an engage of a row the cursor never showed has no mirror copy read to name it.
  */
-export function takesTyping(target: EngageTarget): boolean {
-  return mirroredChatPanel(target) !== undefined;
+function liveChatPanel(target: EngageTarget): string | undefined {
+  const record = useOrchestrationSessionStore.getState().sessions.find(session => session.id === target.sessionId);
+  return record?.panelIds?.[record.agent];
+}
+
+/** The chat tab that takes what was typed into the engaging Session: the mirror's, else (switched) the window's. */
+function engagedChatPanel(engaging: Engaging): string | undefined {
+  return engaging.panelId ?? mirroredChatPanel(engaging) ?? (engaging.switched ? liveChatPanel(engaging) : undefined);
+}
+
+/**
+ * Whether typing on the Session's sidebar row goes into its message box (T-132): only on another
+ * machine than the window's, when the mirror holds its chat, so there is a box to show it in and a
+ * chat there to take it, or while that Session is engaging. Otherwise the row keeps Enter, and no
+ * key is taken that nothing would show (review 1781 SF-3).
+ */
+export function takesTyping(target: EngageTarget, windowMachineId?: string): boolean {
+  // The Session engaging shows its held view, whatever the mirror has read of it and wherever the
+  // window is now: its row's keys go into the hold until it lands (a row the cursor never showed).
+  if (sameTarget(useRemoteEngage.getState().engaging, target)) return true;
+  // A row of the machine the window shows is the window's own: it keeps its keys.
+  return target.machineId !== windowMachineId && mirroredChatPanel(target) !== undefined;
 }
 
 /** What `clickEngages` reads of a press in the read-only view. */
@@ -426,8 +447,9 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
 
 /** The window is on the Session's machine: the chat there paints from what the mirror held, and takes over once it does. */
 function switched(target: EngageTarget, engagedPanelId: string | undefined): void {
-  // The mirror may have learned the chat during the switch (its peek landed meanwhile).
-  const panelId = engagedPanelId ?? mirroredChatPanel(target);
+  // The mirror may have learned the chat during the switch (its peek landed meanwhile), or only
+  // the window's own list names it (a row the cursor never showed).
+  const panelId = engagedPanelId ?? mirroredChatPanel(target) ?? liveChatPanel(target);
   const chat = heldRemoteChat(cachedRemoteSession(target.machineId, target.sessionId));
   // SAFETY: the window's own chat client is what the live chat tab reads through (ChatTabRoute).
   const liveClient = window.electronAPI?.chatTab as ChatTabClient | undefined;
@@ -521,7 +543,7 @@ function land(): void {
   if (!engaging) return;
   // Ended first, so focus moving into the chat there is not taken back to the held box.
   useRemoteEngage.setState({ engaging: undefined, settling: true });
-  const panelId = engaging.panelId ?? mirroredChatPanel(engaging);
+  const panelId = engaging.panelId ?? mirroredChatPanel(engaging) ?? liveChatPanel(engaging);
   landed = panelId ? { machineId: engaging.machineId, sessionId: engaging.sessionId, panelId, at: Date.now() } : undefined;
   clearTimeout(settleCap);
   settleCap = setTimeout(endEngageSettling, SETTLE_CAP_MS);
@@ -540,7 +562,7 @@ function deliverHeld(engaging: EngageTarget & { panelId?: string }, { focused, s
   const key = engageKey(target);
   const text = useRemoteEngage.getState().held[key];
   if (!text) return;
-  const panelId = engaging.panelId ?? mirroredChatPanel(target);
+  const panelId = engaging.panelId ?? mirroredChatPanel(target) ?? liveChatPanel(target);
   if (!panelId) {
     keepUnsent(target);
     const message = `Not sent: ${sessionName(target)} on ${machineName(target.machineId)} has no chat to take what you typed. It is kept with this Session's row: "${text.text}".`;
