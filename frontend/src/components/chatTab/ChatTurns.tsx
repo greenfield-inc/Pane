@@ -1,5 +1,5 @@
-import { memo, useContext, useMemo, useRef, useState, type ComponentProps } from 'react';
-import { ChatBlocksContext } from './chatRendering';
+import { memo, useContext, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react';
+import { ChatBlocksContext, type ChatPhoto } from './chatRendering';
 import { AlertCircle, Brain, ChevronDown, ChevronRight, Circle, CircleCheck, Eye, LoaderCircle, Pencil, Smartphone, Terminal, Wrench, XCircle } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import { markdownBlocks } from './markdownBlocks';
@@ -221,18 +221,24 @@ export function WorkerNoteLine({ note, onOpen }: { note: WorkerNote; onOpen?: (p
  * One turn (D-192): the agent's text, with its activity folded into one row. While
  * the turn runs the row says what it's doing now; afterwards, how long it worked.
  */
-export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions, latest = false }: { turn: ChatTurn; waiting: ReadonlySet<string>; actions: ChatTurnActions; latest?: boolean }) {
-  if (turn.divider) return <ProfileDivider text={turn.divider.text} at={turn.divider.at} />;
-  return <ChatTurnBody turn={turn} waiting={waiting} actions={actions} latest={latest} />;
+export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions, latest = false, photo, author }: {
+  turn: ChatTurn; waiting: ReadonlySet<string>; actions: ChatTurnActions; latest?: boolean;
+  /** The agent's photo (T-63 round 5); without it, replies and dividers carry none. */
+  photo?: ChatPhoto;
+  /** The profile that wrote this reply; none: no photo beside it. */
+  author?: string;
+}) {
+  if (turn.divider) return <ProfileDivider text={turn.divider.text} at={turn.divider.at} mark={photo && turn.divider.profile ? photo.avatar(turn.divider.profile, 16) : undefined} />;
+  return <ChatTurnBody turn={turn} waiting={waiting} actions={actions} latest={latest} mark={photo && author ? photo.avatar(author, 28) : undefined} />;
 });
 
-/** Where the Session's profile changed (T-63): "Switched to Greenfield planner · conversation kept". */
-function ProfileDivider({ text, at }: { text: string; at: string }) {
+/** Where the Session's profile changed (T-63): "Switched to Greenfield planner · conversation kept", with the new profile's photo. */
+function ProfileDivider({ text, at, mark }: { text: string; at: string; mark?: ReactNode }) {
   const time = messageTime(at);
-  return <p className="chat-divider" role="separator" data-testid="chat-profile-divider" title={time?.full}><span>{text}</span></p>;
+  return <p className="chat-divider" role="separator" data-testid="chat-profile-divider" title={time?.full}><span className="chat-divider-text">{mark}{text}</span></p>;
 }
 
-function ChatTurnBody({ turn, waiting, actions, latest }: { turn: ChatTurn; waiting: ReadonlySet<string>; actions: ChatTurnActions; latest: boolean }) {
+function ChatTurnBody({ turn, waiting, actions, latest, mark }: { turn: ChatTurn; waiting: ReadonlySet<string>; actions: ChatTurnActions; latest: boolean; mark?: ReactNode }) {
   const [open, setOpen] = useState(false);
   // D-202: the latest turn says when it finished; every message shows its time on hover.
   const { before, after, activity, fold: row, ended } = turnDisplay(turn, { latest, waiting });
@@ -252,6 +258,8 @@ function ChatTurnBody({ turn, waiting, actions, latest }: { turn: ChatTurn; wait
   </div>;
   return <div className="chat-turn" data-anchor-id={turn.id} data-running={turn.running}>
     <UserMessage turn={turn} />
+    {/* Beside the reply's first line, left of the column; shown only when the chat is wide enough (chatTab.css). */}
+    {mark && (before.length > 0 || fold || after.length > 0) && <div className="chat-reply-photo" data-testid="chat-reply-photo" aria-hidden="true"><span className="chat-reply-photo-mark">{mark}</span></div>}
     <div className="contents" title={ended?.full}>{before.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
     {fold}
     {!open && actions.device && pinnedMarkers(activity, latest ? actions.device.openedHere : []).map(marker => <PinnedDeviceCard key={marker.panelId} marker={marker} device={actions.device!} />)}

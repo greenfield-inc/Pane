@@ -16,7 +16,7 @@ import { sessionChatLaunch } from './chatTabs/launch';
 import { agentFarmConfigRoot, createPaneSessionSnapshot, listPaneAgentFarmProfiles, paneAgentFarmHarness } from './agentFarm/bundledAgentFarm';
 import { ReceiptHashes, snapshotLocation, snapshotPluginHashes, type SessionSnapshot } from './agentFarm/sessionSnapshot';
 import { installedPluginHash, profilePlugin } from './agentFarm/agentFarmProfiles';
-import { plainProfileAgent, plainProfileRef, profileDisplayName, profileSwitchEffect } from '../../../shared/agentProfiles';
+import { dividerProfiles, launchProfileRef, plainProfileAgent, plainProfileRef, profileDisplayName, profileSwitchEffect } from '../../../shared/agentProfiles';
 import { profilesEnabled } from './agentFarm/profilesFeature';
 import type { AgentFarmProfileList, SessionAgentProfile } from '../../../shared/types/agentFarmProfiles';
 import type { SessionAdoption } from './chatTabs/switchToChat';
@@ -740,7 +740,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         this.chatTabs().relaunch(fromPanel.id, relaunch);
       } else {
         if (toPanel) this.chatTabs().relaunch(toPanel.id, relaunch);
-        else await this.ensurePanelForAgent(next, false, { divider: { leading: true, text: divider, at: new Date().toISOString() }, transcript, reason });
+        else await this.ensurePanelForAgent(next, false, { divider: { leading: true, text: divider, at: new Date().toISOString(), ...dividerProfiles(launchProfileRef(next.agent, chat.launch), previous.ref ?? plainProfileRef(previous.agent)) }, transcript, reason });
         void this.chatTabs().stop(fromPanel.id, { message: `${current.name} now runs ${name}, in its ${configuredAgent(target.agent).title} tab.`, next: `Switch the Session back to a ${configuredAgent(current.agent).title} profile to use this tab again.` })
           .catch(error => console.warn(`[Sessions] ${current.name}'s ${configuredAgent(current.agent).title} tab did not stop: ${reasonOf(error)}`));
       }

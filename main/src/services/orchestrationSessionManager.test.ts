@@ -549,7 +549,8 @@ describe('OrchestrationSessionManager', () => {
         expect(codexPanel?.state.customState).toMatchObject({
           agent: 'codex', launch: { kind: 'profile', profile: 'greenfield/product-researcher' },
           initialInput: expect.stringContaining('saved in /sessions/s/transcripts/old.md'),
-          dividers: [expect.objectContaining({ leading: true, text: 'Switched to Greenfield product-researcher · new Codex conversation, given the transcript' })],
+          // The divider names who writes from here on, and who wrote before (T-63 round 5).
+          dividers: [expect.objectContaining({ leading: true, text: 'Switched to Greenfield product-researcher · new Codex conversation, given the transcript', profile: 'greenfield/product-researcher', previous: 'pane/claude' })],
         });
         expect(port.stop).toHaveBeenCalledWith(created.panel.id, expect.objectContaining({ message: expect.stringContaining('now runs Greenfield product-researcher') }));
         // Back to Claude: its tab exists, so it restarts on a new conversation given Codex's transcript.

@@ -15,3 +15,15 @@ export interface ChatRendering {
   paneId?: string;
 }
 export const ChatBlocksContext = createContext<ChatRendering>({});
+
+/**
+ * The agent's photo in the chat (T-63 round 5), given by the desktop's chat tab while Profiles is
+ * on: beside each reply when the chat is at least 800 px wide, else with its name at the top.
+ * `current` is the profile the tab runs now; `avatar` draws a profile ref's photo.
+ */
+export interface ChatPhoto {
+  current?: string;
+  avatar: (ref: string, size: number) => ReactNode;
+  /** The name and ref shown at the top of a narrow chat, for the current profile. */
+  heading: ReactNode;
+}

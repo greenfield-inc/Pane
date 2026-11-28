@@ -243,6 +243,25 @@ dialog.chat-confirm { position:static; inset:auto; width:auto; max-width:none; m
   .chat-user-row:hover .chat-copy,.chat-turn:hover .chat-response-actions .chat-copy,.chat-message-actions .chat-copy:focus-visible,.chat-message-actions .chat-copy[data-state=copied],.chat-message-actions .chat-copy[data-state=failed] { opacity:1; }
 }
 .chat-header-bar { display:flex; flex-shrink:0; justify-content:flex-end; padding:4px 12px 0; }
+/*
+ * The agent's photo (T-63 round 5): a chat pane at least 800 px wide (the 44rem column and room on
+ * its left) shows it beside each reply; a narrower one shows it with the name at the top instead.
+ */
+.chat-tab[data-photo] { container:chat-pane / inline-size; }
+.chat-header-who { display:flex; flex:1 1 auto; align-items:center; gap:8px; min-width:0; padding-left:4px; font-size:13px; }
+.chat-header-who-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; color:var(--chat-foreground); }
+.chat-header-who-ref { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; color:var(--chat-muted-foreground); }
+/* The name gives way before Clear and Copy conversation do; the ref goes first in a tight chat. */
+.chat-tab[data-photo] .chat-header-bar .chat-copy-all { flex-shrink:0; white-space:nowrap; }
+@container chat-pane (max-width:480px) { .chat-header-who-ref { display:none; } }
+.chat-divider-text { display:inline-flex; align-items:center; gap:6px; }
+.chat-reply-photo { display:none; }
+@container chat-pane (min-width:800px) {
+  .chat-header-who { display:none; }
+  /* In the flow at the reply's first line, taking no room: the next gap is cancelled. */
+  .chat-reply-photo { display:block; position:relative; height:0; margin-bottom:-10px; }
+  .chat-reply-photo-mark { position:absolute; top:0; left:-46px; display:flex; }
+}
 .chat-code { position:relative; }
 .chat-code .chat-code-copy { position:absolute; top:6px; right:6px; background:var(--chat-background); }
 @media (hover:hover) {

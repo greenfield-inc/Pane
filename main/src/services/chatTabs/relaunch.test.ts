@@ -76,6 +76,12 @@ function rows(view: ChatTabView): string[] {
   }));
 }
 
+/** The divider rows' content, as the renderer reads it. */
+function dividerContents(view: ChatTabView): unknown[] {
+  return (view.transcript?.messages ?? []).flatMap(message => message.parts.flatMap(part =>
+    part.type === 'content' && JSON.stringify(part.content).includes('pane_divider') ? [JSON.parse(JSON.stringify(part.content))] : []));
+}
+
 async function idle(manager: ChatTabManager) {
   await expect.poll(() => manager.relaunchPending('p1') || manager.view('p1').status !== 'idle', { timeout: 15_000 }).toBe(false);
 }
@@ -112,12 +118,15 @@ describe('chat tab relaunch (T-63 Reload and Switch profile)', () => {
     expect(privateFiles(spool)).toEqual([]);
     const expected = ['you: hello', 'agent: You said: hello', 'you: turn 1', 'agent: .', 'agent: Done.', '--- Switched to Lab two · conversation kept ---'];
     expect(rows(manager.view('p1'))).toEqual(expected);
+    // The divider names the profile it switched to and the one before, so each reply keeps its author's photo (T-63 round 5).
+    expect(dividerContents(manager.view('p1'))).toEqual([{ type: 'pane_divider', text: 'Switched to Lab two · conversation kept', at: expect.any(String), profile: 'lab/two', previous: 'lab/one' }]);
 
     // A message after it lands below the divider, and a later restart replays it in the same place.
     manager.send('p1', { operationId: 'c', text: 'after' });
     await expect.poll(() => manager.receipt('p1', 'c')?.state).toBe('completed');
     await manager.restart('p1');
     expect(rows(manager.view('p1'))).toEqual([...expected, 'you: after', 'agent: You said: after']);
+    expect(dividerContents(manager.view('p1'))).toMatchObject([{ profile: 'lab/two', previous: 'lab/one' }]);
   });
 
   it('starts a new conversation given the outgoing transcript when the switch can\'t keep it', { timeout: 30_000 }, async () => {

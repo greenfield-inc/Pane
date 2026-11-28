@@ -641,11 +641,14 @@ sidebar's **Profiles** tab lists every profile Agent Farm's
 `profiles list --json` lists (greenfield's Orchestrator, Business and SEO, and
 any of your own), pinned ones first, each with Agent Farm's title, description
 and SVG photo. Every other role is an agent a profile links to, and shows in its
-tree. With Profiles off there is no tab and its channels refuse. A profile opens on its cover page,
+tree. While the tab is open, the left sidebar lists the same profiles under its
+**Profiles** row (pinned first, then New profile), and Sessions move down until
+you leave; one click there opens any profile. With Profiles off there is no tab
+and its channels refuse. A profile opens on its cover page,
 `covers/<profile>.html` or `.md` in the plugin when there is one (HTML is shown in
 a sandboxed frame with no scripts and no network), otherwise one Pane makes from
-its title, description, identity, subagents, skills and references. Beside it, a
-tree holds that profile's own files (its identity, instructions, skills,
+its title, description, identity, subagents, skills and references. On its right,
+a **Files** sidebar holds that profile's own files (its identity, instructions, skills,
 references and settings) and, under Subagents, the agents it links to, drawn from
 the listing's `tree`. Each linked agent says how it runs (inside its parent,
 its own process, or its own launch), whether it has Claude and Codex versions, and
@@ -817,8 +820,17 @@ it has; a `stop` still ending the agent is waited for too. A kept conversation i
 loaded again with the new launch; `loadFallback` names the private transcript (in
 the tab's chat-tabs folder) a failed load falls back to. Each change adds a `dividers` entry, a
 `pane_divider` row that the history replay puts back after the message it followed,
-as it does turn times. With Profiles off, nothing calls it, and a request still
+as it does turn times. The entry names the profile the tab runs from there on
+(`profile`) and the one before (`previous`), as refs (`pane/<agent>` for the agent
+on its own). With Profiles off, nothing calls it, and a request still
 waiting is dropped.
+
+With Profiles on, a Session's chat, and any chat tab running a named profile, shows
+the agent's photo: on its tab in place of the agent mark, on each divider (the new
+profile's), and beside each reply when the chat pane is at least 800 px wide;
+narrower, the photo and the profile's name sit at the top of the chat instead. Each
+reply keeps the photo of the profile that wrote it, read from the dividers around it;
+a reply before a divider saved without its profiles shows none.
 
 ## Older clients
 
