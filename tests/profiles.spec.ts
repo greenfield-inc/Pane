@@ -130,12 +130,13 @@ const PALETTE_PROFILES: AgentFarmProfileEntry[] = [
   { ref: 'greenfield/seo', plugin: 'greenfield', version: '0.1.0', harness: 'claude', hidden: false, title: 'SEO' },
 ];
 
-interface ProfilesOptions { theme?: string; saveError?: string; pins?: string[]; on?: boolean; sync?: ProfileSyncStatus; recovered?: ProfileRecovery[] }
+interface ProfilesOptions { theme?: string; saveError?: string; pins?: string[]; on?: boolean; sync?: ProfileSyncStatus; recovered?: ProfileRecovery[]; adjust?: (data: ReturnType<typeof fixture>) => void }
 
 async function installProfiles(page: Page, options: ProfilesOptions = {}): Promise<void> {
   await page.setViewportSize({ width: 1440, height: 900 });
   const data = fixture();
   if (options.recovered) data.overview.recovered = options.recovered;
+  options.adjust?.(data);
   await installSessionsFixture(page, [
     { ...sessionFixture('s1', 'Session profiles plan', '', '', '2026-11-25T08:00:00.000Z'), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h1' } },
     { ...sessionFixture('s2', 'Weekend blog post', '', '', '2026-11-25T08:01:00.000Z'), agentProfile: { ref: 'pane/claude', hash: 'h' } },
@@ -271,6 +272,31 @@ test('the tree holds only the profile\'s files; folders open and close; a subage
   await expect(tree.getByTestId('profiles-tree-orchestrator/skills/plan')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('profiles-list')).toBeVisible();
+});
+
+test('a linked agent with its own cover still says how it runs and gives its command (review F-8)', async ({ page }) => {
+  await installProfiles(page, {
+    adjust: data => {
+      // The advisor is a process link to a profile of the same plugin with a cover of its own.
+      const greenfield = data.overview.plugins[0];
+      const business = greenfield.profiles.find(item => item.name === 'business')!;
+      business.cover = 'covers/business.html';
+      greenfield.files = [...greenfield.files, 'covers/business.html'].sort();
+      data.files['greenfield/covers/business.html'] = '<html><body><h1>Business cover</h1><p>Answers support tickets.</p></body></html>';
+      const orchestrator = greenfield.profiles.find(item => item.name === 'orchestrator')!;
+      const subagents = orchestrator.tree.find(node => node.kind === 'folder' && node.label === 'Subagents');
+      const advisor = subagents?.kind === 'folder' ? subagents.children.find(node => node.kind === 'subagent' && node.alias === 'advisor') : undefined;
+      if (advisor?.kind === 'subagent') advisor.profile = 'greenfield/business';
+    },
+  });
+  await page.getByTestId('profiles-nav').click();
+  await page.getByTestId('profile-row-greenfield-orchestrator').click();
+  await page.getByRole('tree', { name: 'greenfield/orchestrator files' }).getByTestId('profiles-tree-orchestrator/sub:advisor').click();
+  await expect(page.getByTestId('profiles-html-preview')).toBeVisible();
+  await expect(page.getByTestId('profiles-generated-cover')).toHaveCount(0);
+  await expect(page.getByTestId('profiles-cover-link')).toContainText('advisor · greenfield/advisor');
+  await expect(page.getByTestId('profiles-cover-command')).toHaveText('agent-farm run greenfield/advisor');
+  await shot(page, 'linked-custom-cover');
 });
 
 test('the tree says how each agent runs, and implementer ↔ reviewer stops at a cycle node', async ({ page }) => {
