@@ -137,7 +137,12 @@ export function ProfileTree({ plugin, profile, file, selectedId, onSelect, onOpe
 
   const coverSelected = coverId === '';
   return (
-    <div className="flex w-[280px] shrink-0 flex-col overflow-y-auto border-r border-border-primary py-2" data-testid="profiles-tree">
+    // Round 5, layout (a): a right sidebar beside the file, headed Files.
+    <div className="flex w-[260px] shrink-0 flex-col overflow-y-auto border-l border-border-primary bg-surface-secondary pb-2" data-testid="profiles-tree">
+      <div className="flex h-[34px] shrink-0 items-center justify-between px-4 pt-1" aria-hidden="true">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-text-tertiary">Files</span>
+        <span className="text-[11.5px] text-text-tertiary">and subagents</span>
+      </div>
       <div ref={treeRef} role="tree" aria-label={`${profile.ref} files`} onKeyDown={onKeyDown}>
         <button
           type="button"

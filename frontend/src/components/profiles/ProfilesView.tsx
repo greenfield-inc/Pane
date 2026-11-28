@@ -15,12 +15,12 @@ import { Button } from '../ui/Button';
 import { Dropdown } from '../ui/Dropdown';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { isTypingTarget, overlayOpen } from '../todos/todosNavigation';
-import { TODOS_HEADER_BUTTON, TODOS_PILL, TODOS_PILL_OFF } from '../todos/todoStyles';
+import { TODOS_HEADER_BUTTON } from '../todos/todoStyles';
 import { ProfileAvatar } from './ProfileAvatar';
 import { PROFILES_FIND_ID, ProfileFilePane } from './ProfileFilePane';
 import { useSurfaceFind } from '../find/surfaceFind';
 import { ProfileTree } from './ProfileTree';
-import { isPinned, pinnedFirst, togglePinnedProfile, usePinnedProfiles } from './profilePins';
+import { isPinned, splitPinned, togglePinnedProfile, usePinnedProfiles } from './profilePins';
 import { PHOTO_ACCEPT, PHOTO_SAMPLES, readSvgPhoto } from './profilePhotos';
 import { leaveProfiles } from './profilesNavigation';
 import { directSubagents } from './profilePreview';
@@ -152,9 +152,10 @@ function PinButton({ profile, pinned, className }: { profile: ProfileSummary; pi
 }
 
 /**
- * Profiles (T-63 PR 5, design round 4 "Tree + preview"): this computer's top-level Agent Farm
- * profiles, pinned first. A profile opens on its cover page, with only its own files in a tree
- * beside it, previewed first and edited with Edit. Save checks the plugin with Agent Farm; Sessions
+ * Profiles (T-63 PR 5; design round 5, layout (a) "Profiles in the sidebar"): this computer's
+ * top-level Agent Farm profiles, pinned first, in the list page and in the app sidebar while the tab
+ * is open. A profile opens on its cover page, with only its own files in a tree in a right sidebar,
+ * previewed first and edited with Edit. Save checks the plugin with Agent Farm; Sessions
  * using it then show the changed dot. Pane's own profiles can be edited, become "Edited", and
  * Restore brings Pane's version back (A-3). Esc or ⌘[ goes back.
  */
@@ -167,7 +168,9 @@ export function ProfilesView() {
   const back = useProfilesStore(state => state.back);
   const [notice, setNotice] = useState<{ key: number; text: string } | null>(null);
   const notify = useCallback((text: string) => setNotice({ key: Date.now(), text }), []);
-  const [creating, setCreating] = useState(false);
+  // New profile opens from the list page's button or the sidebar's New profile row (round 5).
+  const creating = useProfilesStore(state => state.creating);
+  const setCreating = useProfilesStore(state => state.setCreating);
   const [syncing, setSyncing] = useState(false);
   const loadSync = useProfilesStore(state => state.loadSync);
   const follow = useProfilesStore(state => state.follow);
@@ -296,12 +299,10 @@ function ProfileList({ plugins }: { plugins: ProfilePlugin[] }) {
   const used = useSessionsByProfile();
   const pins = usePinnedProfiles();
   const listRef = useRef<HTMLDivElement>(null);
-  const all = plugins.flatMap(plugin => plugin.profiles.map(profile => ({ plugin, profile })));
-  const pinned = pinnedFirst(all.filter(item => isPinned(pins, item.profile.ref)), pins, item => item.profile.ref);
-  const rest = all.filter(item => !isPinned(pins, item.profile.ref));
+  const { pinned, rest } = splitPinned(plugins, pins);
   // Keys belong to the list once it is open: the first profile takes focus.
   useEffect(() => { listRef.current?.querySelector<HTMLElement>('[data-profiles-item]')?.focus({ preventScroll: true }); }, []);
-  if (!all.length) {
+  if (!pinned.length && !rest.length) {
     return <p className="mx-auto mt-8 max-w-[820px] px-6 text-[13px] text-text-secondary">No profiles here yet. Use New profile to make one.</p>;
   }
   const first = (pinned[0] ?? rest[0])?.profile.ref;
@@ -350,7 +351,6 @@ function ProfilesFooter() {
 }
 
 function ProfileDetail({ plugin, profile, file, notify }: { plugin: ProfilePlugin; profile: ProfileSummary; file: string; notify: (text: string) => void }) {
-  const back = useProfilesStore(state => state.back);
   const restore = useProfilesStore(state => state.restore);
   const openFile = useProfilesStore(state => state.openFile);
   const pins = usePinnedProfiles();
@@ -385,7 +385,6 @@ function ProfileDetail({ plugin, profile, file, notify }: { plugin: ProfilePlugi
   return (
     <>
       <div className="flex h-[54px] shrink-0 items-center gap-2.5 border-b border-border-primary px-4">
-        <button type="button" className={cn(TODOS_PILL, TODOS_PILL_OFF)} data-testid="profiles-back" title="Back to Profiles (Esc)" onClick={back}>‹ Profiles</button>
         <PhotoMenu profile={profile} notify={notify} />
         <span className="flex min-w-0 flex-col leading-tight">
           <span className="truncate text-[15px] font-semibold" data-testid="profiles-title">{titleOf(profile)}</span>
@@ -420,8 +419,9 @@ function ProfileDetail({ plugin, profile, file, notify }: { plugin: ProfilePlugi
         )}
       </div>
       <div ref={findRoot} className="flex min-h-0 flex-1">
-        <ProfileTree plugin={plugin.name} profile={profile} file={file} selectedId={selectedId} onSelect={show} onOpenTab={openTab} />
+        {/* Round 5, layout (a): the file in the middle, the profile's files and subagents in a right sidebar. */}
         <ProfileFilePane plugin={plugin} profile={profile} file={file} notify={notify} onShow={show} onOpenTab={openTab} searchRef={findSearch} />
+        <ProfileTree plugin={plugin.name} profile={profile} file={file} selectedId={selectedId} onSelect={show} onOpenTab={openTab} />
       </div>
       {newKind && <NewFileDialog kind={newKind} plugin={plugin} profile={profile} onClose={() => setNewKind(null)} notify={notify} onCreated={path => show(null, path)} />}
       {details && <EditDetailsDialog plugin={plugin} profile={profile} onClose={() => setDetails(false)} notify={notify} />}
