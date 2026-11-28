@@ -16,7 +16,7 @@ export interface ProfilePlugin {
   name: string;
   version: string;
   description?: string;
-  /** Ships with Pane (greenfield, dcouple). */
+  /** Ships with Pane (greenfield). */
   bundled: boolean;
   /** Ships with Pane and was changed here, so Pane updates no longer replace it (A-3). */
   edited: boolean;
