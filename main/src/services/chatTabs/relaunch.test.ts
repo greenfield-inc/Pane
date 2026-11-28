@@ -35,8 +35,15 @@ interface HarnessOptions {
  */
 function harness(options: HarnessOptions = {}) {
   const directory = mkdtempSync(path.join(tmpdir(), 'pane-chat-relaunch-'));
-  // Windows holds the folder while a slow-stopping agent (SCRIPTED_AGENT_SLOW_CLOSE_MS) is still exiting.
-  cleanup.push(() => rmSync(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }));
+  cleanup.push(() => {
+    try { rmSync(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); }
+    catch (error) {
+      // Windows can keep the folder locked after a stop that timed out on a slow-stopping agent
+      // (SCRIPTED_AGENT_SLOW_CLOSE_MS); the temporary folder is left for the OS to clean.
+      if (process.platform !== 'win32' || !(error instanceof Error && 'code' in error && error.code === 'EBUSY')) throw error;
+      console.warn(`[relaunch.test] ${directory} is still locked on Windows, so it was left behind.`);
+    }
+  });
   const store = new MemoryStore();
   const launched: string[] = [];
   const launcher: ChatTabLauncher = {
