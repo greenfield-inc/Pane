@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -310,6 +310,32 @@ describe('installBundledAgentFarm with the pinned package', () => {
     expect(again.edited).toEqual(['greenfield']);
   }, 180_000);
 
+  // Review F-10: an unreadable receipt can't prove the folder is Pane's own copy, so it stays.
+  for (const [label, breakReceipt] of [
+    ['invalid JSON', (file: string) => writeFileSync(file, '{"version":')],
+    ['no checksums', (file: string) => writeFileSync(file, '{"version":"1.0.0"}')],
+    ['unreadable', (file: string) => { rmSync(file); mkdirSync(file); }],
+  ] as const) {
+    it(`keeps an edited plugin whose receipt is ${label} when a Pane update brings a new bundle, and says why`, async () => {
+      const paneDir = tempDir();
+      const configRoot = agentFarmConfigRoot(paneDir);
+      await installBundledAgentFarm({ paneDir, log: () => undefined });
+      const mine = path.join(configRoot, 'plugins', 'greenfield', 'agents', 'mine.md');
+      writeFileSync(mine, '# my own subagent\n');
+      breakReceipt(path.join(configRoot, '.plugins', 'greenfield.json'));
+      const logs: string[] = [];
+      const status = await installBundledAgentFarm({ paneDir, bundle: { ...bundledAgentFarm()!, version: '9.9.7' }, log: (line) => logs.push(line) });
+      expect(readFileSync(mine, 'utf8')).toBe('# my own subagent\n');
+      expect(status).toMatchObject({ state: 'failed', edited: ['greenfield'] });
+      expect(status.error).toContain(path.join(configRoot, '.plugins', 'greenfield.json'));
+      expect(logs.join('\n')).toContain('updated none');
+      // The next start checks and says so again, still keeping the folder.
+      const again = await installBundledAgentFarm({ paneDir, bundle: { ...bundledAgentFarm()!, version: '9.9.7' }, log: () => undefined });
+      expect(again).toMatchObject({ state: 'failed', edited: ['greenfield'] });
+      expect(readFileSync(mine, 'utf8')).toBe('# my own subagent\n');
+    }, 180_000);
+  }
+
   it('treats a changed installed file as an edit too', async () => {
     const paneDir = tempDir();
     const configRoot = agentFarmConfigRoot(paneDir);
@@ -459,6 +485,49 @@ describe('agentFarmTelemetrySync', () => {
     await sync.sync();
     expect(writes).toEqual([true, true]);
     expect(errors).toHaveLength(1);
+  });
+});
+
+// Review F-6: a settings.json write that fails after Pane's record changed must not lose the opt-out.
+describe('writeAgentFarmTelemetry when a settings.json write fails', () => {
+  /** Makes settings.json read-only for one write, as a full disk or a locked file would refuse it. */
+  async function refused(paneDir: string, enabled: boolean | undefined): Promise<void> {
+    const file = path.join(agentFarmConfigRoot(paneDir), 'settings.json');
+    chmodSync(file, 0o444);
+    try { await expect(writeAgentFarmTelemetry(paneDir, enabled)).rejects.toThrow(); }
+    finally { chmodSync(file, 0o644); }
+  }
+
+  function setUp() {
+    const paneDir = tempDir();
+    const configRoot = agentFarmConfigRoot(paneDir);
+    const directory = path.join(configRoot, 'telemetry');
+    mkdirSync(configRoot, { recursive: true });
+    // The person's own opt-out, made before Profiles.
+    writeFileSync(path.join(configRoot, 'settings.json'), JSON.stringify({ telemetry: { enabled: false, directory } }));
+    return { paneDir, directory, settings: () => JSON.parse(readFileSync(path.join(configRoot, 'settings.json'), 'utf8')).telemetry };
+  }
+
+  it('gives back the opt-out at Profiles off when turning the switch off never reached settings.json', async () => {
+    const { paneDir, settings, directory } = setUp();
+    await writeAgentFarmTelemetry(paneDir, true);
+    await refused(paneDir, false);
+    expect(settings()).toEqual({ enabled: true, directory });
+    await writeAgentFarmTelemetry(paneDir, undefined);
+    expect(settings()).toEqual({ enabled: false, directory });
+    expect(existsSync(path.join(agentFarmConfigRoot(paneDir), 'pane-telemetry.json'))).toBe(false);
+  });
+
+  it('finishes an interrupted restoration at the next write, and keeps the opt-out if Profiles comes back on', async () => {
+    const { paneDir, settings, directory } = setUp();
+    await writeAgentFarmTelemetry(paneDir, true);
+    await refused(paneDir, false);
+    await refused(paneDir, undefined);
+    expect(settings()).toEqual({ enabled: true, directory });
+    // Profiles back on, the switch on, then off for good.
+    await writeAgentFarmTelemetry(paneDir, true);
+    await writeAgentFarmTelemetry(paneDir, undefined);
+    expect(settings()).toEqual({ enabled: false, directory });
   });
 });
 

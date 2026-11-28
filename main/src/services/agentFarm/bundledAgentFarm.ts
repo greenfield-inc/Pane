@@ -220,35 +220,50 @@ export async function writeAgentFarmTelemetry(paneDir: string, enabled: boolean 
   const text = await fs.readFile(file, 'utf8').catch(() => undefined);
   const settings = (text === undefined ? undefined : decodeOptionalBoundary(JSON.parse(text), boundary.jsonObject)) ?? {};
   const telemetry = decodeOptionalBoundary(settings.telemetry, boundary.jsonObject) ?? {};
-  const marker = await fs.readFile(markerFile, 'utf8').then(value => decodeOptionalBoundary(JSON.parse(value), telemetryMarkerSchema), () => undefined);
+  const currentMarker = await fs.readFile(markerFile, 'utf8').catch(() => undefined);
+  const marker = currentMarker === undefined ? undefined : (() => {
+    try { return decodeOptionalBoundary(JSON.parse(currentMarker), telemetryMarkerSchema); }
+    catch { return undefined; }
+  })();
+  const current = decodeOptionalBoundary(telemetry.enabled, boundary.boolean);
+  // settings.json still holds a value Pane wrote: the one it last asked for, or, when that write
+  // never landed, the one before it (review F-6).
+  const panesOwn = marker !== undefined && current !== undefined && (current === marker.enabled || current === marker.prior);
   const next: JsonObject = { ...telemetry, directory };
-  let nextMarker: TelemetryMarker | undefined;
+  let pending: TelemetryMarker | undefined;
+  let done: TelemetryMarker | undefined;
   if (enabled !== undefined) {
     next.enabled = enabled;
     // What was there before Pane first wrote (review F-5), kept through every later write.
-    const before = decodeOptionalBoundary(telemetry.enabled, boundary.boolean);
-    nextMarker = { enabled, original: marker ? marker.original : before === undefined ? {} : { enabled: before } };
-  } else if (marker && telemetry.enabled === marker.enabled) {
+    const original = marker ? marker.original : current === undefined ? {} : { enabled: current };
+    done = { enabled, original };
+    // Until settings.json takes the new value, the record also names the value Pane wrote before.
+    pending = panesOwn && current !== enabled ? { enabled, prior: current, original } : done;
+  } else if (marker && panesOwn) {
     // Still Pane's value: give back what was there before, or nothing.
     if (marker.original.enabled === undefined) delete next.enabled;
     else next.enabled = marker.original.enabled;
   }
   const settingsText = `${JSON.stringify({ ...settings, telemetry: next }, null, 2)}\n`;
-  const markerText = nextMarker ? `${JSON.stringify(nextMarker)}\n` : undefined;
-  const currentMarker = await fs.readFile(markerFile, 'utf8').catch(() => undefined);
-  if (text === settingsText && currentMarker === markerText) return;
+  const markerText = (value: TelemetryMarker | undefined) => value ? `${JSON.stringify(value)}\n` : undefined;
+  if (text === settingsText && currentMarker === markerText(done)) return;
   await fs.mkdir(configRoot, { recursive: true });
   // The record goes first and comes off last, so a write cut short never leaves Pane's value without it.
-  if (markerText !== undefined) await fs.writeFile(markerFile, markerText);
+  const pendingText = markerText(pending);
+  if (pendingText !== undefined && pendingText !== currentMarker) await fs.writeFile(markerFile, pendingText);
   if (text !== settingsText) await fs.writeFile(file, settingsText);
-  if (markerText === undefined) await fs.rm(markerFile, { force: true });
+  const doneText = markerText(done);
+  if (doneText === undefined) await fs.rm(markerFile, { force: true });
+  else if (doneText !== pendingText) await fs.writeFile(markerFile, doneText);
 }
 
 const telemetryMarkerSchema = boundary.object({
   enabled: boundary.boolean,
+  prior: boundary.optional(boundary.boolean),
   original: boundary.object({ enabled: boundary.optional(boundary.boolean) }),
 });
-type TelemetryMarker = { enabled: boolean; original: { enabled?: boolean } };
+/** pane-telemetry.json: the `enabled` Pane asked for, the one it wrote before while that write is unconfirmed, and what was there before Pane. */
+type TelemetryMarker = { enabled: boolean; prior?: boolean; original: { enabled?: boolean } };
 
 export interface AgentFarmTelemetrySyncOptions {
   write?: (paneDir: string, enabled: boolean | undefined) => Promise<void>;
@@ -302,23 +317,41 @@ async function receiptInventory(pluginRoot: string): Promise<Record<string, stri
   return entries;
 }
 
-async function readReceipt(configRoot: string, name: string) {
-  const text = await fs.readFile(path.join(configRoot, '.plugins', `${name}.json`), 'utf8').catch(() => undefined);
-  return text === undefined ? undefined : decodeOptionalBoundary(JSON.parse(text), receiptSchema);
+function receiptPath(configRoot: string, name: string): string {
+  return path.join(configRoot, '.plugins', `${name}.json`);
+}
+
+type Receipt = { state: 'read'; version: string; checksums: Record<string, string> } | { state: 'missing' } | { state: 'unreadable'; reason: string };
+
+/** A plugin's install receipt: missing only when there is no file; one that can't be read, parsed or decoded is unreadable (review F-10). */
+async function readReceipt(configRoot: string, name: string): Promise<Receipt> {
+  let text: string;
+  try { text = await fs.readFile(receiptPath(configRoot, name), 'utf8'); }
+  catch (error) {
+    return decodeOptionalBoundary(error, boundary.object({ code: boundary.string }))?.code === 'ENOENT' ? { state: 'missing' } : { state: 'unreadable', reason: reasonOf(error) };
+  }
+  let value: unknown;
+  try { value = JSON.parse(text); }
+  catch (error) { return { state: 'unreadable', reason: `it isn't valid JSON (${reasonOf(error)})` }; }
+  const receipt = decodeOptionalBoundary(value, receiptSchema);
+  return receipt ? { state: 'read', ...receipt } : { state: 'unreadable', reason: 'it has no version or checksums' };
 }
 
 async function installedVersionOf(configRoot: string, name: string): Promise<string> {
-  return (await readReceipt(configRoot, name))?.version ?? 'unknown';
+  const receipt = await readReceipt(configRoot, name);
+  return receipt.state === 'read' ? receipt.version : 'unknown';
 }
 
 /**
  * A bundled plugin's install receipt when its files still match it, 'edited' when someone
- * changed, added or removed a file since, or undefined when it has no receipt (never installed,
- * or a first install that never finished).
+ * changed, added or removed a file since, undefined when it has no receipt (never installed,
+ * or a first install that never finished), or unreadable when its plugin folder is there but
+ * Pane can't read the receipt that would tell an edit apart: the folder is kept (review F-10).
  */
-async function installedState(configRoot: string, name: string): Promise<{ version: string } | 'edited' | undefined> {
+async function installedState(configRoot: string, name: string): Promise<{ version: string } | 'edited' | { unreadable: string } | undefined> {
   const receipt = await readReceipt(configRoot, name);
-  if (!receipt) return undefined;
+  if (receipt.state === 'missing') return undefined;
+  if (receipt.state === 'unreadable') return existsSync(path.join(configRoot, 'plugins', name)) ? { unreadable: receipt.reason } : undefined;
   const current = await receiptInventory(path.join(configRoot, 'plugins', name));
   const files = new Set([...Object.keys(current), ...Object.keys(receipt.checksums)]);
   return [...files].every((file) => current[file] === receipt.checksums[file]) ? { version: receipt.version } : 'edited';
@@ -416,6 +449,8 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
     const unfinished: string[] = await fs.readFile(installingPath, 'utf8').then((text) => decodeOptionalBoundary(JSON.parse(text), boundary.array(boundary.string)) ?? []).catch(() => []);
     const install: string[] = [];
     const clear: string[] = [];
+    // Bundled plugins whose install receipt can't be read (review F-10).
+    const unreadable: string[] = [];
     for (const name of BUNDLED_AGENT_FARM_PLUGINS) {
       // A plugin Pane was installing when it stopped is Pane's half-copy, not an edit.
       const state = unfinished.includes(name) ? undefined : await installedState(configRoot, name);
@@ -424,8 +459,22 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
         plugins[name] = await installedVersionOf(configRoot, name);
         continue;
       }
+      if (state && 'unreadable' in state) {
+        // Without its receipt Pane can't tell an edit from its own copy, so it keeps the folder.
+        edited.push(name);
+        plugins[name] = 'unknown';
+        unreadable.push(`${receiptPath(configRoot, name)} (${state.unreadable})`);
+        continue;
+      }
       install.push(name);
       if (!state) clear.push(name);
+    }
+    if (unreadable.length) {
+      // Agent Farm refuses every install while a receipt is broken, so Pane changes nothing and
+      // says so; with no manifest written, the next start checks again.
+      status = { state: 'failed', configRoot, version: bundle.version, plugins, edited, error: `Pane kept its bundled Agent Farm plugins in ${configRoot} as they are and updated none, because it can't read the install receipt ${unreadable.join(', ')}, so it can't tell your changes from its own copy. To keep your changes, copy them out of ${path.join(configRoot, 'plugins')} first; then delete that receipt and the plugin's folder and restart Pane to get Pane's version.` };
+      log(`[AgentFarm] ${status.error}`);
+      return status;
     }
     await clearUnfinishedInstall(configRoot, clear);
     for (const name of install) {
