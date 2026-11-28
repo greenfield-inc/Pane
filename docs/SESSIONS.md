@@ -17,7 +17,7 @@ its associated Panes and open any Pane in its existing sidebar view.
 
 With [chat tabs](CHAT_TABS.md) on (Settings → AI & Agents → Chat tabs), a new
 Session runs its orchestrator in a chat tab instead of a terminal for any agent
-chat tabs run (Claude, Codex, Cursor and OpenCode), from
+chat tabs run (Claude, Codex, Cursor, OpenCode and Antigravity), from
 the plain agent or the Session's `agent-farm run <profile>` launch, and sends its
 opening prompt once. Like every chat, finished turns fold to one row. A worker
 Pane shows up as one line with **Open** while it is asking the person, and when
@@ -940,7 +940,7 @@ write it; the orchestrator is its only writer. What each built-in template gets:
 | --- | --- |
 | Claude Code (`claude --dangerously-skip-permissions`) | Pane adds `--settings '{"permissions":{"additionalDirectories":["<folder>"],"deny":["Edit(/<folder>/**)"]}}'`. `additionalDirectories` (like `--add-dir`) makes the folder a working directory, which grants read and write; an `allow` rule alone does not lift `blockReadsOutsideWorkingDirectories`. The `Edit` deny rule takes the file tools' write access back (it covers Write too; Claude ignores `Write(path)` rules). Under bypass permissions Bash can still write anywhere, so the read-only rule is a guard, not a sandbox. The folder's `CLAUDE.md` is not loaded. Not added on Windows. At launch Pane merges this value into the tab's one settings file ([Claude's own prompts](PANE_NOTIFY.md#claudes-own-prompts)). |
 | Codex (`codex --yolo`) | Nothing to add: `--yolo` runs without a sandbox, and every Codex sandbox mode reads the whole disk. Codex's `--add-dir` grants write access, so Pane does not pass it. |
-| Cursor, OpenCode, Pi | Only `PANE_SESSION_DIR`. |
+| Cursor, OpenCode, Pi, Antigravity | Only `PANE_SESSION_DIR`. |
 | `--tool-command` wrappers (agent-farm) and custom commands | Only `PANE_SESSION_DIR`; the wrapper maps it to its harness's flag. |
 
 The flag is fixed when the tab is created: a tab opened before its Pane was

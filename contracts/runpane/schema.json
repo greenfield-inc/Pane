@@ -740,6 +740,19 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "idFlags": {
+                  "description": "Other flags that open a conversation by id, such as aliases for `flag`.",
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "exitIdPattern": {
+                  "description": "Multiline regular expression whose first capture group reads the conversation id the CLI prints when its TUI exits.",
+                  "type": "string",
+                  "minLength": 1
+                },
                 "paneChoosesId": {
                   "description": "The flag also creates the conversation when none has the id, so Pane picks the id and every launch runs the same command.",
                   "type": "boolean"
@@ -778,6 +791,14 @@
             "command": {
               "type": "string",
               "minLength": 1
+            },
+            "fallbackPaths": {
+              "description": "Shell-expanded executable paths checked by `agents doctor` outside Windows when the CLI's default install folder is off PATH.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         },

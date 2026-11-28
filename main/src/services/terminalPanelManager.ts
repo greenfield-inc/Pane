@@ -140,7 +140,7 @@ import { claudeFolderTrustKey, detectAgentComposer, detectAgentFromScreen } from
 import { readForegroundExecutablePath, readForegroundGroupMembers, readForegroundProcessGroup, type ForegroundGroup } from '../utils/foregroundProcess';
 import { buildCursorLaunchCommand, createCursorReadyDetector, extractCursorChatId } from './agents/cursorLaunch';
 import { assertDirectOpenCodeLaunchCommand, extractOpenCodeSessionId, resolveOpenCodeLaunchCommand } from './agents/opencodeLaunch';
-import { resolveChosenSessionLaunch } from './agents/chosenSessionLaunch';
+import { extractExitSessionId, resolveSessionFlagLaunch } from './agents/chosenSessionLaunch';
 import { agentConfig, agentLabel } from '../../../shared/agents';
 import { isPosixShell, quoteShellWord } from './agents/shellWord';
 import { withClaudePromptHooks } from './claudePrompts';
@@ -705,7 +705,7 @@ export class TerminalPanelManager extends EventEmitter {
     nextState: TerminalPanelState,
     isWSL: boolean,
   ): CliLaunchResolution | undefined {
-    const launch = resolveChosenSessionLaunch({
+    const launch = resolveSessionFlagLaunch({
       agent: agentType,
       baseCommand: initialCommand,
       persistedSessionId: customState.agentSessionId,
@@ -1210,7 +1210,7 @@ export class TerminalPanelManager extends EventEmitter {
     if (agentType === 'codex') return this.extractCodexResumeId(output);
     if (agentType === 'cursor') return extractCursorChatId(output);
     if (agentType === 'opencode') return extractOpenCodeSessionId(this.stripAnsiSequences(output));
-    return undefined;
+    return extractExitSessionId(agentType, this.stripAnsiSequences(output));
   }
 
   private captureAgentSessionId(terminal: TerminalProcess, output: string): void {
@@ -1226,7 +1226,8 @@ export class TerminalPanelManager extends EventEmitter {
     if (!panel) return;
     const customState = terminalCustomState(panel.state);
     const resume = effectiveCustomResume(customState);
-    if (!resume && terminal.agentType !== 'codex' && terminal.agentType !== 'cursor' && terminal.agentType !== 'opencode') return;
+    const capturesExitId = Boolean(terminal.agentType && agentConfig(terminal.agentType)?.terminal.session?.exitIdPattern);
+    if (!resume && terminal.agentType !== 'codex' && terminal.agentType !== 'cursor' && terminal.agentType !== 'opencode' && !capturesExitId) return;
     // Agent Farm prints one ID line before the agent starts; anything later is agent output.
     const firstLineOnly = resume?.source === 'agent-farm';
     if (firstLineOnly && terminal.reportedSessionIdLocked) return;
@@ -3929,6 +3930,9 @@ export function relaunchLogDetail(state: Pick<TerminalPanelState, 'agentSessionI
  */
 function reopensConversation(command: string, agentType: CliAgentType | undefined): boolean {
   const session = agentType ? agentConfig(agentType)?.terminal.session : undefined;
-  if (session?.paneChoosesId) return command.split(/\s+/).some(word => word === session.flag || word.startsWith(`${session.flag}=`));
+  if (session) {
+    const flags = [session.flag, ...(session.idFlags ?? [])];
+    return command.split(/\s+/).some(word => flags.some(flag => word === flag || word.startsWith(`${flag}=`)));
+  }
   return /(?:--resume(?:=|\s)|\bresume\s|--session(?:=|\s))/.test(command);
 }

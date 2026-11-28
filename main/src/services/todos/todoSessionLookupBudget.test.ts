@@ -33,7 +33,7 @@ function record(index: number): OrchestrationSessionRecord {
   }));
   return {
     id: `s${index}`, name: `Session ${index}`, agent: 'claude', internalSessionId: `__orchestration_session_${index}__`,
-    panelIds: { claude: `o${index}`, codex: `c${index}`, cursor: `u${index}`, opencode: `p${index}`, pi: `i${index}` },
+    panelIds: { claude: `o${index}`, codex: `c${index}`, cursor: `u${index}`, opencode: `p${index}`, pi: `i${index}`, agy: `a${index}` },
     goal: 'Ship it.', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
     associations: [{ paneId: `pane${index}`, panelIds: [], attachedAt: at }, { paneId: `gone${index}`, panelIds: [], attachedAt: at }],
     activity, revision: 1, createdAt: at, updatedAt: at,

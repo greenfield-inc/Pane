@@ -211,7 +211,7 @@ function buildOrchestrationSession(name: string, index: number): OrchestrationSe
     isPinned: false,
     agent: 'claude',
     internalSessionId: `${id}terminal__`,
-    panelIds: { claude: `${id}claude`, codex: `${id}codex`, cursor: `${id}cursor`, opencode: `${id}opencode`, pi: `${id}pi` },
+    panelIds: { claude: `${id}claude`, codex: `${id}codex`, cursor: `${id}cursor`, opencode: `${id}opencode`, pi: `${id}pi`, agy: `${id}agy` },
     goal: '',
     context: '',
     decisions: [],

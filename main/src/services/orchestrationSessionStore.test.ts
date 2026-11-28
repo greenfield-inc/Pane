@@ -38,6 +38,7 @@ function createRecord(overrides: Partial<OrchestrationSessionRecord> = {}): Orch
       cursor: '__orchestration_panel_release_cursor',
       opencode: '__orchestration_panel_release_opencode',
       pi: '__orchestration_panel_release_pi',
+      agy: '__orchestration_panel_release_agy',
     },
     goal: 'Review the release evidence.',
     context: 'Use the current branch and attached Panes.',

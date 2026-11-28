@@ -60,6 +60,15 @@ export const PiIcon: React.FC<BrandIconProps> = ({ className = 'w-4 h-4' }) => (
 );
 
 /**
+ * Google Antigravity brand icon
+ */
+export const AntigravityIcon: React.FC<BrandIconProps> = ({ className = 'w-4 h-4' }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M19.94 20.59c1.09.82 2.73.27 1.23-1.23C16.67 15 17.62 3 12.03 3S7.39 15 2.89 19.36c-1.64 1.64.14 2.05 1.23 1.23c4.23-2.86 3.95-7.91 7.91-7.91s3.68 5.05 7.91 7.91" />
+  </svg>
+);
+
+/**
  * Aider brand icon — stylized "A" mark (no official simple-icons entry)
  */
 export const AiderIcon: React.FC<BrandIconProps> = ({ className = 'w-4 h-4' }) => (

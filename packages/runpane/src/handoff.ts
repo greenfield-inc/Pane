@@ -33,7 +33,12 @@ export const HANDOFF_SECTIONS = [
 ] as const;
 
 const AGENTS = new Set<string>(RUNPANE_CONTRACT.enums.agents);
-const AGENT_ALIASES = new Map<string, RunpaneAgent>([['claude-code', 'claude'], ['cursor-agent', 'cursor'], ['codex-cli', 'codex']]);
+const AGENT_ALIASES = new Map<string, RunpaneAgent>([
+  ...RUNPANE_CONTRACT.enums.agents.map((id): [string, RunpaneAgent] => [RUNPANE_CONTRACT.agents.entries[id].label.toLowerCase(), id]),
+  ['claude-code', 'claude'],
+  ['cursor-agent', 'cursor'],
+  ['codex-cli', 'codex'],
+]);
 const EFFORTS = new Set(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 const MODEL_PATTERN = /^(gpt-|o\d|claude-|opus|sonnet|haiku|fable|composer|gemini|grok)/i;
 const FILLER = new Set(['on', 'to', 'with', 'using', 'via', 'at', 'in', 'a', 'an', 'the', 'and', 'effort', 'reasoning', 'model', 'machine']);
@@ -102,8 +107,8 @@ export function parseDestination(text: string, machines: readonly TailnetMachine
   const effort = overrides.effort ?? efforts[0];
   if (model !== undefined && !/^[A-Za-z0-9._:/-]+$/.test(model)) throw new Error('Invalid model identifier. Use letters, numbers, dots, underscores, colons, slashes, or hyphens.');
   if (effort !== undefined && !EFFORTS.has(effort)) throw new Error(`Invalid effort. Use ${[...EFFORTS].join(', ')}.`);
-  // Only Claude and Codex take an effort flag (agentCommand).
-  if (effort !== undefined && agent !== 'claude' && agent !== 'codex') {
+  const agentModels: { flag: string; effortFlag?: string; effortConfig?: string } | undefined = RUNPANE_CONTRACT.agents.entries[agent].models;
+  if (effort !== undefined && !agentModels?.effortFlag && !agentModels?.effortConfig) {
     throw new Error(`${RUNPANE_CONTRACT.agents.entries[agent].label} effort is not supported. Omit --effort and effort text; nothing was committed or sent.`);
   }
   if (model) destination.model = model;

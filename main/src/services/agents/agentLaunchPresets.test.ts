@@ -15,6 +15,7 @@ describe('AGENT_LAUNCH_PRESETS', () => {
       cursor: 'cursor-agent --force --trust',
       opencode: 'opencode --auto',
       pi: 'pi',
+      agy: 'agy --dangerously-skip-permissions',
     });
   });
 
@@ -25,15 +26,19 @@ describe('AGENT_LAUNCH_PRESETS', () => {
       hotkeyId: 'add-tool-terminal-opencode',
       hotkey: 'mod+alt+6',
     });
+    expect(AGENT_LAUNCH_PRESETS.find(p => p.id === 'agy')).toMatchObject({
+      hotkeyId: 'add-tool-terminal-agy',
+      hotkey: 'mod+alt+shift+a',
+    });
   });
 
   it('supports cursor on POSIX hosts and WSL repos, but not native Windows', () => {
-    expect(agentPresetsForPlatform('win32').map(p => p.id)).toEqual(['claude', 'codex', 'opencode', 'pi']);
-    expect(agentPresetsForPlatform('darwin').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi']);
-    expect(agentPresetsForPlatform('linux').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi']);
-    expect(agentPresetsForPlatform('windows').map(p => p.id)).toEqual(['claude', 'codex', 'opencode', 'pi']);
-    expect(agentPresetsForPlatform('macos').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi']);
-    expect(agentPresetsForPlatform('wsl').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi']);
+    expect(agentPresetsForPlatform('win32').map(p => p.id)).toEqual(['claude', 'codex', 'opencode', 'pi', 'agy']);
+    expect(agentPresetsForPlatform('darwin').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi', 'agy']);
+    expect(agentPresetsForPlatform('linux').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi', 'agy']);
+    expect(agentPresetsForPlatform('windows').map(p => p.id)).toEqual(['claude', 'codex', 'opencode', 'pi', 'agy']);
+    expect(agentPresetsForPlatform('macos').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi', 'agy']);
+    expect(agentPresetsForPlatform('wsl').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi', 'agy']);
     expect(isAgentSupportedOnPlatform('cursor', 'windows')).toBe(false);
     expect(isAgentSupportedOnPlatform('cursor', 'wsl')).toBe(true);
     expect(isAgentSupportedOnPlatform('opencode', 'darwin')).toBe(true);
@@ -43,5 +48,7 @@ describe('AGENT_LAUNCH_PRESETS', () => {
     expect(AGENT_LAUNCH_PRESETS.find(p => p.id === 'opencode')?.platforms).toBeUndefined();
     expect(isAgentSupportedOnPlatform('pi', 'windows')).toBe(true);
     expect(AGENT_LAUNCH_PRESETS.find(p => p.id === 'pi')?.platforms).toBeUndefined();
+    expect(isAgentSupportedOnPlatform('agy', 'windows')).toBe(true);
+    expect(AGENT_LAUNCH_PRESETS.find(p => p.id === 'agy')?.platforms).toBeUndefined();
   });
 });

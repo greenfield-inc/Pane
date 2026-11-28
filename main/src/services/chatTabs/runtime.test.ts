@@ -128,4 +128,14 @@ describe('chat tab runtime against a scripted ACP agent', () => {
     await second.runtime.prompt([{ type: 'text', text: 'again' }]);
     expect(text(second.updates)).toBe('You said: remember meYou said: again');
   });
+
+  it('filters session/list results to the requested folder when an ACP server ignores cwd', async () => {
+    const store = scratch();
+    const other = scratch();
+    const session = await start(store, { SCRIPTED_AGENT_LIST_IGNORES_CWD: '1' });
+    const { sessionId: localId } = await session.runtime.create({ cwd: store, mcpServers: [] });
+    await session.runtime.create({ cwd: other, mcpServers: [] });
+    const listed = await session.runtime.list(store);
+    expect(listed.sessions.map(entry => entry.sessionId)).toEqual([localId]);
+  });
 });

@@ -114,7 +114,8 @@ const CONTRACT_SECTION_8 = {
     "claude",
     "cursor",
     "opencode",
-    "pi"
+    "pi",
+    "agy"
   ],
   "reclaimKinds": [
     "update-snapshot",
@@ -505,6 +506,79 @@ const CONTRACT_SECTION_9 = {
       "models": {
         "flag": "--model"
       }
+    },
+    "agy": {
+      "title": "Antigravity",
+      "label": "Antigravity",
+      "icon": "agy",
+      "description": "Open an Antigravity CLI terminal tab and allow the initial input to drive the agent.",
+      "executables": [
+        "agy"
+      ],
+      "terminal": {
+        "args": [],
+        "fullAccessArgs": [
+          "--dangerously-skip-permissions"
+        ],
+        "hotkey": "mod+alt+shift+a",
+        "configDir": ".agents",
+        "session": {
+          "flag": "--conversation",
+          "minimumVersion": "1.5.18",
+          "idPattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+          "idFlags": [
+            "--resume",
+            "-r"
+          ],
+          "exitIdPattern": "^Resume with -c \\(or command below\\):\\r?\\nagy --conversation=([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})[ \\t]*\\r?$",
+          "selectors": [
+            "--continue",
+            "-c",
+            "--resume",
+            "-r",
+            "--prompt-interactive",
+            "-i",
+            "--print",
+            "-p",
+            "--prompt",
+            "--remote-agent"
+          ]
+        }
+      },
+      "install": {
+        "url": "https://antigravity.google/docs/getting-started",
+        "command": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+        "fallbackPaths": [
+          "$HOME/.local/bin/agy"
+        ]
+      },
+      "transcriptDirs": [
+        ".gemini/antigravity-cli/conversations"
+      ],
+      "signIn": [
+        "acp",
+        "--login"
+      ],
+      "chat": {
+        "args": [
+          "acp"
+        ],
+        "minimumVersion": "1.5.18",
+        "apiKeyEnv": [
+          "GEMINI_API_KEY"
+        ],
+        "fullAccess": {
+          "args": true
+        },
+        "terminalConversationsLoad": true,
+        "registryIds": [
+          "antigravity-acp"
+        ]
+      },
+      "models": {
+        "flag": "--model",
+        "effortFlag": "--effort"
+      }
     }
   }
 } as const;
@@ -621,7 +695,7 @@ const CONTRACT_SECTION_11 = [
     "name": "agents doctor",
     "summary": "Diagnose whether a built-in agent command is available in a Pane repository environment.",
     "usage": [
-      "runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json] [--pane-dir <path>]"
+      "runpane agents doctor --agent <codex|claude|cursor|opencode|pi|agy> [--repo <selector>] [--json] [--pane-dir <path>]"
     ],
     "toolsets": [
       "admin"
@@ -1553,7 +1627,7 @@ const CONTRACT_SECTION_11 = [
     "summary": "Hand your task to another agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it. A same-agent handoff from a Pane tab carries and resumes your own session (a fork on this machine) and checks it continued; otherwise a fresh agent starts with the note. From a Session's terminal, create the Session on another machine instead.",
     "usage": [
       "runpane handoff --template",
-      "runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor|opencode|pi>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]"
+      "runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor|opencode|pi|agy>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]"
     ],
     "mutates": true,
     "wrappers": [
@@ -1586,7 +1660,7 @@ const CONTRACT_SECTION_11 = [
     "name": "models",
     "summary": "List the models each installed agent offers, on this machine, another one, or every saved machine, with what each agent reports about its sign-in. Read live on every call.",
     "usage": [
-      "runpane models [--agent <codex|claude|cursor|opencode|pi>] [--search <text>] [--machine <name> | --all] [--json]"
+      "runpane models [--agent <codex|claude|cursor|opencode|pi|agy>] [--search <text>] [--machine <name> | --all] [--json]"
     ],
     "mutates": false,
     "wrappers": [
@@ -1620,8 +1694,8 @@ const CONTRACT_SECTION_11 = [
     "name": "panes create",
     "summary": "Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.",
     "usage": [
-      "runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]",
-      "runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]",
+      "runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi|agy> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]",
+      "runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi|agy>] [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]",
       "runpane panes create --from-json <path|-> [--yes] [--json] [--pane-dir <path>]"
     ],
     "mutates": true,
@@ -1640,8 +1714,8 @@ const CONTRACT_SECTION_11 = [
     "name": "panes adopt",
     "summary": "Adopt an existing externally managed git worktree as a Pane without changing the worktree.",
     "usage": [
-      "runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor|opencode|pi> [--resume <id>] [--folder <name>] [--launch [--prompt <text>|--prompt-file <path|->] [--wait-ready] [--ready-timeout-ms <ms>]] [--no-pinned] [--no-associate] [--dry-run] [--yes] [--json] [--pane-dir <path>]",
-      "runpane panes adopt --repo <selector> --path <dir> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--folder <name>] [--launch [--prompt <text>|--prompt-file <path|->] [--wait-ready] [--ready-timeout-ms <ms>]] [--no-pinned] [--no-associate] [--dry-run] [--yes] [--json] [--pane-dir <path>]"
+      "runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor|opencode|pi|agy> [--resume <id>] [--folder <name>] [--launch [--prompt <text>|--prompt-file <path|->] [--wait-ready] [--ready-timeout-ms <ms>]] [--no-pinned] [--no-associate] [--dry-run] [--yes] [--json] [--pane-dir <path>]",
+      "runpane panes adopt --repo <selector> --path <dir> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi|agy>] [--folder <name>] [--launch [--prompt <text>|--prompt-file <path|->] [--wait-ready] [--ready-timeout-ms <ms>]] [--no-pinned] [--no-associate] [--dry-run] [--yes] [--json] [--pane-dir <path>]"
     ],
     "mutates": true,
     "additive": true,
@@ -1784,8 +1858,8 @@ const CONTRACT_SECTION_11 = [
     "name": "panels create",
     "summary": "Open a new agent or terminal tab inside an existing Pane, sharing its worktree. The default for review, QA, fixes and any other agent on work that already has a Pane.",
     "usage": [
-      "runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi> [--source user|agent] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]",
-      "runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--title <title>] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]"
+      "runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi|agy> [--source user|agent] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]",
+      "runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi|agy>] [--title <title>] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]"
     ],
     "mutates": true,
     "additive": true,
@@ -2381,7 +2455,7 @@ const CONTRACT_SECTION_11 = [
       "runpane links create --pane <pane-id> [--panel <panel-id>] [--json]",
       "runpane links create --repo <repo-id> [--json]",
       "runpane links create --session <session-id> [--json]",
-      "runpane links create --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--repo <repo> | --session <id|name>] [--web] [--json]"
+      "runpane links create --prompt <task> [--agent <codex|claude|cursor|opencode|pi|agy>] [--repo <repo> | --session <id|name>] [--web] [--json]"
     ],
     "toolsets": [
       "core",
@@ -2458,7 +2532,7 @@ const CONTRACT_SECTION_11 = [
     "name": "agents start",
     "summary": "Start an agent on a task and wait until it is ready: as a new tab in an existing Pane with --pane <id> (review, audit, fix, QA), or in a new Pane with --repo and --name for new work.",
     "usage": [
-      "runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--todo <T-n>] [--json] [--pane-dir <path>]"
+      "runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi|agy>|--tool-command <command>) --prompt <task> --yes [--todo <T-n>] [--json] [--pane-dir <path>]"
     ],
     "mutates": true,
     "additive": true,
@@ -2754,7 +2828,7 @@ const CONTRACT_SECTION_11 = [
     "name": "sessions set-agent",
     "summary": "Switch the durable terminal agent for a named Session.",
     "usage": [
-      "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi> [--json] [--pane-dir <path>]"
+      "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi|agy> [--json] [--pane-dir <path>]"
     ],
     "mutates": true,
     "idempotent": true,
@@ -3590,7 +3664,7 @@ const CONTRACT_SECTION_12 = {
     },
     {
       "name": "--agent",
-      "value": "<codex|claude|cursor|opencode|pi>",
+      "value": "<codex|claude|cursor|opencode|pi|agy>",
       "description": "Built-in agent terminal template to open. With --tool-command, the agent that command runs."
     },
     {
@@ -4361,7 +4435,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane mcp [--toolsets <name,...>] [--read-only]",
       "  runpane relay [pane-relay flags...]",
       "  runpane link <link> [--yes] [--json]",
-      "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json]",
+      "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi|agy> [--repo <selector>] [--json]",
       "  runpane repos list [--json]",
       "  runpane repos add --path <path> [--name <name>]",
       "  runpane repos get [--repo <selector>] [--json]",
@@ -4409,7 +4483,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
       "  runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]",
       "  runpane sessions pause|resume --session <id|name> [--json] [--pane-dir <path>]",
-      "  runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi> [--json] [--pane-dir <path>]",
+      "  runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi|agy> [--json] [--pane-dir <path>]",
       "  runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]",
       "  runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]",
       "  runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]",
@@ -4433,11 +4507,11 @@ const CONTRACT_SECTION_13 = {
       "  runpane workspace <machine> read|write|exec|<command>",
       "  runpane watch --follow",
       "  runpane watch --until-event",
-      "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [--base-branch <branch>] [--source user|agent] [--focus|--no-focus] [--wait-ready]",
+      "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi|agy> [--base-branch <branch>] [--source user|agent] [--focus|--no-focus] [--wait-ready]",
       "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes",
       "  runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--dry-run] --yes",
       "  runpane panes pause|resume --pane <pane-id> --yes [--json]",
-      "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi> [--source user|agent] [--focus|--no-focus] --yes",
+      "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi|agy> [--source user|agent] [--focus|--no-focus] --yes",
       "  runpane panels list --pane <pane-id> [--json]",
       "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
       "  runpane panels screen --panel <panel-id> [--limit <count>] [--json]",
@@ -4460,7 +4534,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane links open --url <pane-url> --yes [--json] [--pane-dir <path>]",
       "  runpane docs search --query <text> [--limit <count>] [--json]",
       "  runpane docs read --doc <path> [--json]",
-      "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
+      "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi|agy>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
       "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
       "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
       "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text> [--choices <json>]] [--json]",
@@ -4827,7 +4901,7 @@ const CONTRACT_SECTION_13 = {
       "Commands:",
       "  runpane panes list [--repo <selector>] [--json]",
       "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
-      "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [options]",
+      "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi|agy> [options]",
       "  runpane panes archive --pane <pane-id> [--force] [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
       "  runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--dry-run] --yes [--json]",
       "  runpane panes pin --pane <pane-id> --yes [--dry-run] [--json]",
@@ -4952,8 +5026,8 @@ const CONTRACT_SECTION_13 = {
     ],
     "panes create": [
       "Usage:",
-      "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
-      "  runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
+      "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi|agy> [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
+      "  runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi|agy>] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
       "  runpane panes create --from-json <path|-> [--yes] [--json]",
       "",
       "Creates a Pane in a saved repository and opens a terminal-backed tool tab. Create one only when the work's branch has no Pane yet; for existing work use `runpane panels create --pane <id>`.",
@@ -4966,7 +5040,7 @@ const CONTRACT_SECTION_13 = {
       "  --worktree-name <name>         Worktree directory name, cut to 100 characters at a word; defaults to --name",
       "  --branch <name>                Exact new branch name (slashes kept); must not exist; defaults to the worktree name",
       "  --base-branch <ref>            Ref to branch from; --base is an alias",
-      "  --agent <codex|claude|cursor|opencode|pi>  Built-in terminal template; with --tool-command, the agent it runs",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Built-in terminal template; with --tool-command, the agent it runs",
       "  --tool-command <command>       Custom terminal command",
       "  --title <title>                Terminal tab title",
       "  --initial-input <text>         Text sent after the command is ready",
@@ -5000,8 +5074,8 @@ const CONTRACT_SECTION_13 = {
     ],
     "panes adopt": [
       "Usage:",
-      "  runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor|opencode|pi> [options]",
-      "  runpane panes adopt --repo <selector> --path <dir> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [options]",
+      "  runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor|opencode|pi|agy> [options]",
+      "  runpane panes adopt --repo <selector> --path <dir> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi|agy>] [options]",
       "",
       "Adopts an existing externally managed git worktree without creating, syncing, or deleting it. Archiving only removes its worktree with `panes archive --remove-worktree`. To start new work on a named branch, use `panes create --base <ref> --branch <name>` instead of `git worktree add` plus adopt.",
       "",
@@ -5090,7 +5164,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane panels <command> [options]",
       "",
       "Commands:",
-      "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi> [options]",
+      "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi|agy> [options]",
       "  runpane panels open (--url <url>|--file <path>) [--split|--tab] --yes [--json]",
       "  runpane panels close --panel <panel-id> [--dry-run] [--force] --yes [--json]",
       "  runpane panels list --pane <pane-id> [--json]",
@@ -5214,12 +5288,12 @@ const CONTRACT_SECTION_13 = {
     ],
     "agents doctor": [
       "Usage:",
-      "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json]",
+      "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi|agy> [--repo <selector>] [--json]",
       "",
       "Diagnoses whether Codex or Claude is available in the same repository environment Pane will use.",
       "",
       "Options:",
-      "  --agent <codex|claude|cursor|opencode|pi>         Built-in agent command to diagnose",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>         Built-in agent command to diagnose",
       "  --repo <selector>              active, id, exact path, or saved repository name; defaults to active",
       "  --pane-dir <path>              Connect to a specific Pane data directory",
       "  --json                         Print machine-readable output"
@@ -5289,13 +5363,13 @@ const CONTRACT_SECTION_13 = {
       "Create a terminal-backed tool panel inside an existing Pane session.",
       "",
       "Usage:",
-      "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json]",
-      "  runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--title <title>] [--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json]",
+      "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi|agy> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json]",
+      "  runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi|agy>] [--title <title>] [--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json]",
       "  runpane panels create --pane <pane-id> --chat --agent <id> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] --yes [--json]",
       "",
       "Options:",
       "  --pane <pane-id>              Existing Pane session to add the panel to.",
-      "  --agent <codex|claude|cursor|opencode|pi> Built-in agent command template, or with --tool-command the agent it runs.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy> Built-in agent command template, or with --tool-command the agent it runs.",
       "  --tool-command <command>      Custom terminal command to launch.",
       "  --chat                        Open --agent as a chat tab instead of a terminal; the host lists the agents it can run.",
       "  --title <title>               Panel title override.",
@@ -5377,7 +5451,7 @@ const CONTRACT_SECTION_13 = {
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
-      "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Agent terminal to use.",
       "  --json                       Print JSON output."
     ],
     "sessions create": [
@@ -5388,7 +5462,7 @@ const CONTRACT_SECTION_13 = {
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
-      "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Agent terminal to use.",
       "  --json                       Print JSON output.",
       "",
       "JSON isPinned: true pins the Session; omitted or false leaves it unpinned.",
@@ -5402,7 +5476,7 @@ const CONTRACT_SECTION_13 = {
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
-      "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Agent terminal to use.",
       "  --json                       Print JSON output."
     ],
     "sessions update": [
@@ -5413,20 +5487,20 @@ const CONTRACT_SECTION_13 = {
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
-      "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Agent terminal to use.",
       "  --json                       Print JSON output.",
       "",
       "JSON isPinned: true/false sets the Session pin star. Select the Session with --session, not a session field in JSON."
     ],
     "sessions set-agent": [
       "Usage:",
-      "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi> [--json] [--pane-dir <path>]",
+      "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi|agy> [--json] [--pane-dir <path>]",
       "",
       "Options:",
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
-      "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Agent terminal to use.",
       "  --json                       Print JSON output."
     ],
     "sessions associate": [
@@ -5437,7 +5511,7 @@ const CONTRACT_SECTION_13 = {
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
-      "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Agent terminal to use.",
       "  --json                       Print JSON output."
     ],
     "sessions detach": [
@@ -5448,7 +5522,7 @@ const CONTRACT_SECTION_13 = {
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
-      "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Agent terminal to use.",
       "  --json                       Print JSON output."
     ],
     "sessions overview": [
@@ -5459,7 +5533,7 @@ const CONTRACT_SECTION_13 = {
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
-      "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Agent terminal to use.",
       "  --json                       Print JSON output."
     ],
     "panes git-status": [
@@ -5661,7 +5735,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane links create --pane <pane-id> [--panel <panel-id>] [--json]",
       "  runpane links create --repo <repo-id> [--json]",
       "  runpane links create --session <session-id> [--json]",
-      "  runpane links create --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--repo <repo> | --session <id|name>] [--web] [--json]",
+      "  runpane links create --prompt <task> [--agent <codex|claude|cursor|opencode|pi|agy>] [--repo <repo> | --session <id|name>] [--web] [--json]",
       "",
       "Build a pane:// link that opens a Pane, panel, repository, or Session, or a start link that starts an agent on a prompt once the person confirms.",
       "",
@@ -5710,14 +5784,14 @@ const CONTRACT_SECTION_13 = {
     ],
     "agents start": [
       "Usage:",
-      "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--todo <T-n>] [--json] [--pane-dir <path>]",
+      "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi|agy>|--tool-command <command>) --prompt <task> --yes [--todo <T-n>] [--json] [--pane-dir <path>]",
       "",
       "Start an agent on a task and wait until it is ready: as a new tab in an existing Pane with --pane <id> (review, audit, fix, QA), or in a new Pane with --repo and --name for new work.",
       "",
       "Options:",
       "  --repo <selector>               Repository: active, id, exact path, or saved name.",
       "  --name <name>                   Name for the new Pane.",
-      "  --agent <codex|claude|cursor|opencode|pi>   Built-in agent to launch.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>   Built-in agent to launch.",
       "  --tool-command <command>        Custom terminal command instead of a built-in agent.",
       "  --prompt <task>                 The task to send once the agent is ready.",
       "  --base-branch <branch>          Branch to start the worktree from.",
@@ -6239,7 +6313,7 @@ const CONTRACT_SECTION_13 = {
     "handoff": [
       "Usage:",
       "  runpane handoff --template",
-      "  runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor|opencode|pi>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]",
+      "  runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor|opencode|pi|agy>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]",
       "",
       "Hand your task to another agent. You write the note (runpane handoff --template); the CLI checks it,",
       "makes sure your branch is pushed, sends the note to the destination, and starts the agent there.",
@@ -6255,7 +6329,7 @@ const CONTRACT_SECTION_13 = {
       "  --template                      Print the note template, with this checkout's (or Session's) origin and git state filled in.",
       "  --note-file <path|->            The note to check and send; every template section must be filled in.",
       "  --machine <name>                Destination machine (Tailscale name or unique prefix); overrides the text.",
-      "  --agent <codex|claude|cursor|opencode|pi>   Receiving agent; overrides the text.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>   Receiving agent; overrides the text.",
       "  --model <model>                 Model for the receiving agent; overrides the text.",
       "  --effort <level>                minimal, low, medium, high, xhigh, or max; supported for Claude and Codex only; overrides the text. Cursor effort is rejected.",
       "  --repo <selector>               Saved repository on the destination; defaults to the one with the same remote.",
@@ -6288,7 +6362,7 @@ const CONTRACT_SECTION_13 = {
     ],
     "models": [
       "Usage:",
-      "  runpane models [--agent <codex|claude|cursor|opencode|pi>] [--search <text>] [--machine <name> | --all] [--json]",
+      "  runpane models [--agent <codex|claude|cursor|opencode|pi|agy>] [--search <text>] [--machine <name> | --all] [--json]",
       "",
       "List the models each installed agent offers, from the agent's own list, with its sign-in in its own",
       "words. --all covers this machine and every saved machine, and the WSL of a machine with a saved WSL",
@@ -7301,7 +7375,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane mcp [--toolsets <name,...>] [--read-only]",
       "  runpane relay [pane-relay flags...]",
       "  runpane link <link> [--yes] [--json]",
-      "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json]",
+      "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi|agy> [--repo <selector>] [--json]",
       "  runpane repos list [--json]",
       "  runpane repos add --path <path> [--name <name>]",
       "  runpane repos get [--repo <selector>] [--json]",
@@ -7319,11 +7393,11 @@ const CONTRACT_SECTION_13 = {
       "  runpane workspace state [--repo <selector>] [--json]",
       "  runpane watch --follow",
       "  runpane watch --until-event",
-      "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [--base-branch <branch>] [--source user|agent] [--focus|--no-focus] [--wait-ready]",
+      "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi|agy> [--base-branch <branch>] [--source user|agent] [--focus|--no-focus] [--wait-ready]",
       "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes",
       "  runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--dry-run] --yes",
       "  runpane panes pause|resume --pane <pane-id> --yes [--json]",
-      "  python -m runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi> [--source user|agent] [--focus|--no-focus] --yes",
+      "  python -m runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi|agy> [--source user|agent] [--focus|--no-focus] --yes",
       "  runpane panels list --pane <pane-id> [--json]",
       "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
       "  runpane panels screen --panel <panel-id> [--limit <count>] [--json]",
@@ -7346,7 +7420,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane links open --url <pane-url> --yes [--json] [--pane-dir <path>]",
       "  runpane docs search --query <text> [--limit <count>] [--json]",
       "  runpane docs read --doc <path> [--json]",
-      "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
+      "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi|agy>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
       "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
       "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
       "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text> [--choices <json>]] [--json]",
@@ -7726,7 +7800,7 @@ const CONTRACT_SECTION_13 = {
       "Commands:",
       "  runpane panes list [--repo <selector>] [--json]",
       "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
-      "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [options]",
+      "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi|agy> [options]",
       "  runpane panes archive --pane <pane-id> [--force] [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
       "  runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--dry-run] --yes [--json]",
       "  runpane panes pin --pane <pane-id> --yes [--dry-run] [--json]",
@@ -7842,8 +7916,8 @@ const CONTRACT_SECTION_13 = {
     ],
     "panes create": [
       "Usage:",
-      "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
-      "  python -m runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
+      "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi|agy> [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
+      "  python -m runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi|agy>] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
       "  runpane panes create --from-json <path|-> [--yes] [--json]",
       "",
       "Creates a Pane in a saved repository and opens a terminal-backed tool tab. Create one only when the work's branch has no Pane yet; for existing work use `runpane panels create --pane <id>`.",
@@ -7856,7 +7930,7 @@ const CONTRACT_SECTION_13 = {
       "  --worktree-name <name>         Worktree directory name, cut to 100 characters at a word; defaults to --name",
       "  --branch <name>                Exact new branch name (slashes kept); must not exist; defaults to the worktree name",
       "  --base-branch <ref>            Ref to branch from; --base is an alias",
-      "  --agent <codex|claude|cursor|opencode|pi>  Built-in terminal template; with --tool-command, the agent it runs",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Built-in terminal template; with --tool-command, the agent it runs",
       "  --tool-command <command>       Custom terminal command",
       "  --title <title>                Terminal tab title",
       "  --initial-input <text>         Text sent after the command is ready",
@@ -7890,8 +7964,8 @@ const CONTRACT_SECTION_13 = {
     ],
     "panes adopt": [
       "Usage:",
-      "  runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor|opencode|pi> [options]",
-      "  runpane panes adopt --repo <selector> --path <dir> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [options]",
+      "  runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor|opencode|pi|agy> [options]",
+      "  runpane panes adopt --repo <selector> --path <dir> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi|agy>] [options]",
       "",
       "Adopts an existing externally managed git worktree without creating, syncing, or deleting it. Archiving only removes its worktree with `panes archive --remove-worktree`. To start new work on a named branch, use `panes create --base <ref> --branch <name>` instead of `git worktree add` plus adopt.",
       "",
@@ -7980,7 +8054,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane panels <command> [options]",
       "",
       "Commands:",
-      "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi> [options]",
+      "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi|agy> [options]",
       "  runpane panels open (--url <url>|--file <path>) [--split|--tab] --yes [--json]",
       "  runpane panels close --panel <panel-id> [--dry-run] [--force] --yes [--json]",
       "  runpane panels list --pane <pane-id> [--json]",
@@ -8086,12 +8160,12 @@ const CONTRACT_SECTION_13 = {
     ],
     "agents doctor": [
       "Usage:",
-      "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json]",
+      "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi|agy> [--repo <selector>] [--json]",
       "",
       "Diagnoses whether Codex or Claude is available in the same repository environment Pane will use.",
       "",
       "Options:",
-      "  --agent <codex|claude|cursor|opencode|pi>         Built-in agent command to diagnose",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>         Built-in agent command to diagnose",
       "  --repo <selector>              active, id, exact path, or saved repository name; defaults to active",
       "  --pane-dir <path>              Connect to a specific Pane data directory",
       "  --json                         Print machine-readable output"
@@ -8161,13 +8235,13 @@ const CONTRACT_SECTION_13 = {
       "Create a terminal-backed tool panel inside an existing Pane session.",
       "",
       "Usage:",
-      "  python -m runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] --yes [--json]",
-      "  python -m runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--title <title>] [--no-focus] [--wait-ready] --yes [--json]",
+      "  python -m runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi|agy> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] --yes [--json]",
+      "  python -m runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi|agy>] [--title <title>] [--no-focus] [--wait-ready] --yes [--json]",
       "  python -m runpane panels create --pane <pane-id> --chat --agent <id> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] --yes [--json]",
       "",
       "Options:",
       "  --pane <pane-id>              Existing Pane session to add the panel to.",
-      "  --agent <codex|claude|cursor|opencode|pi> Built-in agent command template, or with --tool-command the agent it runs.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy> Built-in agent command template, or with --tool-command the agent it runs.",
       "  --tool-command <command>      Custom terminal command to launch.",
       "  --chat                        Open --agent as a chat tab instead of a terminal; the host lists the agents it can run.",
       "  --title <title>               Panel title override.",
@@ -8249,7 +8323,7 @@ const CONTRACT_SECTION_13 = {
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
-      "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Agent terminal to use.",
       "  --json                       Print JSON output."
     ],
     "sessions create": [
@@ -8260,7 +8334,7 @@ const CONTRACT_SECTION_13 = {
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
-      "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Agent terminal to use.",
       "  --json                       Print JSON output.",
       "",
       "JSON isPinned: true pins the Session; omitted or false leaves it unpinned.",
@@ -8274,7 +8348,7 @@ const CONTRACT_SECTION_13 = {
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
-      "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Agent terminal to use.",
       "  --json                       Print JSON output."
     ],
     "sessions update": [
@@ -8285,20 +8359,20 @@ const CONTRACT_SECTION_13 = {
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
-      "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Agent terminal to use.",
       "  --json                       Print JSON output.",
       "",
       "JSON isPinned: true/false sets the Session pin star. Select the Session with --session, not a session field in JSON."
     ],
     "sessions set-agent": [
       "Usage:",
-      "python -m runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi> [--json] [--pane-dir <path>]",
+      "python -m runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi|agy> [--json] [--pane-dir <path>]",
       "",
       "Options:",
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
-      "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Agent terminal to use.",
       "  --json                       Print JSON output."
     ],
     "sessions associate": [
@@ -8309,7 +8383,7 @@ const CONTRACT_SECTION_13 = {
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
-      "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Agent terminal to use.",
       "  --json                       Print JSON output."
     ],
     "sessions detach": [
@@ -8320,7 +8394,7 @@ const CONTRACT_SECTION_13 = {
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
-      "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Agent terminal to use.",
       "  --json                       Print JSON output."
     ],
     "sessions overview": [
@@ -8331,7 +8405,7 @@ const CONTRACT_SECTION_13 = {
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
-      "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
+      "  --agent <codex|claude|cursor|opencode|pi|agy>  Agent terminal to use.",
       "  --json                       Print JSON output."
     ],
     "panes git-status": [
@@ -8533,7 +8607,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane links create --pane <pane-id> [--panel <panel-id>] [--json]",
       "  runpane links create --repo <repo-id> [--json]",
       "  runpane links create --session <session-id> [--json]",
-      "  runpane links create --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--repo <repo> | --session <id|name>] [--web] [--json]",
+      "  runpane links create --prompt <task> [--agent <codex|claude|cursor|opencode|pi|agy>] [--repo <repo> | --session <id|name>] [--web] [--json]",
       "",
       "Build a pane:// link that opens a Pane, panel, repository, or Session, or a start link that starts an agent on a prompt once the person confirms.",
       "",
@@ -8575,7 +8649,7 @@ const CONTRACT_SECTION_13 = {
     ],
     "agents start": [
       "Usage:",
-      "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--todo <T-n>] [--json] [--pane-dir <path>]",
+      "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi|agy>|--tool-command <command>) --prompt <task> --yes [--todo <T-n>] [--json] [--pane-dir <path>]",
       "",
       "`runpane agents start` ships in the npm package and the Pane app, not in the Python package.",
       "Run it with Node instead: npx --yes runpane@latest agents start"
@@ -9057,7 +9131,7 @@ const CONTRACT_SECTION_13 = {
     "handoff": [
       "Usage:",
       "  runpane handoff --template",
-      "  runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor|opencode|pi>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]",
+      "  runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor|opencode|pi|agy>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]",
       "",
       "`runpane handoff` ships in the npm package and the Pane app, not in the Python package.",
       "Run it with Node instead: npx --yes runpane@latest handoff"
@@ -9071,7 +9145,7 @@ const CONTRACT_SECTION_13 = {
     ],
     "models": [
       "Usage:",
-      "  runpane models [--agent <codex|claude|cursor|opencode|pi>] [--search <text>] [--machine <name> | --all] [--json]",
+      "  runpane models [--agent <codex|claude|cursor|opencode|pi|agy>] [--search <text>] [--machine <name> | --all] [--json]",
       "",
       "`runpane models` ships in the npm package and the Pane app, not in the Python package.",
       "Run it with Node instead: npx --yes runpane@latest models"
@@ -10006,7 +10080,7 @@ const CONTRACT_SECTION_14 = {
     "runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]",
     "runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
     "runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]",
-    "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi> [--json] [--pane-dir <path>]",
+    "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi|agy> [--json] [--pane-dir <path>]",
     "runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]",
     "runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]",
     "runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]",
@@ -23476,7 +23550,7 @@ const CONTRACT_SECTION_17 = {
       "When a command needs a secret (an API key, a token), run it with `runpane secrets exec --project <project> -- <command>`. If the secret is missing, ask the person with `runpane secrets request`; never ask them to paste a secret into the chat, and never print one. For a secret from 1Password, ask with `runpane secrets lease` and wait; when `secrets exec` fails with SECRET_LEASE_ENDED, run the next step it names.",
       "If WSL cannot reach Pane, the user may be running Windows Pane; try `/mnt/c/Users/<you>/.pane/bin/runpane doctor --json`, or with an older Pane build `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane doctor --json'`.",
       "If the repository exists on disk but is not saved in Pane, use `runpane repos add --path <repo> --yes --json` before creating panes.",
-      "Use `runpane agents doctor --agent <codex|claude|cursor|opencode|pi> --repo <selector> --json` when agent availability differs across host, Windows, WSL, or repo environments.",
+      "Use `runpane agents doctor --agent <codex|claude|cursor|opencode|pi|agy> --repo <selector> --json` when agent availability differs across host, Windows, WSL, or repo environments.",
       "Use `runpane panes create --wait-ready` to create Panes, wait for each agent's input box, and verify its starting message in one call.",
       "Use `runpane panels screen` for compact current state, including Claude and Codex composer state. Use `panels wait` for create-time readiness or text checks. Use `runpane watch --follow` to block on workspace transitions (READY, BLOCKED, IDLE, STUCK, EXIT) without polling, or `runpane watch --until-event` to exit on the first one. Use `panels submit` to send and submit a new turn. Use `panels submit-composer --strategy auto` only for a composer that was filled separately.",
       "Use `runpane panels input` only when exact bytes are required, such as Ctrl-C or handcrafted terminal input.",
@@ -23508,7 +23582,7 @@ const CONTRACT_SECTION_17 = {
         "name": "agents doctor",
         "summary": "Check whether Codex or Claude is available in the repo environment Pane will use.",
         "arguments": [
-          "--agent <codex|claude|cursor|opencode|pi>",
+          "--agent <codex|claude|cursor|opencode|pi|agy>",
           "--repo <selector>",
           "--json"
         ]
@@ -23637,7 +23711,7 @@ const CONTRACT_SECTION_17 = {
         "arguments": [
           "--repo <selector>",
           "--name <name>",
-          "--agent <codex|claude|cursor|opencode|pi>",
+          "--agent <codex|claude|cursor|opencode|pi|agy>",
           "--tool-command <command>",
           "--prompt <text>",
           "--initial-input-file <path|->",
@@ -23718,7 +23792,7 @@ const CONTRACT_SECTION_17 = {
         "summary": "Open reviewer, QA, fix or helper agent tabs inside an existing Pane; they share that Pane's worktree. The default for any later agent on existing work.",
         "arguments": [
           "--pane <pane-id>",
-          "--agent <codex|claude|cursor|opencode|pi>",
+          "--agent <codex|claude|cursor|opencode|pi|agy>",
           "--tool-command <command>",
           "--source <user|agent>",
           "--no-focus",
@@ -25011,7 +25085,7 @@ const CONTRACT_SECTION_17 = {
         },
         {
           "name": "--agent",
-          "value": "<codex|claude|cursor|opencode|pi>",
+          "value": "<codex|claude|cursor|opencode|pi|agy>",
           "required": false,
           "description": "Built-in agent terminal template to open. With --tool-command, the agent that command runs."
         },
@@ -25223,7 +25297,7 @@ const CONTRACT_SECTION_17 = {
         },
         {
           "name": "--agent",
-          "value": "<codex|claude|cursor|opencode|pi>",
+          "value": "<codex|claude|cursor|opencode|pi|agy>",
           "required": false,
           "description": "Agent whose terminal to create; with --tool-command, the agent that command runs."
         },
@@ -25869,7 +25943,7 @@ const CONTRACT_SECTION_17 = {
       "arguments": [
         {
           "name": "--agent",
-          "value": "<codex|claude|cursor|opencode|pi>",
+          "value": "<codex|claude|cursor|opencode|pi|agy>",
           "required": true,
           "description": "Built-in agent command to diagnose."
         },
@@ -26395,7 +26469,7 @@ const CONTRACT_SECTION_17 = {
         },
         {
           "name": "--agent",
-          "value": "<codex|claude|cursor|opencode|pi>",
+          "value": "<codex|claude|cursor|opencode|pi|agy>",
           "required": false,
           "description": "Built-in agent command template to launch. With --tool-command, the agent that command runs."
         },
@@ -27772,7 +27846,7 @@ const CONTRACT_SECTION_17 = {
         },
         {
           "name": "--agent",
-          "value": "<codex|claude|cursor|opencode|pi>",
+          "value": "<codex|claude|cursor|opencode|pi|agy>",
           "required": false,
           "description": "Built-in agent to launch."
         },
@@ -28167,7 +28241,7 @@ const CONTRACT_SECTION_17 = {
         }
       ],
       "examples": [
-        "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi> [--json] [--pane-dir <path>]"
+        "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi|agy> [--json] [--pane-dir <path>]"
       ],
       "jsonSchemas": [
         "sessionResult"
@@ -28627,7 +28701,7 @@ const CONTRACT_SECTION_17 = {
         },
         {
           "name": "--agent",
-          "value": "<codex|claude|cursor|opencode|pi>",
+          "value": "<codex|claude|cursor|opencode|pi|agy>",
           "required": false,
           "description": "Receiving agent; overrides the text."
         },
@@ -28766,7 +28840,7 @@ const CONTRACT_SECTION_17 = {
       "arguments": [
         {
           "name": "--agent",
-          "value": "<codex|claude|cursor|opencode|pi>",
+          "value": "<codex|claude|cursor|opencode|pi|agy>",
           "required": false,
           "description": "Only this agent's rows."
         },

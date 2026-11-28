@@ -5,7 +5,7 @@ import { newestFullRecord, SessionSettingsForm, settingsSave, withNewerSummary }
 function record(revision: number, overrides: Partial<OrchestrationSessionRecord> = {}): OrchestrationSessionRecord {
   return {
     id: 'session-1', name: 'Release', agent: 'claude', internalSessionId: 'internal-1',
-    panelIds: { claude: 'panel-claude', codex: 'panel-codex', cursor: 'panel-cursor', opencode: 'panel-opencode', pi: 'panel-pi' },
+    panelIds: { claude: 'panel-claude', codex: 'panel-codex', cursor: 'panel-cursor', opencode: 'panel-opencode', pi: 'panel-pi', agy: 'panel-agy' },
     goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [], associations: [],
     activity: [{ id: 'a1', kind: 'updated', message: 'Updated the goal.', at: '2026-11-26T10:00:00.000Z', source: 'user' }],
     profile: 'Answer in French.',

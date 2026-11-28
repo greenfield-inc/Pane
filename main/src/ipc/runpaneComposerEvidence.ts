@@ -89,6 +89,16 @@ export function assessComposerEvidence(args: {
     return before === after ? 'staged' : 'unknown';
   }
 
+  if (args.agentType === 'agy') {
+    const before = agyComposer(args.beforeText);
+    const after = agyComposer(args.afterText);
+    if (before === undefined || after === undefined) return 'unknown';
+    const content = (AGY_PASTE_MARKER.exec(before)?.[0] ?? marker).replace(/\s/gu, '');
+    if (!before.replace(/\s/gu, '').includes(content)) return 'unknown';
+    if (!after.replace(/\s/gu, '').includes(content)) return 'cleared';
+    return before === after ? 'staged' : 'unknown';
+  }
+
   if (!args.afterText.includes(marker)) {
     return 'cleared';
   }
@@ -125,6 +135,35 @@ function openCodeComposer(text: string): string | undefined {
 
 const PI_PASTE_MARKER = /\[paste #\d+(?: \+\d+ lines| \d+ chars)?\]/u;
 const PI_FOOTER_STATS = /(?:\d+(?:\.\d+)?%|\?)\/\d+(?:\.\d+)?[kMB]?\b/u;
+const AGY_PASTE_MARKER = /\[Pasted text #\d+(?: \+\d+ lines)?\]/u;
+const AGY_MODE_PLACEHOLDER = /^(?:(?:Auto|Default|Accept[- ]edits|Plan|Best-of-N)\s+mode:\s+(?:edits|file edits|research|parallel arms)\b.*(?:\(shift\+tab to cycle\)|\.{3}|…)|(?:Auto|Default|Accept[- ]edits|Plan|Best-of-N)(?:\s+mode:.*)?\s*\(shift\+tab to cycle\))$/iu;
+const AGY_FOOTER = /(?:\? for shortcuts|press ctrl\+[cd] again to exit|(?:default|accept-edits|auto|plan|best-of-n)\s*·\s*\S)/iu;
+
+/**
+ * Antigravity's composer: the rows between its `>` prompt's surrounding rules,
+ * when Antigravity's footer (and while working, its status tray) follows below.
+ */
+function agyComposer(text: string): string | undefined {
+  const lines = text.split(/\r?\n/u);
+  const rules: number[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (/^\s*─{20,}\s*$/u.test(lines[index])) rules.push(index);
+  }
+  for (let r = rules.length - 1; r >= 1; r -= 1) {
+    const top = rules[r - 1];
+    const bottom = rules[r];
+    if (bottom <= top + 1) continue;
+    const first = lines[top + 1].trim();
+    if (!/^>(?:\s|$)/u.test(first)) continue;
+    const tail = lines.slice(bottom + 1).filter(line => line.trim());
+    if (tail.length === 0 || tail.length > 10 || !AGY_FOOTER.test(tail[tail.length - 1])) return undefined;
+    if (tail.some(line => /^\s*Keyboard:.*\benter\s+(?:Select|Confirm)\b/iu.test(line))) return undefined;
+    const body = [first.replace(/^>\s?/u, ''), ...lines.slice(top + 2, bottom).map(line => line.trim())]
+      .filter(line => line.length > 0 && !AGY_MODE_PLACEHOLDER.test(line));
+    return body.join('\n');
+  }
+  return undefined;
+}
 
 /**
  * Pi's composer: the rows between its last two rules, when a footer of at most

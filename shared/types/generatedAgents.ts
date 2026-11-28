@@ -371,6 +371,79 @@ export const AGENTS_CONFIG = {
       "models": {
         "flag": "--model"
       }
+    },
+    "agy": {
+      "title": "Antigravity",
+      "label": "Antigravity",
+      "icon": "agy",
+      "description": "Open an Antigravity CLI terminal tab and allow the initial input to drive the agent.",
+      "executables": [
+        "agy"
+      ],
+      "terminal": {
+        "args": [],
+        "fullAccessArgs": [
+          "--dangerously-skip-permissions"
+        ],
+        "hotkey": "mod+alt+shift+a",
+        "configDir": ".agents",
+        "session": {
+          "flag": "--conversation",
+          "minimumVersion": "1.5.18",
+          "idPattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+          "idFlags": [
+            "--resume",
+            "-r"
+          ],
+          "exitIdPattern": "^Resume with -c \\(or command below\\):\\r?\\nagy --conversation=([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})[ \\t]*\\r?$",
+          "selectors": [
+            "--continue",
+            "-c",
+            "--resume",
+            "-r",
+            "--prompt-interactive",
+            "-i",
+            "--print",
+            "-p",
+            "--prompt",
+            "--remote-agent"
+          ]
+        }
+      },
+      "install": {
+        "url": "https://antigravity.google/docs/getting-started",
+        "command": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+        "fallbackPaths": [
+          "$HOME/.local/bin/agy"
+        ]
+      },
+      "transcriptDirs": [
+        ".gemini/antigravity-cli/conversations"
+      ],
+      "signIn": [
+        "acp",
+        "--login"
+      ],
+      "chat": {
+        "args": [
+          "acp"
+        ],
+        "minimumVersion": "1.5.18",
+        "apiKeyEnv": [
+          "GEMINI_API_KEY"
+        ],
+        "fullAccess": {
+          "args": true
+        },
+        "terminalConversationsLoad": true,
+        "registryIds": [
+          "antigravity-acp"
+        ]
+      },
+      "models": {
+        "flag": "--model",
+        "effortFlag": "--effort"
+      }
     }
   }
 } as const;

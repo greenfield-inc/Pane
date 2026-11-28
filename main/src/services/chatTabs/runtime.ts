@@ -1,3 +1,5 @@
+import { realpathSync } from 'fs';
+import path from 'path';
 import {
   client, methods, RequestError, type AvailableCommand, type ClientConnection, type ContentBlock, type CreateElicitationRequest, type CreateElicitationResponse,
   type ClientCapabilities, type InitializeResponse, type LoadSessionRequest, type LoadSessionResponse, type NewSessionRequest, type NewSessionResponse,
@@ -99,6 +101,12 @@ function withAsyncTasks(stream: Stream): Stream {
 }
 type AsyncTaskUpdate = { sessionUpdate: string; asyncTaskId: string; taskType?: string; state?: string; name?: string; description?: string; canStop?: boolean };
 
+function normalizeFolder(folder: string): string {
+  try { folder = realpathSync.native(folder); }
+  catch { folder = path.resolve(folder); }
+  return process.platform === 'win32' ? folder.toLowerCase() : folder;
+}
+
 /**
  * One chat tab's ACP client connection to its adapter process. It never holds
  * a terminal and never hands its session to one (D-20).
@@ -146,6 +154,7 @@ export class ChatTabRuntime {
    */
   async list(cwd: string, limit = CHAT_CONVERSATION_LIMIT): Promise<{ sessions: SessionInfo[]; complete: boolean }> {
     if (!this.canList()) throw new PaneError('CHAT_LIST_UNSUPPORTED', 'This agent adapter cannot list saved conversations.', 'Update Pane, or keep working in this conversation.');
+    const target = normalizeFolder(cwd);
     const sessions: SessionInfo[] = [];
     const seen = new Set<string>();
     let cursor: string | undefined;
@@ -153,7 +162,10 @@ export class ChatTabRuntime {
     do {
       if (cursor) seen.add(cursor);
       const response = await this.bounded(this.agent().request(methods.agent.session.list, cursor ? { cwd, cursor } : { cwd })).catch(error => { throw chatFailure(error, { code: 'CHAT_LIST_FAILED', next: 'Try again, or keep working in this conversation.' }); });
-      sessions.push(...response.sessions);
+      for (const session of response.sessions) {
+        // Native ACP servers such as `agy acp` return conversations across all folders even when `cwd` is sent.
+        if (!session.cwd || normalizeFolder(session.cwd) === target) sessions.push(session);
+      }
       cursor = response.nextCursor ?? undefined;
     } while (cursor && !seen.has(cursor) && sessions.length < limit);
     const complete = !(cursor && !seen.has(cursor)) && sessions.length <= limit;

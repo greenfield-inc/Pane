@@ -123,3 +123,35 @@ for (const alternateScreen of [false, true]) {
     });
   });
 }
+
+test('Add tool menu lists every built-in preset with its icon and launches Antigravity', async ({ page }) => {
+  await installElectronApiMock(page, {
+    platform: 'darwin',
+    initialConfig: { customCommands: [{ name: 'claude-glm', command: 'claude-glm' }, { name: 'gemini', command: 'gemini' }] },
+    initialProjects: [{ ...project, environment: 'darwin' }],
+    initialSessions: [worktreeSession],
+    initialPanels: terminalPanels(worktreeSession.id, 'wt'),
+    initialTerminalStates: { 'wt-0': { scrollbackBuffer: 'ready\r\n' }, 'wt-1': { scrollbackBuffer: 'ready\r\n' } },
+    activeProjectId: project.id,
+  });
+  await openSession(page, worktreeSession.name);
+  const before = (await panelCreates(page)).length;
+
+  await page.getByRole('button', { name: 'Add tool', exact: true }).first().click();
+  const menu = page.getByRole('menu');
+  await expect(menu.getByText('Presets', { exact: true })).toBeVisible();
+  for (const preset of AGENT_LAUNCH_PRESETS) {
+    const item = menu.getByRole('menuitem', { name: new RegExp(`^${preset.title}\\b`) });
+    await expect(item).toBeVisible();
+    await expect(item.locator('svg').first()).toBeVisible();
+  }
+  await menu.getByRole('menuitem', { name: /^Antigravity\b/ }).click();
+
+  await expect.poll(async () => (await panelCreates(page)).length).toBe(before + 1);
+  expect((await panelCreates(page)).at(-1)).toMatchObject({
+    sessionId: worktreeSession.id,
+    type: 'terminal',
+    title: 'Antigravity',
+    state: { customState: { initialCommand: 'agy --dangerously-skip-permissions' } },
+  });
+});

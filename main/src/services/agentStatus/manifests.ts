@@ -572,6 +572,82 @@ export const PI_MANIFEST: AgentManifest = {
   ],
 };
 
+/*
+ * Distilled from real Antigravity CLI (agy 1.5.18) PTY captures. Antigravity
+ * renders inline (entering the alternate screen only briefly during sign-in or
+ * folder trust) and also reports state over OSC 7501; these rules cover screen
+ * readiness (`--wait-ready`, held starting messages, `panels submit`) and
+ * live TUI overlays (`/model`, `/resume`, workspace trust, sign-in).
+ */
+export const AGY_MANIFEST: AgentManifest = {
+  id: 'agy',
+  rules: [
+    {
+      id: 'workspace_trust_prompt',
+      state: 'blocked',
+      priority: 1000,
+      region: 'whole_recent',
+      visibleBlocker: true,
+      regex: [/(?:^|\n)[^\S\n]*Do you trust the contents of this project\?[\s\S]*?Yes, I trust this folder\b(?![\s\S]*\n[^\S\n]*─{20,})/iu],
+    },
+    {
+      id: 'sign_in_prompt',
+      state: 'blocked',
+      priority: 950,
+      region: 'whole_recent',
+      visibleBlocker: true,
+      regex: [/(?:^|\n)[^\S\n]*Welcome to the Antigravity CLI\. You are currently not signed in\.(?![\s\S]*\n[^\S\n]*─{20,})/iu],
+    },
+    {
+      id: 'live_overlay',
+      state: 'blocked',
+      priority: 900,
+      region: 'bottom_non_empty_lines(20)',
+      visibleBlocker: true,
+      any: [
+        { lineRegex: [/^\s*Keyboard:.*\benter\s+(?:Select|Confirm)\b.*\besc\b/iu] },
+        {
+          contains: ['do you want to proceed?'],
+          any: [{ contains: ['allow'] }, { contains: ['yes'] }, { contains: ['esc'] }],
+        },
+        {
+          contains: ['allow once', 'always allow'],
+          any: [{ contains: ['reject'] }, { contains: ['deny'] }, { contains: ['esc'] }],
+        },
+      ],
+    },
+    {
+      id: 'working_tray',
+      state: 'working',
+      priority: 700,
+      region: 'bottom_non_empty_lines(12)',
+      visibleWorking: true,
+      any: [
+        {
+          regex: [/(?:^|\n)\s*─{20,}\s*\n\s*>(?:[^\n]*\n){1,6}\s*─{20,}\s*\n(?:[^\n]*\n){1,8}\s*─{20,}\s*\n/u],
+        },
+        {
+          lineRegex: [/^\s*[\u2800-\u28FF●]\s+.*(?:\bGenerating\b|\bThinking\b|\bRunning\b|\bWorking\b|·\s*\d+(?:m\d*s|s)\b)/u],
+        },
+        {
+          lineRegex: [/\besc to (?:interrupt|cancel)\b/iu],
+          not: [{ contains: ['tab complete'] }],
+        },
+      ],
+    },
+    {
+      id: 'idle_composer',
+      state: 'idle',
+      priority: 500,
+      region: 'bottom_non_empty_lines(8)',
+      visibleIdle: true,
+      regex: [
+        /(?:^|\n)\s*─{20,}\s*\n\s*>(?:\s[^\n]*)?\n(?:(?![^\S\n]*─{20,})[^\n]*\n)*\s*─{20,}\s*\n(?:[^\n]*\n){0,2}[^\n]*(?:\? for shortcuts|press ctrl\+[cd] again to exit|(?:default|accept-edits|auto|plan|best-of-n)\s*·\s*\S)[^\n]*\s*$/iu,
+      ],
+    },
+  ],
+};
+
 interface AgentManifestLookup {
   [agent: string]: AgentManifest;
 }
@@ -582,6 +658,7 @@ const MANIFESTS_BY_AGENT: AgentManifestLookup = {
   cursor: CURSOR_MANIFEST,
   opencode: OPENCODE_MANIFEST,
   pi: PI_MANIFEST,
+  agy: AGY_MANIFEST,
 };
 
 /**

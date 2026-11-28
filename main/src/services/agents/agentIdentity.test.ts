@@ -13,7 +13,7 @@ import {
 type CommandClassificationCase = {
   name: string;
   command: string | undefined;
-  expected: 'claude' | 'codex' | 'cursor' | 'opencode' | 'pi' | undefined;
+  expected: string | undefined;
   platformHint?: NodeJS.Platform;
 };
 
@@ -27,6 +27,8 @@ const COMMAND_CLASSIFICATION_CASES: CommandClassificationCase[] = [
   { name: 'Pi command with flags', command: 'pi --thinking high', expected: 'pi' },
   { name: 'Pi by absolute path', command: '/opt/homebrew/bin/pi', expected: 'pi' },
   { name: 'Pi after an environment assignment', command: 'PI_OFFLINE=1 pi', expected: 'pi' },
+  { name: 'direct Antigravity command', command: 'agy --dangerously-skip-permissions', expected: 'agy' },
+  { name: 'Antigravity by ~/.local/bin path', command: '/Users/dev/.local/bin/agy --dangerously-skip-permissions', expected: 'agy' },
   {
     name: 'path-qualified OpenCode command',
     command: '/usr/local/bin/opencode --auto',
@@ -162,7 +164,7 @@ const COMMAND_CLASSIFICATION_CASES: CommandClassificationCase[] = [
 
 describe('CLI_AGENT_TYPES', () => {
   it('lists the supported agents', () => {
-    expect([...CLI_AGENT_TYPES].sort()).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi']);
+    expect([...CLI_AGENT_TYPES].sort()).toEqual(['agy', 'claude', 'codex', 'cursor', 'opencode', 'pi']);
   });
 });
 
@@ -173,6 +175,7 @@ describe('isCliAgentType', () => {
     expect(isCliAgentType('cursor')).toBe(true);
     expect(isCliAgentType('opencode')).toBe(true);
     expect(isCliAgentType('pi')).toBe(true);
+    expect(isCliAgentType('agy')).toBe(true);
     expect(isCliAgentType('aider')).toBe(false);
     expect(isCliAgentType(undefined)).toBe(false);
     expect(isCliAgentType(null)).toBe(false);
@@ -194,6 +197,9 @@ describe('foreground process identity', () => {
     ['opencode', 'opencode'],
     ['/usr/local/bin/opencode', 'opencode'],
     ['pi', 'pi'],
+    ['agy', 'agy'],
+    ['/Users/dev/.local/bin/agy', 'agy'],
+    ['agy-helper', undefined],
     ['pip', undefined],
     ['/usr/local/bin/codex', 'codex'],
     ['codex.exe', 'codex'],
