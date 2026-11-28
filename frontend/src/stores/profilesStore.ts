@@ -78,7 +78,22 @@ export function shownFile(overview: ProfilesOverview | null, plugin: string, pro
   return ref ? entry?.profiles.find(item => item.ref === ref)?.cover : undefined;
 }
 
-const yamlAnswer = boundary.object({ data: boundary.optional(boundary.json), error: boundary.optional(boundary.string) });
+/**
+ * The file on disk the open place shows, for reading only: `shownFile`, or for a cover Pane
+ * generates (no cover file), the identity file its "What it does" comes from, so each poll keeps
+ * and refreshes that text (review F-4). Editing stays with `shownFile`: a generated cover isn't edited.
+ */
+export function displayedFile(overview: ProfilesOverview | null, plugin: string, profile: string, file: string): string | undefined {
+  const shown = shownFile(overview, plugin, profile, file);
+  if (shown || !isCoverPlace(file)) return shown;
+  const summary = overview?.plugins.find(item => item.name === plugin)?.profiles.find(item => item.name === profile);
+  const id = file.slice('cover:'.length);
+  if (!id) return summary?.entry || undefined;
+  const node = summary ? findNode(summary.tree, id) : undefined;
+  return node?.kind === 'subagent' ? node.identity || undefined : undefined;
+}
+
+const yamlAnswer =boundary.object({ data: boundary.optional(boundary.json), error: boundary.optional(boundary.string) });
 /** Parsed YAML by source: previews ask again on every render. */
 const parsedYaml = new Map<string, { data?: JsonValue; error?: string }>();
 
@@ -190,7 +205,7 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
         const overview = await answer(api().list(), profilesOverviewSchema).catch(() => undefined);
         if (overview && JSON.stringify(overview) !== JSON.stringify(get().overview)) set({ overview, error: null });
         const place = get().place;
-        const shown = place.level === 'profile' ? shownFile(get().overview, place.plugin, place.profile, place.file) : undefined;
+        const shown = place.level === 'profile' ? displayedFile(get().overview, place.plugin, place.profile, place.file) : undefined;
         const openKey = place.level === 'profile' && shown ? fileKey(place.plugin, shown) : null;
         // Files you aren't looking at and haven't edited are read again when opened.
         set(state => ({ saved: Object.fromEntries(Object.entries(state.saved).filter(([key]) => key === openKey || key in state.drafts)) }));
