@@ -136,7 +136,7 @@ export function ProfileFilePane({ plugin, profile, file, notify, onShow }: {
   } else if (saved === undefined || !path) body = <div className="flex-1" />;
   else {
     const kind = previewKind(path);
-    body = kind === 'html' ? <HtmlPage html={value} title={`${plugin.name}/${path}`} />
+    body = kind === 'html' ? <HtmlPage html={value} title={`${plugin.name}/${path}`} subagent={cover ? subagent : undefined} />
       : kind === 'markdown' ? <MarkdownWithMeta source={value} />
         : kind === 'yaml' ? <YamlPreview source={value} />
           : <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap px-6 py-4 font-mono text-[12.5px] text-text-primary" data-testid="profiles-text-preview">{value}</pre>;
