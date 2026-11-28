@@ -461,7 +461,8 @@ describe('profile sync: review fixes (fix round 2)', () => {
 });
 
 describe('profile sync: review fixes (fix round 3)', () => {
-  it('leaves the live copy and its receipt in place when they can\'t be set aside (F-3)', async () => {
+  // Read-only folders are how the test makes a move fail; Windows ignores a folder's mode bits.
+  it.skipIf(process.platform === 'win32')('leaves the live copy and its receipt in place when they can\'t be set aside (F-3)', async () => {
     const a = computer('studio', 'a-id');
     const b = computer('build', 'b-id');
     await installFixture(a.paneDir);
