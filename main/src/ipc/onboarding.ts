@@ -33,7 +33,7 @@ const execAsync = promisify(exec);
  * environment on launch, and gh may wait on the network.
  */
 async function runProbe(command: string, timeout?: number): Promise<string> {
-  return (await execAsync(command, shellExecOpts({ encoding: 'utf-8', timeout }))).stdout;
+  return (await execAsync(command, shellExecOpts({ encoding: 'utf-8', timeout, windowsHide: true }))).stdout;
 }
 
 /** The agents the first-run screen offers on this platform, and whether a login shell finds each CLI. */
@@ -229,6 +229,8 @@ function spawnDetached(command: string, args: string[]): Promise<void> {
       detached: true,
       stdio: 'ignore',
       env: { ...process.env, PATH: getShellPath() },
+      // It opens a terminal the person types in, so its window is wanted.
+      windowsHide: false,
     });
 
     child.once('error', reject);

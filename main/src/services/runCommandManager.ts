@@ -415,7 +415,7 @@ export class RunCommandManager extends EventEmitter {
         // Windows: Use WMIC to get child processes
         const result = execSync(
           `wmic process where (ParentProcessId=${parentPid}) get ProcessId`,
-          { encoding: 'utf8' }
+          { encoding: 'utf8', windowsHide: true }
         );
         
         const lines = result.split('\n').filter((line: string) => line.trim());
@@ -493,14 +493,14 @@ export class RunCommandManager extends EventEmitter {
       if (platform === 'win32') {
         // On Windows, use taskkill to terminate the process tree
         try {
-          await execAsync(`taskkill /F /T /PID ${pid}`);
+          await execAsync(`taskkill /F /T /PID ${pid}`, { windowsHide: true });
           this.logger?.verbose(`Successfully killed Windows process tree ${pid}`);
         } catch (error) {
           this.logger?.warn(`Error killing Windows process tree: ${error instanceof Error ? error : new Error(String(error))}`);
           // Fallback: kill descendants individually
           for (const childPid of descendantPids) {
             try {
-              await execAsync(`taskkill /F /PID ${childPid}`);
+              await execAsync(`taskkill /F /PID ${childPid}`, { windowsHide: true });
             } catch {
               // Process might already be dead
             }

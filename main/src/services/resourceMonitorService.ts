@@ -186,7 +186,7 @@ export class ResourceMonitorService {
         ({ stdout } = await execFileAsync(
           'wsl.exe',
           ['-d', distro, '--', 'sh', '-c', WSL_ENVIRON_SCAN_SCRIPT],
-          { encoding: 'utf8', timeout: 4000 }
+          { encoding: 'utf8', timeout: 4000, windowsHide: true }
         ));
         this.wslScanFailedDistros.delete(distro);
       } catch (error) {

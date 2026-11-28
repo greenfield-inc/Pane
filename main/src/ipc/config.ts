@@ -248,7 +248,7 @@ export function registerConfigHandlers(
 
         const enumerateWindowsFonts = (): void => {
           const psCommand = `[System.Reflection.Assembly]::LoadWithPartialName('System.Drawing') | Out-Null; (New-Object System.Drawing.Text.InstalledFontCollection).Families | ForEach-Object { $_.Name }`;
-          execFile('powershell.exe', ['-NoProfile', '-Command', psCommand], { timeout: 10000 }, (psError, psStdout) => {
+          execFile('powershell.exe', ['-NoProfile', '-Command', psCommand], { timeout: 10000, windowsHide: true }, (psError, psStdout) => {
             if (psError) {
               console.warn('[Config] PowerShell font enumeration failed:', psError.message);
               resolve([]);

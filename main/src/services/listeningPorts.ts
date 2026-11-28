@@ -299,7 +299,7 @@ async function readListeningSockets(): Promise<ListeningSocket[]> {
 
 function run(command: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { encoding: 'utf8', timeout: READ_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
+    execFile(command, args, { encoding: 'utf8', timeout: READ_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (error, stdout) => {
       // lsof exits 1 when nothing matches, or when it could not read every process; its output is still the answer.
       if (error && error.code !== 1) reject(error);
       else resolve(stdout);

@@ -569,7 +569,7 @@ export function findPaneSourceRoot(startDir: string): string | null {
 }
 
 function runCommand(command: string, args: string[]): CommandResult {
-  const result = spawnSync(command, args, { encoding: 'utf8', stdio: 'pipe', timeout: 5_000 });
+  const result = spawnSync(command, args, { encoding: 'utf8', stdio: 'pipe', timeout: 5_000, windowsHide: true });
   return {
     ok: result.status === 0,
     stdout: commandOutputToString(result.stdout),

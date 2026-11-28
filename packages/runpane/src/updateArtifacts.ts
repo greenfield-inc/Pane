@@ -25,7 +25,7 @@ function macSigner(bundle: string): string {
 }
 function windowsSigner(file: string): string {
   const script = `$s=Get-AuthenticodeSignature -LiteralPath '${file.replace(/'/g, "''")}'; if ($s.Status -ne 'Valid') { throw 'Invalid application signature' }; $s.SignerCertificate.Thumbprint`;
-  return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', timeout: 30_000 }).trim();
+  return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', timeout: 30_000, windowsHide: true }).trim();
 }
 
 export async function stageApp(host: UpdateHost, requested: string, directory: string): Promise<StagedApp> {

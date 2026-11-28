@@ -19,7 +19,7 @@ export interface ArchiveProcessObservation extends ArchiveProcessIdentity {
 /** A failed snapshot must never be interpreted as an empty process table. */
 export async function readArchiveProcesses(): Promise<ArchiveProcessObservation[]> {
   // LC_ALL=C: lstart is compared as text with machine health's process table, and other locales reorder it.
-  const options = { encoding: 'utf8' as const, timeout: 5000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } };
+  const options = { encoding: 'utf8' as const, timeout: 5000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' }, windowsHide: true };
   const { stdout } = process.platform === 'win32'
     ? await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
       '$ErrorActionPreference = "Stop"; Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { [long]$ticks = $_.CreationDate.ToUniversalTime().Ticks; $birth = ($ticks - ($ticks % [long]10)).ToString(); "$($_.ProcessId) $($_.ParentProcessId) $birth" } }'], options)
@@ -56,7 +56,7 @@ async function terminateArchiveProcesses(identities: readonly ArchiveProcessIden
     // time. Kill uses that handle, not a later lookup of a potentially reused PID.
     await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
       `@(${records}) | ForEach-Object { try { $p = [Diagnostics.Process]::GetProcessById($_.Pid); $null = $p.Handle; [long]$ticks = $p.StartTime.ToUniversalTime().Ticks; if (($ticks - ($ticks % [long]10)).ToString() -eq $_.Started) { $p.Kill() } } catch { } finally { if ($p) { $p.Dispose(); $p = $null } } }`],
-    { timeout: 5000, maxBuffer: 1024 * 1024 });
+    { timeout: 5000, maxBuffer: 1024 * 1024, windowsHide: true });
     return;
   }
   // POSIX exposes no portable process handle: re-read immediately before each
