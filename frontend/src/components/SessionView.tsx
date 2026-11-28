@@ -35,7 +35,7 @@ import { usePanelStore } from '../stores/panelStore';
 import { useProjectViewActionsStore } from '../stores/projectViewActionsStore';
 import { panelApi } from '../services/panelApi';
 import { requestBrowserNavigation } from './panels/browser/browserNavigation';
-import { setPendingViewCommit } from './panels/diff/pendingViewCommit';
+import { setPendingViewCommit, type ViewCommitEventDetail, type ViewCommitRequest } from './panels/diff/pendingViewCommit';
 import { PanelTabBar } from './panels/PanelTabBar';
 import { TabStripSkeleton } from './panels/TabStripSkeleton';
 import { TerminalSkeleton } from './panels/TerminalSkeleton';
@@ -807,19 +807,19 @@ export const SessionView = memo(() => {
   }, [inspectorRequest, activeSession?.id, openInspector]);
 
   const handleCommitClick = useCallback(
-    async (commitHash: string) => {
+    async (commitHash: string, olderHash?: string) => {
       if (!activeSession || sessionPanels.length === 0) return;
       const diffPanel = sessionPanels.find(p => p.type === 'diff');
       if (!diffPanel) return;
-      // Store pending hash before dispatching — if the diff panel is not
+      // Store the pending request before dispatching — if the diff panel is not
       // currently active, CombinedDiffView is unmounted and will read this
       // module-level variable when it mounts after the panel switch.
-      setPendingViewCommit(activeSession.id, commitHash);
+      const request: ViewCommitRequest = olderHash === undefined ? { commitHash } : { commitHash, olderHash };
+      setPendingViewCommit(activeSession.id, request);
       openInspector('changes');
       window.setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('diff:view-commit', {
-          detail: { sessionId: activeSession.id, commitHash },
-        }));
+        const detail: ViewCommitEventDetail = { sessionId: activeSession.id, ...request };
+        window.dispatchEvent(new CustomEvent('diff:view-commit', { detail }));
       }, 0);
     },
     [activeSession, sessionPanels, openInspector]

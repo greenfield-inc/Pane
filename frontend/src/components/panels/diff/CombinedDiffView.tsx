@@ -10,7 +10,7 @@ import { ChangesList } from './ChangesList';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../../ui/Skeleton';
 import { buildChangesRows, type ChangesRow } from './changesListModel';
 import { editorDiffRefForFile, isMutableScope, normalizeEditorDiffRef, sameScope, scopeKey, scopeLabel } from './diffScope';
-import { clearPendingViewCommit, takePendingViewCommit } from './pendingViewCommit';
+import { clearPendingViewCommit, takePendingViewCommit, viewCommitScope, type ViewCommitEventDetail } from './pendingViewCommit';
 
 const SESSION_SCOPE: DiffScope = { kind: 'session' };
 
@@ -118,12 +118,12 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
 
   useEffect(() => {
     const pending = takePendingViewCommit(sessionId);
-    if (pending !== null) setScope(pending === 'index' ? { kind: 'working-tree' } : { kind: 'commit', hash: pending });
+    if (pending !== null) setScope(viewCommitScope(pending));
     const handler = (event: Event) => {
       // SAFETY: This listener is registered only for the app-owned diff:view-commit event.
-      const detail = (event as CustomEvent<{ sessionId: string; commitHash: string }>).detail;
+      const detail = (event as CustomEvent<ViewCommitEventDetail>).detail;
       if (detail.sessionId !== sessionId) return;
-      setScope(detail.commitHash === 'index' ? { kind: 'working-tree' } : { kind: 'commit', hash: detail.commitHash });
+      setScope(viewCommitScope(detail));
       clearPendingViewCommit();
     };
     window.addEventListener('diff:view-commit', handler);
