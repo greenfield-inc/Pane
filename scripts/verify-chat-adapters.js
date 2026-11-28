@@ -102,6 +102,19 @@ function runAgentFarm(app, entry, args, env = {}) {
   });
 }
 
+/**
+ * The plugin files, as `plugins/...` paths, the source package has and the archive lacks
+ * (`missing`), and those the archive has and the source package lacks (`added`), each sorted.
+ */
+function pluginInventoryDifference(packedFiles, sourceFiles) {
+  const packed = new Set(packedFiles);
+  const source = new Set(sourceFiles);
+  return {
+    missing: [...source].filter(file => !packed.has(file)).sort(),
+    added: [...packed].filter(file => !source.has(file)).sort(),
+  };
+}
+
 /** Checks the bundled Agent Farm in one packed app; returns its log line. */
 async function verifyAgentFarm(app, files, runnable) {
   const root = `/node_modules/${AGENT_FARM}/`;
@@ -115,13 +128,16 @@ async function verifyAgentFarm(app, files, runnable) {
   const source = path.dirname(require.resolve(`${AGENT_FARM}/package.json`));
   const sourceVersion = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8')).version;
   if (sourceVersion !== version) throw new Error(`${app.asar} carries ${AGENT_FARM}@${version}, but node_modules has ${sourceVersion}; run pnpm install and package again.`);
-  const packed = files.filter(file => file.startsWith(`${root}plugins/`));
+  const packed = files.filter(file => file.startsWith(`${root}plugins/`) && !('files' in asar.statFile(app.asar, path.join(...file.slice(1).split('/')), false)));
   const sourceFiles = [];
   const walk = dir => { for (const entry of fs.readdirSync(dir, { withFileTypes: true })) { const full = path.join(dir, entry.name); if (entry.isDirectory()) walk(full); else sourceFiles.push(full); } };
   walk(path.join(source, 'plugins'));
+  const difference = pluginInventoryDifference(packed.map(file => file.slice(root.length)), sourceFiles.map(file => path.relative(source, file).split(path.sep).join('/')));
+  if (difference.missing.length) throw new Error(`${app.asar} is missing ${AGENT_FARM}/${difference.missing[0]}, so its plugin would fail Agent Farm's integrity check. Check build.files in package.json.`);
+  // greenfield's plugin.yaml carries no checksums, so Agent Farm would install a file packing added (review F-5).
+  if (difference.added.length) throw new Error(`Packing added ${AGENT_FARM}/${difference.added[0]} to ${app.asar}, which isn't in the installed package; Agent Farm would install it into Pane's profiles. Check build.files and anything that writes under node_modules/${AGENT_FARM}/plugins.`);
   for (const file of sourceFiles) {
     const relative = path.relative(source, file).split(path.sep).join('/');
-    if (!packed.includes(`${root}${relative}`)) throw new Error(`${app.asar} is missing ${AGENT_FARM}/${relative}, so its plugin would fail Agent Farm's integrity check. Check build.files in package.json.`);
     const bytes = asar.extractFile(app.asar, path.join('node_modules', ...AGENT_FARM.split('/'), ...relative.split('/')));
     if (!bytes.equals(fs.readFileSync(file))) throw new Error(`Packing changed ${AGENT_FARM}/${relative} in ${app.asar}; Agent Farm refuses a packed plugin whose files differ from its checksums, and Pane then sets up no profiles. Check that package.json build.removePackageScripts is false and nothing else rewrites files under node_modules.`);
   }
@@ -194,4 +210,4 @@ async function main() {
 
 if (require.main === module) main().catch(error => { console.error(`[verify-chat-adapters] ${error.message}`); process.exit(1); });
 
-module.exports = { verifyChatAdapters };
+module.exports = { verifyChatAdapters, pluginInventoryDifference };
