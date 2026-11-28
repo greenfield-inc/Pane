@@ -229,6 +229,17 @@ impl State {
         }
     }
 
+    /// A `--dev` relay's state with default limits and no DNS helpers, for unit tests.
+    #[cfg(test)]
+    pub fn for_tests() -> Self {
+        use clap::Parser;
+        let cfg = Config::parse_from(["pane-relay", "--dev"]);
+        let alerts = Alerts::load(&cfg).unwrap();
+        let registry = Registry::new(&[], None, None, 10).unwrap();
+        let direct = "127.0.0.1:1".parse().unwrap();
+        Self::new(cfg, "pane.localhost".into(), registry, alerts, direct, 8443)
+    }
+
     pub fn computers(&self) -> usize {
         self.agents.lock().unwrap().len()
     }

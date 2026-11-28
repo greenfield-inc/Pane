@@ -7,7 +7,7 @@ use std::net::Ipv4Addr;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{Notify, oneshot};
 
@@ -553,27 +553,18 @@ async fn post(
     let tcp = TcpStream::connect((host, port))
         .await
         .map_err(|e| format!("connect: {e}"))?;
-    let mut answer = Vec::new();
-    if tls {
+    let answer = if tls {
         let name = rustls::pki_types::ServerName::try_from(host.to_string())
             .map_err(|_| "bad registry host")?;
-        let mut s = tokio_rustls::TlsConnector::from(tls_config)
+        let s = tokio_rustls::TlsConnector::from(tls_config)
             .connect(name, tcp)
             .await
             .map_err(|e| format!("tls: {e}"))?;
-        s.write_all(head.as_bytes())
-            .await
-            .map_err(|e| e.to_string())?;
-        s.write_all(body).await.map_err(|e| e.to_string())?;
-        let _ = s.read_to_end(&mut answer).await;
+        exchange(s, head.as_bytes(), body).await
     } else {
-        let mut s = tcp;
-        s.write_all(head.as_bytes())
-            .await
-            .map_err(|e| e.to_string())?;
-        s.write_all(body).await.map_err(|e| e.to_string())?;
-        let _ = s.read_to_end(&mut answer).await;
+        exchange(tcp, head.as_bytes(), body).await
     }
+    .map_err(|e| e.to_string())?;
     let status = String::from_utf8_lossy(&answer)
         .split(' ')
         .nth(1)
@@ -584,6 +575,22 @@ async fn post(
     } else {
         Err(format!("registry answered {status:?}"))
     }
+}
+
+/// Sends one request and reads the answer until the helper closes. A batch of updates can be
+/// megabytes, and TLS may hold its last bytes back until a flush: without one the helper
+/// would wait for them, and the relay for its answer, until `POST_TIMEOUT`.
+async fn exchange<S: AsyncRead + AsyncWrite + Unpin>(
+    mut s: S,
+    head: &[u8],
+    body: &[u8],
+) -> std::io::Result<Vec<u8>> {
+    s.write_all(head).await?;
+    s.write_all(body).await?;
+    s.flush().await?;
+    let mut answer = Vec::new();
+    let _ = s.read_to_end(&mut answer).await;
+    Ok(answer)
 }
 
 fn client_config(extra_ca: Option<&Path>) -> Result<Arc<rustls::ClientConfig>, crate::Error> {
@@ -666,4 +673,30 @@ fn any_certificate_config() -> Result<Arc<rustls::ClientConfig>, crate::Error> {
             .with_custom_certificate_verifier(Arc::new(AnyCertificate(provider)))
             .with_no_client_auth(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::io::test_tls;
+
+    // A large batch of updates reaches the helper whole, and its answer comes back.
+    #[tokio::test]
+    async fn exchange_sends_a_large_body_whole() {
+        let (relay, mut helper) = test_tls::pair().await;
+        let head = b"POST /v1/registry HTTP/1.1\r\nconnection: close\r\n\r\n";
+        // Larger than the pipe, so the body's last TLS record has to wait for the flush.
+        let body = vec![b'x'; 16 * test_tls::PIPE];
+        let mut got = vec![0u8; head.len() + body.len()];
+        let (answer, read) = tokio::join!(exchange(relay, head, &body), async {
+            let read =
+                tokio::time::timeout(Duration::from_secs(5), helper.read_exact(&mut got)).await;
+            helper.write_all(b"HTTP/1.1 200 OK\r\n\r\n").await.unwrap();
+            helper.shutdown().await.unwrap();
+            read
+        });
+        read.expect("the helper got the whole request").unwrap();
+        assert_eq!(got, [&head[..], &body].concat());
+        assert_eq!(answer.unwrap(), b"HTTP/1.1 200 OK\r\n\r\n");
+    }
 }
