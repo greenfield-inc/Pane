@@ -1313,7 +1313,13 @@ async function initializeServices() {
     },
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
-  machineMirrorHandlers = registerMachineMirrorHandlers(ipcMain, () => machineMirror, machineConnections);
+  // This computer's own Sessions list beside the mirrored machines, for its rows in a window showing another machine (T-116 D-20).
+  machineMirrorHandlers = registerMachineMirrorHandlers(ipcMain, () => machineMirror, machineConnections, {
+    index: async () => (await paneDaemonHost?.services.sessionSnapshots?.index()) ?? [],
+    snapshot: async sessionId => paneDaemonHost?.services.sessionSnapshots?.snapshot(sessionId),
+  });
+  // A switch to a machine this connection heard from in the last 30 s skips the connection checklist.
+  remotePaneClientController.setRecentAnswers((computerId, ms) => machineConnections?.answeredWithin(computerId, ms) ?? null);
   setDeviceMachines(machineConnections);
   const machines = machineConnections;
   powerMonitor.on('suspend', () => machines.suspend());

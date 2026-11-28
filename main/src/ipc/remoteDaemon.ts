@@ -113,26 +113,57 @@ export function registerRemoteDaemonHandlers(
     }
   }
 
+  /**
+   * What a client transition writes, built from config read again once its connection work is
+   * done (F-7): a Remote Access change saved while a switch connected is kept, not overwritten
+   * by the copy the switch read when it started.
+   */
+  interface RemoteClientTransitionResult {
+    next: (latest: RemoteDaemonConfig) => RemoteDaemonConfig;
+    resyncRenderer: boolean;
+  }
+
   async function applyRemoteClientTransition(
-    transition: (current: RemoteDaemonConfig) => Promise<{
-      next: RemoteDaemonConfig;
-      resyncRenderer: boolean;
-    }> | {
-      next: RemoteDaemonConfig;
-      resyncRenderer: boolean;
-    },
+    transition: (current: RemoteDaemonConfig) => Promise<RemoteClientTransitionResult> | RemoteClientTransitionResult,
   ): Promise<RemoteDaemonConfig> {
-    const current = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
-    const result = await transition(current);
-    const next = normalizeRemoteDaemonConfig(result.next);
+    // A switch owns the connection until its config is written: a config write from elsewhere
+    // meanwhile still names the old machine and must not close the switch's connection.
+    const releaseSync = remotePaneClientController.holdConfigSync();
+    try {
+      const current = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
+      const result = await transition(current);
+      const next = normalizeRemoteDaemonConfig(result.next(getRemoteDaemonConfig(configManager.getConfig().remoteDaemon)));
+      // A switch whose dial was ready, cancelled before it was committed (an arrow, QA 1781 F-3): the
+      // window never showed the new machine, so the machine it shows is written back instead.
+      const switchedTo = next.client.mode === 'remote' && result.resyncRenderer ? next.client.activeProfileId : null;
+      const cancelledBeforeCommit = (): boolean => switchedTo !== null && remotePaneClientController.takeCancelBeforeCommit(switchedTo);
+      const stayPut = (latest: RemoteDaemonConfig): RemoteDaemonConfig => normalizeRemoteDaemonConfig({ ...latest, client: { ...latest.client, mode: current.client.mode, activeProfileId: current.client.activeProfileId } });
+      const refuse = (): PaneError => new PaneError('ERR_REMOTE_SWITCH_CANCELLED', 'The switch was cancelled before it finished.', 'Nothing to do: the window stays on the machine it shows.');
 
-    await configManager.updateConfig({ remoteDaemon: next });
-    if (result.resyncRenderer) {
-      if (next.client.mode === 'remote') remotePaneClientController.commitActivation();
-      else requestRendererRemoteResync();
+      if (cancelledBeforeCommit()) {
+        await configManager.updateConfig({ remoteDaemon: stayPut(next) });
+        throw refuse();
+      }
+      try {
+        await configManager.updateConfig({ remoteDaemon: next });
+      } catch (error) {
+        // Not committed: the connection it dialed closes and the window stays where it is.
+        if (switchedTo !== null) remotePaneClientController.abandonActivation(switchedTo);
+        throw error;
+      }
+      if (cancelledBeforeCommit()) {
+        await configManager.updateConfig({ remoteDaemon: stayPut(getRemoteDaemonConfig(configManager.getConfig().remoteDaemon)) });
+        throw refuse();
+      }
+      if (result.resyncRenderer) {
+        if (next.client.mode === 'remote') remotePaneClientController.commitActivation();
+        else requestRendererRemoteResync();
+      }
+
+      return next;
+    } finally {
+      releaseSync();
     }
-
-    return next;
   }
 
   ipcMain.handle('remote-daemon:get-config', async () => {
@@ -400,15 +431,15 @@ export function registerRemoteDaemonHandlers(
         }
 
         return {
-          next: {
-            ...current,
+          next: (latest) => ({
+            ...latest,
             client: {
-              ...current.client,
-              computers: saveProfileRoute(current.client.computers, profile),
-              activeProfileId: connected ? profile.id : current.client.activeProfileId,
-              mode: connected ? 'remote' : current.client.mode,
+              ...latest.client,
+              computers: saveProfileRoute(latest.client.computers, profile),
+              activeProfileId: connected ? profile.id : latest.client.activeProfileId,
+              mode: connected ? 'remote' : latest.client.mode,
             },
-          },
+          }),
           resyncRenderer: connected,
         };
       });
@@ -600,15 +631,15 @@ export function registerRemoteDaemonHandlers(
         }
 
         return {
-          next: {
-            ...current,
+          next: (latest) => ({
+            ...latest,
             client: {
-              ...current.client,
-              computers: current.client.computers.filter((computer) => computer.id !== decodedProfileId),
+              ...latest.client,
+              computers: latest.client.computers.filter((computer) => computer.id !== decodedProfileId),
               activeProfileId,
               mode,
             },
-          },
+          }),
           resyncRenderer: isActiveRemoteProfile,
         };
       });
@@ -648,7 +679,8 @@ export function registerRemoteDaemonHandlers(
       }
 
       return {
-        next: candidate,
+        // The switch changes only which machine is active; everything else is as saved now.
+        next: (latest) => ({ ...latest, client: { ...latest.client, ...nextState } }),
         resyncRenderer: true,
       };
     });
@@ -679,6 +711,18 @@ export function registerRemoteDaemonHandlers(
       return { success: true, data: remotePaneClientController.dismissCheck(checkId) };
     } catch (error) {
       return { success: false, error: getErrorMessage(error, 'Failed to close the connection checklist') };
+    }
+  });
+
+  // Out of band: a switch waiting on another's probes asks for them to stop, so it runs now (T-128, D-6).
+  ipcMain.handle('remote-daemon:cancel-switch', async (_event, computerId: PaneCommandValue) => {
+    try {
+      const id = decodeBoundary(computerId, boundary.nonEmptyString);
+      // `committed`: too late, the window is going there; `nothing`: no such switch was running (R4-SF-1).
+      const outcome = remotePaneClientController.cancelSwitch(id);
+      return { success: true, data: { cancelled: outcome === 'cancelled', outcome } };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error, 'Failed to cancel the machine switch') };
     }
   });
 

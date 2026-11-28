@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { API } from '../utils/api';
+import { connectionReadOutcome } from './connectionRead';
 import {
   createDefaultRemoteDaemonHostRuntimeState,
   createDefaultRemotePaneConnectionState,
@@ -15,6 +16,8 @@ import {
 export function useRemoteRuntimeState() {
   const [connectionState, setConnectionState] = useState<RemotePaneConnectionState>(createDefaultRemotePaneConnectionState);
   const [connectionKnown, setConnectionKnown] = useState(false);
+  /** The first read of the connection failed, and no change has said which machine the window shows. */
+  const [connectionReadFailed, setConnectionReadFailed] = useState(false);
   const [hostState, setHostState] = useState<RemoteDaemonHostRuntimeState>(createDefaultRemoteDaemonHostRuntimeState);
 
   useEffect(() => {
@@ -30,9 +33,14 @@ export function useRemoteRuntimeState() {
     const fetchConnectionState = async () => {
       try {
         const response = await API.remoteDaemon.getConnectionState();
-        if (!cancelled && !connectionUpdated && response.success && response.data) applyConnectionState(response.data);
+        if (cancelled || connectionUpdated) return;
+        const outcome = connectionReadOutcome(response);
+        if (outcome === 'state' && response.data) applyConnectionState(response.data);
+        else if (outcome === 'local') setConnectionKnown(true);
+        else setConnectionReadFailed(true);
       } catch (error) {
         console.error('Failed to fetch remote connection state:', error);
+        if (!cancelled && !connectionUpdated) setConnectionReadFailed(true);
       }
     };
     const fetchHostState = async () => {
@@ -62,5 +70,5 @@ export function useRemoteRuntimeState() {
     };
   }, []);
 
-  return { connectionState, connectionKnown, hostState };
+  return { connectionState, connectionKnown, connectionReadFailed, hostState };
 }

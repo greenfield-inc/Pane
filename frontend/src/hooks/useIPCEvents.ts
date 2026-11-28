@@ -19,6 +19,7 @@ import { devLog } from '../utils/console';
 import { claimCreatedPane, markAppReady } from '../utils/journeyTimings';
 import type { Session, SessionOutput, GitStatus } from '../types/session';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
+import { noteWindowHostReset } from '../stores/windowLink';
 
 interface SessionEventData {
   sessionId: string;
@@ -50,8 +51,14 @@ let runtimeGeneration = 0;
 async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => void, hostChanged: boolean, ownsRuntime: () => boolean): Promise<void> {
   if (!ownsRuntime()) return;
   if (hostChanged) {
+    // Said first, while the outgoing views are still on screen: an engage that just landed in one
+    // takes back what is being typed there before the reset clears it (build 12).
+    noteWindowHostReset();
     // Invalidate outgoing Session requests and tile memory before any host read.
     useOrchestrationSessionStore.getState().invalidateHost();
+    // A press on one of this host's Sessions waits for its list (T-128, T-132): read it now, beside
+    // the rest of the restore, so the pressed Session opens a round trip sooner.
+    if (useOrchestrationSessionStore.getState().landingArmed()) void useOrchestrationSessionStore.getState().refresh().catch(() => undefined);
     useSessionStore.getState().invalidateHost();
     usePanelStore.setState({ panels: {}, activePanels: {}, layouts: {}, focusedGroupIds: {}, activationRequests: {},
       agentStatus: {}, agentStatusSession: {}, agentStatusReason: {}, agentStatusSnapshotVersion: 0, activityStatus: {}, lastActivityAt: {}, unviewedCompletedActivity: {} });
@@ -125,7 +132,12 @@ async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
   }
   // A switch clears the outgoing host's selection before restoring the incoming
   // host's; don't let those intermediate states be remembered as either one's.
-  await withHostNavigationWritesPaused(() => reloadRemoteRuntimeState(loadSessions, true, ownsRuntime));
+  try {
+    await withHostNavigationWritesPaused(() => reloadRemoteRuntimeState(loadSessions, true, ownsRuntime));
+  } finally {
+    // The Session a press landed on stays held a moment longer, then the layout may pick again.
+    useOrchestrationSessionStore.getState().settleLanding();
+  }
 }
 
 // Frontend validation helpers

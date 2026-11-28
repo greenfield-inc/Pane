@@ -184,6 +184,33 @@ export class SessionSnapshotService implements PaneEventSink {
     return { revision, epoch: this.epoch, sessionIds, snapshots };
   }
 
+  /**
+   * Each chat Session's revision, with no messages: this computer's own rows in a window showing
+   * another machine read them as a mirror listing (T-116 D-20).
+   */
+  async index(): Promise<Array<{ sessionId: string; revision: number }>> {
+    if (this.listedChanges !== this.listChanges || Date.now() - this.listedAt > LIST_MAX_AGE_MS) await this.refresh();
+    return [...this.known.values()].map(({ record }) => ({ sessionId: record.id, revision: this.revisionOf(record.id) }));
+  }
+
+  /** One chat Session's whole snapshot (its newest 30 messages), as a first read would send it; undefined when it has none. */
+  async snapshot(sessionId: string): Promise<SessionSnapshot | undefined> {
+    if (this.listedChanges !== this.listChanges || Date.now() - this.listedAt > LIST_MAX_AGE_MS) await this.refresh();
+    const known = this.known.get(sessionId);
+    const chat = known && this.sources.chat(known.chatPanelId, SESSION_SNAPSHOT_MESSAGE_LIMIT);
+    if (!known || !chat) return undefined;
+    const snapshot: SessionSnapshot = {
+      sessionId,
+      revision: this.revisionOf(sessionId),
+      session: known.record,
+      chat,
+      tabs: this.sources.tabs(known.record.internalSessionId),
+      layout: this.sources.layout(known.record.internalSessionId),
+    };
+    if (!chat.transcript) snapshot.transcriptUnknown = true;
+    return projectSnapshot(snapshot);
+  }
+
   dispose(): void {
     this.disposed = true;
     for (const pace of this.paces.values()) clearTimeout(pace.timer);

@@ -14,6 +14,7 @@ type ClientOptions = Parameters<CreateMachineClient>[1];
 interface FakeClient extends MachineClient {
   options: ClientOptions;
   invoke: ReturnType<typeof vi.fn<MachineClient['invoke']>>;
+  lastHeardAt: ReturnType<typeof vi.fn<MachineClient['lastHeardAt']>>;
 }
 
 function profile(id: string): RemotePaneConnectionProfile {
@@ -51,6 +52,8 @@ function setup(ids: string[]) {
         resume: vi.fn(),
         openPortStream: vi.fn(),
         measureLatency: vi.fn(async () => 4),
+        lastHeardAt: vi.fn<MachineClient['lastHeardAt']>(() => null),
+        profile: { ...saved, baseUrl: `https://${saved.id}.tail1234.ts.net:8443` },
       };
       clients.set(saved.id, client);
       return client;
@@ -120,6 +123,20 @@ describe('MachineConnections', () => {
       { channel: 'chat-tab:view', payload: { panelId: 'chat-1', status: 'working' } },
     ]);
     expect(events).toEqual([]);
+  });
+
+  it('passes on this computer\'s followed chat too, for its rows in a window showing another machine (T-116 D-20)', () => {
+    const { machines } = setup(['build-box']);
+    const heard: Array<{ channel: string; payload: unknown }> = [];
+    const stop = machines.followChat('local', 'chat-1', (channel, payload) => heard.push({ channel, payload }));
+    const shown = { panelId: 'chat-1', generation: 2, revision: 7, index: 0, change: { type: 'append' } };
+
+    machines.forwardLocal('chat-tab:event', [shown]);
+    machines.forwardLocal('chat-tab:event', [{ ...shown, panelId: 'chat-2' }]);
+    stop();
+    machines.forwardLocal('chat-tab:event', [shown]);
+
+    expect(heard).toEqual([{ channel: 'chat-tab:event', payload: shown }]);
   });
 
   it('runs a rename on the named machine only', async () => {
@@ -273,6 +290,24 @@ describe('MachineConnections', () => {
     expect(first).toEqual({ ms: 4, routeId: 'relay:https://bb.runpane.net' });
     expect(second).toEqual(first);
     expect(client('build-box').measureLatency).toHaveBeenCalledTimes(1);
+  });
+
+  it('says a machine answered recently only while it is online and heard from inside the window, and names its route', () => {
+    const { machines, client } = setup(['build-box']);
+    const heard = client('build-box').lastHeardAt;
+    expect(machines.answeredWithin('build-box', 30_000)).toBeNull();
+    client('build-box').options.onConnectionStateChange?.('connected', undefined, { routeId: 'lan:https://bb.local' });
+    // Online, but not one event or heartbeat yet.
+    expect(machines.answeredWithin('build-box', 30_000)).toBeNull();
+    heard.mockReturnValue(Date.now());
+    vi.advanceTimersByTime(29_000);
+    expect(machines.answeredWithin('build-box', 30_000)).toEqual({ routeId: 'lan:https://bb.local', baseUrl: 'https://build-box.tail1234.ts.net:8443' });
+    vi.advanceTimersByTime(2_000);
+    expect(machines.answeredWithin('build-box', 30_000)).toBeNull();
+    heard.mockReturnValue(Date.now());
+    client('build-box').options.onConnectionStateChange?.('reconnecting');
+    expect(machines.answeredWithin('build-box', 30_000)).toBeNull();
+    expect(machines.answeredWithin('nowhere', 30_000)).toBeNull();
   });
 
   it('refuses a write to an offline machine before sending it', async () => {

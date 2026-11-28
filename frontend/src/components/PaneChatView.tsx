@@ -54,7 +54,7 @@ import { switchMark } from '../../../shared/switchMarks';
 import { useCursorFollowEnabled } from '../services/sessionCursor';
 import { useRemoteSessionView } from '../stores/remoteSessionView';
 import { RemoteSessionTileBody } from './RemoteSessionView';
-import { SessionShowContext } from '../contexts/SessionShowContext';
+import { SessionShowContext, type SessionShow } from '../contexts/SessionShowContext';
 import { QuietSkeletons } from './ui/Skeleton';
 import {
   cachedSessionView,
@@ -220,6 +220,11 @@ function SessionWorkspace() {
     if (sessionId === useOrchestrationSessionStore.getState().selectedSessionId) return;
     void select({ sessionId }).catch(() => undefined);
   }, [select]);
+  /** A select the layout makes on its own; it never replaces the Session a machine switch landed on. */
+  const selectAutomatically = useCallback((sessionId: string) => {
+    if (sessionId === useOrchestrationSessionStore.getState().selectedSessionId) return;
+    void select({ sessionId }, { automatic: true }).catch(() => undefined);
+  }, [select]);
 
   // The Session on screen counts as opened when it shows (a launch restores one without a click)
   // and each time the window comes back to it: a phone's Recent lists Sessions by when they were opened.
@@ -237,8 +242,8 @@ function SessionWorkspace() {
     if (selectedSessionId || activeSessionIds.length === 0) return;
     const current = currentLayout();
     const focused = current ? focusedSessionId(current) : undefined;
-    selectSession(focused && activeSessionIds.includes(focused) ? focused : activeSessionIds[0]);
-  }, [activeSessionIds, currentLayout, selectSession, selectedSessionId]);
+    selectAutomatically(focused && activeSessionIds.includes(focused) ? focused : activeSessionIds[0]);
+  }, [activeSessionIds, currentLayout, selectAutomatically, selectedSessionId]);
 
   // Read the host's remembered layout once its Sessions are known, then let the
   // selection adopt what it restored. The store hydrates once per host and only
@@ -255,10 +260,10 @@ function SessionWorkspace() {
     void hydrateLayout(activeSessionIds, selectedSessionId, selectionRevision > 0).then(hydrated => {
       if (!hydrated || cancelled) return;
       const focused = focusedSessionId(hydrated);
-      if (activeSessionIds.includes(focused)) selectSession(focused);
+      if (activeSessionIds.includes(focused)) selectAutomatically(focused);
     });
     return () => { cancelled = true; };
-  }, [activeSessionIds, hydrateLayout, remoteHostId, selectSession, selectedSessionId, selectionRevision]);
+  }, [activeSessionIds, hydrateLayout, remoteHostId, selectAutomatically, selectedSessionId, selectionRevision]);
 
   // Archiving or deleting a Session retires its tile.
   useEffect(() => {
@@ -433,6 +438,10 @@ interface SessionTileProps {
 }
 
 const ignoreTileEvent = () => undefined;
+/** A Session shown live (not from the cursor's cache), as it always was. */
+const NOT_PEEKING: SessionShow = { peeking: false, startsAgents: true };
+/** The same, landed on by a rest on another machine: a paused chat stays paused (T-132). */
+const QUIET_SHOW: SessionShow = { peeking: false, startsAgents: false };
 
 /**
  * One Session shown live beside something else (Approvals' right side): the same workspace as
@@ -468,6 +477,8 @@ function SessionTile({
   // Deferred: drawing it never holds the next key press (D-6); a newer press interrupts the draw.
   const remoteTarget = useDeferredValue(useRemoteSessionView(state => state.target));
   const remote = cached && isFocused ? remoteTarget : undefined;
+  // A Session a rest landed on (T-132): its chats' reads start no paused agent.
+  const quiet = useOrchestrationSessionStore(state => state.quietSessionId === sessionId);
   const visit = useOrchestrationSessionStore(state => state.selectionVisits[sessionId] ?? 0);
   const [view, setView] = useState<OrchestrationSessionView<Session> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -490,7 +501,12 @@ function SessionTile({
     setError(null);
     try {
       switchMark('session:get:start', { sessionId });
-      const response = await API.orchestrationSessions.get({ sessionId });
+      // Landed on by a 1 s rest on another machine (T-132): opened as a rest settles, so its chat's
+      // agent starts unless it is paused, which waits for typing, Enter or a click (#1777).
+      const quiet = useOrchestrationSessionStore.getState().quietSessionId === sessionId;
+      const response = quiet
+        ? await API.orchestrationSessions.open({ sessionId }, { resume: false }).then(opened => ({ ...opened, data: opened.data?.view ?? undefined }))
+        : await API.orchestrationSessions.get({ sessionId });
       switchMark('session:get:end', { sessionId });
       if (generation !== requestGeneration.current) return;
       const responseFailure = responseError(response, 'Failed to open Session');
@@ -591,17 +607,19 @@ function SessionTile({
       ) : cached ? (
         <CachedSessionTileBody sessionId={sessionId} record={record} hostId={hostId} chrome={chrome} />
       ) : view && view.session.id === sessionId && loadingSessionId === sessionId && loadingHostId === hostId && loadingVisit === visit && !isLoading && !selectionError && !error ? (
-        <NamedSessionWorkspace
-          // Changing which Session a tile shows starts that Session's workspace
-          // fresh, exactly as switching Sessions always has: its inspector, its
-          // terminal dock and its tab state belong to the Session, not the tile.
-          key={view.session.id}
-          view={view}
-          error={error}
-          chrome={chrome}
-          onOverviewUpdate={handleOverviewUpdate}
-          onRetry={() => void load()}
-        />
+        <SessionShowContext.Provider value={quiet ? QUIET_SHOW : NOT_PEEKING}>
+          <NamedSessionWorkspace
+            // Changing which Session a tile shows starts that Session's workspace
+            // fresh, exactly as switching Sessions always has: its inspector, its
+            // terminal dock and its tab state belong to the Session, not the tile.
+            key={view.session.id}
+            view={view}
+            error={error}
+            chrome={chrome}
+            onOverviewUpdate={handleOverviewUpdate}
+            onRetry={() => void load()}
+          />
+        </SessionShowContext.Provider>
       ) : (
         <SessionTileFallback
           record={record}

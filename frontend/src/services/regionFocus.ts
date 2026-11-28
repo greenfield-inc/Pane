@@ -12,6 +12,7 @@
  */
 import { create } from 'zustand';
 import { useNavigationStore } from '../stores/navigationStore';
+import { holdCursorThroughSwitch, machineSwitchInFlight, releaseSwitchCursorHold } from './switchCursorHold';
 import {
   SESSION_CURSOR_ATTRIBUTE,
   SESSION_CURSOR_MACHINE_ATTRIBUTE,
@@ -20,7 +21,9 @@ import {
   pendingCursorSession,
   settleSessionCursor,
   showSessionAtCursor,
+  windowMachineId,
 } from './sessionCursor';
+import { engageKey, engageRemoteSession, holdRemoteText, onEngageSwitch, takesTyping, useRemoteEngage } from './remoteEngage';
 import {
   sidebarListKey,
   stepStop,
@@ -543,19 +546,33 @@ export function handleSidebarListKey(event: KeyboardEvent): void {
       if (parent) moveTo(parent);
       return;
     }
-    case 'Enter':
+    case 'Enter': {
       event.preventDefault();
       releaseCursorHold?.();
+      releaseSwitchCursorHold();
       item.click();
-      // A toggle (a project or section) stays in the list; a row opens its work.
-      if (item.hasAttribute('aria-expanded')) refocus(item);
-      else requestAnimationFrame(() => requestAnimationFrame(() => {
+      const intoWork = () => {
         focusMainArea();
         // A chat that is still loading takes focus into its message box once it shows (D-328).
         const chat = chatShownInFocusedSplit();
         if (chat !== null) focusChatSoon(chat);
-      }));
+      };
+      // A toggle (a project or section) stays in the list; a row opens its work.
+      if (item.hasAttribute('aria-expanded')) { refocus(item); return; }
+      // A row on another machine: the cursor stays in the list until the switch lands (D-6).
+      const switching = machineSwitchInFlight();
+      if (switching) {
+        holdCursorThroughSwitch({
+          switching,
+          cursor: () => sidebarCursor,
+          findByKey: key => document.querySelector<HTMLElement>(`[data-sidebar-key="${CSS.escape(key)}"]`),
+          onLanded: () => requestAnimationFrame(() => requestAnimationFrame(intoWork)),
+        });
+        return;
+      }
+      requestAnimationFrame(() => requestAnimationFrame(intoWork));
       return;
+    }
     case ' ':
       event.preventDefault();
       holdSidebarCursor();
@@ -567,16 +584,43 @@ export function handleSidebarListKey(event: KeyboardEvent): void {
       if (useNavigationStore.getState().activeView === 'notify') return;
       event.preventDefault();
       releaseCursorHold?.();
+      releaseSwitchCursorHold();
       const back = returnTarget;
       if (back?.isConnected && regionOf(back) !== 'sidebar') back.focus({ preventScroll: true });
       else focusMainArea();
       return;
     }
-    default:
+    default: {
+      // Typing on another machine's Session row starts its message (T-132): the key goes into that
+      // Session's box, which takes focus, and the Session engages there.
+      const machineId = item.getAttribute(SESSION_CURSOR_MACHINE_ATTRIBUTE);
+      const sessionId = item.getAttribute(SESSION_CURSOR_ATTRIBUTE);
+      if (event.key.length === 1 && cursorFollowEnabled() && sessionId && machineId && takesTyping({ machineId, sessionId }, windowMachineId())) {
+        event.preventDefault();
+        const target = { machineId, sessionId };
+        holdRemoteText(target, (useRemoteEngage.getState().held[engageKey(target)]?.text ?? '') + event.key);
+        engageRemoteSession(target, 'type');
+        return;
+      }
       // Typing on the row settles what the cursor shows (T-87); the key keeps its own meaning.
       if (event.key.length === 1 && pendingCursorSession()) settleSessionCursor();
+    }
   }
 }
+
+// A switch a 1 s rest started keeps the cursor in the list as Enter's does (D-6), and leaves it
+// there when it lands: the person was only looking (T-132).
+onEngageSwitch((cause) => {
+  if (cause !== 'rest') return;
+  const switching = machineSwitchInFlight();
+  if (!switching || !sidebarCursor?.isConnected || document.activeElement !== sidebarCursor) return;
+  holdCursorThroughSwitch({
+    switching,
+    cursor: () => sidebarCursor,
+    findByKey: key => document.querySelector<HTMLElement>(`[data-sidebar-key="${CSS.escape(key)}"]`),
+    onLanded: () => undefined,
+  });
+});
 
 // --- Enter goes to the chat (D-328) ---
 

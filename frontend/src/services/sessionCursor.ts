@@ -8,11 +8,13 @@
  * with one `open` call. Passing over a Session starts nothing and saves nothing, and
  * the cursor never resumes a paused chat (Enter or a click does, as before).
  *
- * This machine's Sessions follow the cursor (`rowShowsInstantly`), in its own sidebar and in
- * the All machines view, and so do the Sessions of the owner's mirrored machines in All machines
- * (T-116 PR 6): those show read-only and never settle by themselves. A teammate's machine,
- * worktree Pane and project rows keep Enter, and so does every row in a window showing another
- * machine. A Session whose agent runs in a terminal is shown only by Enter or a click, as before.
+ * The Sessions of the machine the window shows follow the cursor (`rowShowsInstantly`), in its
+ * own sidebar and in the All machines view, and so do the Sessions of the owner's other machines
+ * in All machines (T-116 PR 6, D-20), this computer's included when the window shows another:
+ * those show read-only from the mirror, and a rest engages them (PR 7, `remoteEngage`): the
+ * window switches to that machine and opens the Session there. Any arrow press cancels that rest,
+ * or the switch it started (D-6). A teammate's machine, worktree Pane and project rows keep
+ * Enter. A Session whose agent runs in a terminal is shown only by Enter or a click, as before.
  */
 import { useConfigStore } from '../stores/configStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -23,6 +25,7 @@ import { usePanelStore } from '../stores/panelStore';
 import { useAllMachinesStore } from '../stores/allMachinesStore';
 import { useMachineMirrorStore } from '../stores/machineMirrorStore';
 import { clearRemoteSession, showRemoteSession } from '../stores/remoteSessionView';
+import { armRestEngage, cancelRemoteEngage } from './remoteEngage';
 import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { chatPausedMarkOf, panePausedMark } from '../../../shared/types/panels';
@@ -42,14 +45,39 @@ export function sessionCursorAttributes(machineId: string, sessionId: string | u
   return { [SESSION_CURSOR_ATTRIBUTE]: sessionId, [SESSION_CURSOR_MACHINE_ATTRIBUTE]: sessionId ? machineId : undefined } as const;
 }
 
+/**
+ * The window's host by config object: every Session row's selector asks on each store change, and
+ * reading it normalizes the whole remote config (T-132's rig: most of the renderer's time during
+ * a switch). The store replaces its config, never changes one in place.
+ */
+const hostIds = new WeakMap<AppConfig, string | null>();
+
 /** The window's host: null on this machine, undefined before the config loads. */
 function hostIdOf(config: AppConfig | null | undefined): string | null | undefined {
-  return config ? getActiveRemoteHostId(config.remoteDaemon) : undefined;
+  if (!config) return undefined;
+  const known = hostIds.get(config);
+  if (known !== undefined) return known;
+  const hostId = getActiveRemoteHostId(config.remoteDaemon);
+  hostIds.set(config, hostId);
+  return hostId;
 }
 
-/** Whether cursor-follow is on: the setting, and the window showing this machine. */
+/** Whether cursor-follow is on: the setting, whichever machine the window shows (T-116 D-20). */
 export function cursorFollowEnabled(config: AppConfig | null | undefined = useConfigStore.getState().config): boolean {
-  return !!config && config.arrowKeysOpenSessions !== false && hostIdOf(config) === null;
+  return !!config && config.arrowKeysOpenSessions !== false;
+}
+
+/**
+ * The machine the window shows, by its All machines id: `LOCAL_MACHINE_ID` on this computer, else
+ * the saved computer's id. Its rows show from the window's own Session cache (D-20).
+ */
+export function windowMachineId(config: AppConfig | null | undefined = useConfigStore.getState().config): string {
+  return hostIdOf(config) ?? LOCAL_MACHINE_ID;
+}
+
+/** The same, for a component that should re-render when it changes. */
+export function useWindowMachineId(): string {
+  return useConfigStore(state => windowMachineId(state.config));
 }
 
 /** The same, for a component that should re-render when it changes. */
@@ -60,18 +88,18 @@ export function useCursorFollowEnabled(): boolean {
 /**
  * Whether a Session row on `machineId` shows its Session as the cursor passes, rather than
  * waiting for Enter (T-116). Both sidebars' Session rows ask it before they carry
- * `sessionCursorAttributes`. This computer's rows do, and so do the rows of each of the owner's
- * machines the desktop mirrors (PR 6, D-500): those show read-only from the mirror, or from one
- * read of their host for a Session the mirror lacks, without switching the window. A teammate's
- * machine, or one the mirror doesn't hold, keeps Enter (D-5); so does every row in a window
- * showing another machine.
+ * `sessionCursorAttributes`. The window's own machine's rows do (D-20: whichever machine it
+ * shows), and so do the rows of each of the owner's machines the mirror lists (PR 6, D-500;
+ * this computer lists there from its own snapshots): those show read-only from the mirror, or from
+ * one read of their host for a Session the mirror lacks, without switching the window. A
+ * teammate's machine, or one the mirror doesn't hold, keeps Enter (D-5).
  */
 export function rowShowsInstantly(
   machineId: string,
   config: AppConfig | null | undefined = useConfigStore.getState().config,
   mirrored: (machineId: string) => boolean = id => useMachineMirrorStore.getState().listings[id] !== undefined,
 ): boolean {
-  return cursorFollowEnabled(config) && (machineId === LOCAL_MACHINE_ID || mirrored(machineId));
+  return cursorFollowEnabled(config) && (machineId === windowMachineId(config) || mirrored(machineId));
 }
 
 /** The same, for a row that should re-render when it changes. */
@@ -139,8 +167,8 @@ function isTerminalSession(sessionId: string): boolean {
 }
 
 /**
- * The sidebar cursor moved onto another machine's Session row (T-116 PR 6): show it, read-only,
- * and nothing more. Resting on it settles nothing in this PR; Enter or a click opens it there.
+ * The sidebar cursor moved onto another machine's Session row (T-116 PR 6): show it, read-only.
+ * Resting on it for a second engages it (PR 7, D-2): the window switches there and opens it.
  */
 function showRemoteSessionAtCursor(machineId: string, sessionId: string): void {
   pending = undefined;
@@ -150,17 +178,20 @@ function showRemoteSessionAtCursor(machineId: string, sessionId: string): void {
   // This computer's Session of the same id, if the cursor showed it, is not what it shows now.
   useOrchestrationSessionStore.getState().showAtCursor(undefined);
   showRemoteSession({ machineId, sessionId });
+  armRestEngage({ machineId, sessionId });
 }
 
 /**
  * The sidebar cursor moved onto a chat Session's row: show it now, and settle on it
  * after SETTLE_MS unless the cursor moves on first. Another machine's row shows its
- * Session and settles nothing.
+ * Session and engages it after the same rest.
  */
-export function showSessionAtCursor(sessionId: string, machineId: string = LOCAL_MACHINE_ID): void {
+export function showSessionAtCursor(sessionId: string, machineId: string = windowMachineId()): void {
   listen();
   clearTimer();
-  if (machineId !== LOCAL_MACHINE_ID) { showRemoteSessionAtCursor(machineId, sessionId); return; }
+  // The cursor moved: a rest on another machine's Session, or the switch it started, is off (D-6).
+  cancelRemoteEngage({ machineId, sessionId });
+  if (machineId !== windowMachineId()) { showRemoteSessionAtCursor(machineId, sessionId); return; }
   clearRemoteSession();
   const sessions = useOrchestrationSessionStore.getState();
   if (isTerminalSession(sessionId)) { pauseSessionCursor(); return; }
@@ -188,6 +219,7 @@ export function showSessionAtCursor(sessionId: string, machineId: string = LOCAL
 /** The cursor moved to a row that is not a chat Session: what it showed stays, and does not settle by itself. */
 export function pauseSessionCursor(): void {
   clearTimer();
+  cancelRemoteEngage();
 }
 
 /**

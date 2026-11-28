@@ -129,6 +129,21 @@ describe('SessionSnapshotService', () => {
     expect(result.revision).toBeGreaterThanOrEqual(snapshot.revision);
   });
 
+  it('lists each chat Session\'s revision, and reads one Session\'s whole snapshot, for this computer\'s own rows in a window on another machine (D-20)', async () => {
+    const host = fakeHost([hostSession('a'), hostSession('b', { messages: 40 }), hostSession('c', { archived: true })]);
+    const service = new SessionSnapshotService(host.sources);
+
+    const index = await service.index();
+    expect(index.map(entry => entry.sessionId)).toEqual(['a', 'b']);
+    expect(index.every(entry => entry.revision > 0)).toBe(true);
+
+    const snapshot = await service.snapshot('b');
+    expect(snapshot?.session.name).toBe('Session b');
+    expect(snapshot?.chat.transcript?.messages).toHaveLength(30);
+    expect(snapshot?.revision).toBe(index[1]?.revision);
+    expect(await service.snapshot('c')).toBeUndefined();
+  });
+
   it('caps a snapshot at the newest 30 messages, numbered from the conversation\'s first', async () => {
     const host = fakeHost([hostSession('a', { messages: 75 })]);
     const service = new SessionSnapshotService(host.sources);

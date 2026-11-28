@@ -440,6 +440,8 @@ test('remote terminal starts a shell that nobody has started since the computer 
   // Reopening the app on the shell tab mounts the terminal while the connection is still restoring.
   started = false;
   await page.reload();
-  await expect(page.getByRole('tab', { name: 'shell', exact: true })).toHaveAttribute('aria-selected', 'true');
+  // The reloaded app reads its saved connections before it draws the tabs; on a loaded CI runner
+  // that alone can take longer than 5 s ("Loading saved connections"), on main as well.
+  await expect(page.getByRole('tab', { name: 'shell', exact: true })).toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
   await expect.poll(() => started, { timeout: 10_000 }).toBe(true);
 });

@@ -40,7 +40,9 @@ describe("another machine's Session under the cursor, read-only (T-116 PR 6)", (
     expect(html).toMatch(/role="tab" aria-selected="false" aria-disabled="true"[^>]*>Terminal</);
     expect(text(html)).toContain('ship the mirror');
     expect(html).toContain('placeholder="Type to continue on Build box"');
-    expect(html).toMatch(/<textarea[^>]*readonly=""/i);
+    // It takes text: typing into it engages the Session on Build box (PR 7).
+    expect(html).toMatch(/<textarea[^>]*aria-label="Message on Build box"/);
+    expect(html).not.toMatch(/<textarea[^>]*readonly=""/i);
     expect(html).not.toContain('Offline');
     expect(text(html)).not.toContain('Read only: you can watch this chat');
     expect(html).not.toContain('Start a fresh conversation in this tab');
@@ -81,5 +83,77 @@ describe("another machine's Session under the cursor, read-only (T-116 PR 6)", (
     const html = await render({ snapshot: { ...snapshot, chat: { ...chat, transcript: undefined, messageCount: 0 }, transcriptUnknown: true } });
     expect(text(html)).toContain('Messages load when this Session is opened on Build box.');
     expect(html).not.toContain('Type to continue');
+  });
+});
+
+describe("engaging another machine's Session (T-132)", () => {
+  async function box(props: { held?: { text: string; send: boolean }; failure?: string; engagingCause?: 'enter' | 'type' }) {
+    const { HeldComposerBox } = await import('./RemoteSessionView');
+    return renderToStaticMarkup(<HeldComposerBox target={{ machineId: 'build', sessionId: 's1' }} machineName="Build box" held={props.held} failure={props.failure} engagingCause={props.engagingCause} />);
+  }
+
+  it('keeps what was typed after a failed switch, unsent, beside the reason', async () => {
+    const html = await box({ held: { text: 'ship it', send: false }, failure: 'Build box stopped answering.' });
+    expect(html).toMatch(/<textarea[^>]*>ship it<\/textarea>/);
+    expect(html).not.toMatch(/readonly=""/i);
+    expect(html).toContain('role="alert"');
+    expect(text(html)).toContain('Build box stopped answering.');
+  });
+
+  it('says a pressed Enter sends there once it opens, and holds the text still meanwhile', async () => {
+    const html = await box({ held: { text: 'ship it', send: true }, engagingCause: 'enter' });
+    expect(html).toMatch(/<textarea[^>]*readonly=""/i);
+    expect(text(html)).toContain('Sends on Build box once it opens there.');
+  });
+});
+
+describe('what was typed and not sent stays on screen (QA 1781 F-1)', () => {
+  it('the kept bar shows the text, why, and that Enter sends it there', async () => {
+    const { KeptBar } = await import('./RemoteSessionView');
+    const html = renderToStaticMarkup(<KeptBar kept={{ machineId: 'build', sessionId: 's1', text: 'ship it', message: 'Pane daemon not running on Build box.', pending: false }} machineName="Build box" />);
+    expect(text(html)).toContain('Not sent yet to Build box: Pane daemon not running on Build box.');
+    expect(html).toMatch(/<textarea[^>]*aria-label="Message on Build box, not sent yet"[^>]*>ship it<\/textarea>/);
+    expect(text(html)).toContain('Press Enter to send it on Build box.');
+    expect(html).toContain('role="alert"');
+  });
+
+  it('a pending one says so as a status', async () => {
+    const { KeptBar } = await import('./RemoteSessionView');
+    const html = renderToStaticMarkup(<KeptBar kept={{ machineId: 'build', sessionId: 's1', text: 'ship it', message: 'Not sent yet: it goes into Release\'s message box on Build box once that chat opens.', pending: true }} machineName="Build box" />);
+    expect(html).toContain('data-pending="true"');
+    expect(html).toContain('role="status"');
+  });
+
+  it('the held view marks text as not sent yet while the link there is down', async () => {
+    const { HeldComposerBox } = await import('./RemoteSessionView');
+    const html = renderToStaticMarkup(<HeldComposerBox target={{ machineId: 'build', sessionId: 's1' }} machineName="Build box" held={{ text: 'ship it', send: true }} failure={undefined} engagingCause="enter" waiting />);
+    expect(text(html)).toContain('Not sent yet: waiting for Build box to answer. It sends there once it does.');
+    expect(html).not.toContain('remote-engage-sending');
+  });
+});
+
+describe('the kept bar never promises a send its deadline has passed (review 1781 nit)', () => {
+  const kept = { machineId: 'build', sessionId: 's1', text: 'ship it', message: 'Not sent yet: it goes into Release\'s message box on Build box once that chat opens.', pending: true };
+  it('says it sends then while the Enter is within its 60 s', async () => {
+    const { KeptBar } = await import('./RemoteSessionView');
+    const html = renderToStaticMarkup(<KeptBar kept={{ ...kept, sendsBy: 2000 }} machineName="Build box" now={1000} />);
+    expect(text(html)).toContain('once that chat opens. It sends then.');
+  });
+  it('says it goes in unsent once the 60 s have passed', async () => {
+    const { KeptBar } = await import('./RemoteSessionView');
+    const html = renderToStaticMarkup(<KeptBar kept={{ ...kept, sendsBy: 2000 }} machineName="Build box" now={2001} />);
+    expect(text(html)).not.toContain('It sends then');
+    expect(text(html)).toContain('It goes in unsent: its 60 s to send have passed.');
+  });
+});
+
+describe('the held view after the Enter\'s minute (QA 1781 F-2, D-22)', () => {
+  it('says it was not sent and that Enter sends it, never that it sends once the machine answers', async () => {
+    const { HeldComposerBox } = await import('./RemoteSessionView');
+    const html = renderToStaticMarkup(<HeldComposerBox target={{ machineId: 'build', sessionId: 's1' }} machineName="Build box" held={{ text: 'ship it', send: false, notSent: 'Not sent: Build box didn\'t answer within a minute. Press Enter to send.' }} failure={undefined} engagingCause="enter" waiting />);
+    expect(text(html)).toContain('Not sent: Build box didn\'t answer within a minute. Press Enter to send.');
+    expect(text(html)).not.toContain('once it does');
+    expect(html).not.toMatch(/<textarea[^>]*readonly=""/i);
+    expect(html).toContain('>ship it</textarea>');
   });
 });

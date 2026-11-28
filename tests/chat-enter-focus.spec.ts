@@ -148,6 +148,9 @@ test('Enter stays in its own split: a chat tab opens into its own message box, n
   await expect(left).toBeVisible();
   await expect(page.locator('[data-panel-group-id="g-right"] .xterm-helper-textarea')).toHaveCount(1);
 
+  // The shell's activation refresh focuses the shell when it ends (TerminalPanel's
+  // focusAfterActivation); let it finish first, or on a loaded runner it moves focus after the Enter.
+  await expect(page.locator('[data-panel-group-id="g-right"] [data-testid="terminal-activation-mask"]')).toHaveCount(0, { timeout: 15_000 });
   // Focus on the right split, which shows a shell: Enter does not jump into the left split's chat.
   await rightSplit.evaluate((element: HTMLElement) => { element.setAttribute('tabindex', '-1'); element.focus(); });
   await expect(rightSplit).toHaveAttribute('data-group-focused', 'true');

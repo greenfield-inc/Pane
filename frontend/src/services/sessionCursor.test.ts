@@ -11,6 +11,7 @@ const mirrorSession = vi.fn();
 const machineRead = vi.fn();
 const machineRun = vi.fn();
 const followChat = vi.fn();
+const cancelSwitch = vi.fn(async () => ({ success: true, data: { cancelled: true } }));
 
 const records = ['a', 'b', 'c'].map(id => {
   // SAFETY: the cursor reads only these record fields.
@@ -34,9 +35,10 @@ async function setup(config: Partial<AppConfig> = {}) {
   vi.resetModules();
   vi.stubGlobal('window', { addEventListener: vi.fn(), electronAPI: {
     orchestrationSessions: { peek },
-    uiState: { getPaneLayout },
     machineMirror: { list: vi.fn(async () => []), session: mirrorSession, onChanged: vi.fn(() => () => undefined), followChat, onChatEvent: vi.fn(() => () => undefined) },
     machines: { read: machineRead, run: machineRun },
+    remoteDaemon: { cancelSwitch },
+    uiState: { getPaneLayout, saveNavigationMemory: vi.fn(async () => ({ success: true })) },
   } });
   const cursor = await import('./sessionCursor');
   const { useOrchestrationSessionStore } = await import('../stores/orchestrationSessionStore');
@@ -189,12 +191,42 @@ describe('which rows the cursor shows at once (T-116)', () => {
     expect(cursor.rowShowsInstantly('local', { ...appConfig, arrowKeysOpenSessions: false })).toBe(false);
   });
 
-  it('a window showing another machine shows no row at once, not even this computer\'s', async () => {
+  it('in a window showing another machine, that machine\'s rows show from its own cache, and this computer\'s and the other mirrored ones from the mirror; a teammate keeps Enter (D-20)', async () => {
     const { cursor, appConfig } = await setup();
-    // SAFETY: the cursor reads only remoteDaemon and arrowKeysOpenSessions of the config.
-    const remote = { ...appConfig, remoteDaemon: { client: { mode: 'remote', activeProfileId: 'build', profiles: [{ id: 'build', label: 'build-box', baseUrl: 'https://build-box.example:8443', token: 'pairing-token', transport: 'http+sse' }] } } } as AppConfig;
-    expect(cursor.cursorFollowEnabled(remote)).toBe(false);
-    expect(cursor.rowShowsInstantly('local', remote)).toBe(false);
+    const remote = onBuild(appConfig);
+    expect(cursor.cursorFollowEnabled(remote)).toBe(true);
+    expect(cursor.windowMachineId(remote)).toBe('build');
+    const mirrored = (id: string) => id === 'local' || id === 'studio';
+    expect(cursor.rowShowsInstantly('build', remote, mirrored)).toBe(true);
+    expect(cursor.rowShowsInstantly('local', remote, mirrored)).toBe(true);
+    expect(cursor.rowShowsInstantly('studio', remote, mirrored)).toBe(true);
+    expect(cursor.rowShowsInstantly('teammate', remote, mirrored)).toBe(false);
+  });
+
+  it('after an engage moved the window to another machine, its rows show at once there and this computer\'s show read-only, with no switch until a rest (D-20)', async () => {
+    const { cursor, store, settle, appConfig } = await setup();
+    const { useConfigStore } = await import('../stores/configStore');
+    useConfigStore.setState({ config: onBuild(appConfig) });
+    const { target } = await mirrored();
+    const switchMachine = vi.fn(async () => ({ ok: true as const }));
+    const { useAllMachinesStore } = await import('../stores/allMachinesStore');
+    useAllMachinesStore.setState({ switchMachine, machines: [...useAllMachinesStore.getState().machines, { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null }] });
+
+    // The window's own machine: its cache and one peek of it, as this computer's rows are in a local window.
+    cursor.showSessionAtCursor('b', 'build');
+    expect(store.getState().cursorSessionId).toBe('b');
+    expect(target()).toBeUndefined();
+    expect(peek).toHaveBeenCalledWith({ sessionId: 'b' });
+
+    // This computer's row: read-only, from its own snapshots.
+    cursor.showSessionAtCursor('a', 'local');
+    expect(target()).toEqual({ machineId: 'local', sessionId: 'a' });
+    expect(store.getState().cursorSessionId).toBeUndefined();
+    vi.advanceTimersByTime(999);
+    expect(switchMachine).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    await vi.waitFor(() => expect(switchMachine).toHaveBeenCalledWith('local'));
+    expect(settle).not.toHaveBeenCalled();
   });
 
   it("peeks a Session the Sessions list has not loaded from this machine's All machines rows", async () => {
@@ -272,6 +304,12 @@ describe('a load never holds the cursor (D-6)', () => {
 });
 
 /** The owner's machine `build`, mirrored with Sessions `b` and `c` (the same ids as this computer's). */
+/** The config of a window showing the machine `build`. */
+function onBuild(appConfig: AppConfig): AppConfig {
+  // SAFETY: the cursor reads only remoteDaemon and arrowKeysOpenSessions of the config.
+  return { ...appConfig, remoteDaemon: { client: { mode: 'remote', activeProfileId: 'build', profiles: [{ id: 'build', label: 'build-box', baseUrl: 'https://build-box.example:8443', token: 'pairing-token', transport: 'http+sse' }] } } } as AppConfig;
+}
+
 async function mirrored() {
   const { useMachineMirrorStore } = await import('../stores/machineMirrorStore');
   useMachineMirrorStore.setState({ listings: { build: { state: { machineId: 'build', sync: 'live', lastSeenAt: '2026-11-26T12:00:00.000Z', sessionCount: 2 }, sessions: { b: 4, c: 9 } } } });
@@ -290,9 +328,12 @@ describe("another machine's Sessions under the cursor (T-116 PR 6)", () => {
     expect(cursor.rowShowsInstantly('build', { ...appConfig, arrowKeysOpenSessions: false })).toBe(false);
   });
 
-  it('shows the Session from the mirror by machine and id, reads nothing of this computer, and a 1 s rest does nothing more', async () => {
+  it('shows the Session from the mirror by machine and id, reads nothing of this computer, and a 1 s rest engages it once (PR 7, D-2)', async () => {
     const { cursor, store, settle } = await setup();
     const { target } = await mirrored();
+    const switchMachine = vi.fn(async () => ({ ok: true as const }));
+    const { useAllMachinesStore } = await import('../stores/allMachinesStore');
+    useAllMachinesStore.setState({ switchMachine });
     cursor.showSessionAtCursor('b');
     cursor.showSessionAtCursor('b', 'build');
 
@@ -300,10 +341,33 @@ describe("another machine's Sessions under the cursor (T-116 PR 6)", () => {
     // This computer's own `b` is not what the cursor shows any more.
     expect(store.getState().cursorSessionId).toBeUndefined();
     expect(mirrorSession).toHaveBeenCalledWith('build', 'b');
-    vi.advanceTimersByTime(5000);
+    vi.advanceTimersByTime(999);
+    expect(switchMachine).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    await vi.waitFor(() => expect(switchMachine).toHaveBeenCalledTimes(1));
+    expect(switchMachine).toHaveBeenCalledWith('build');
+    // Nothing of this computer settles, and nothing is run on the machine itself.
     expect(settle).not.toHaveBeenCalled();
     expect(machineRun).not.toHaveBeenCalled();
-    expect(target()).toEqual({ machineId: 'build', sessionId: 'b' });
+  });
+
+  it('starts no switch while the cursor keeps moving over another machine\'s Sessions, and an arrow press cancels one in flight (D-6)', async () => {
+    const { cursor } = await setup();
+    await mirrored();
+    const switchMachine = vi.fn(() => new Promise<{ ok: true }>(() => undefined));
+    const { useAllMachinesStore } = await import('../stores/allMachinesStore');
+    useAllMachinesStore.setState({ switchMachine });
+    for (let press = 0; press < 30; press += 1) {
+      cursor.showSessionAtCursor(press % 2 ? 'b' : 'c', 'build');
+      vi.advanceTimersByTime(33);
+    }
+    expect(switchMachine).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1000);
+    await vi.waitFor(() => expect(switchMachine).toHaveBeenCalledTimes(1));
+    cursor.showSessionAtCursor('c');
+    expect(cancelSwitch).toHaveBeenCalledWith('build');
+    vi.advanceTimersByTime(5000);
+    expect(switchMachine).toHaveBeenCalledTimes(1);
   });
 
   it('moving back to a row of this computer shows it there, and the remote one goes', async () => {

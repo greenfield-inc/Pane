@@ -44,7 +44,9 @@ import { chatAgentLabel } from '../../../../shared/chatAgentMenu';
 import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
 import { FindBar } from '../find/FindBar';
 import { useSurfaceFind } from '../find/surfaceFind';
-import { takeLaunchDraft } from '../../utils/launchOutline';
+import { takeLaunchDraft, type LaunchDraft } from '../../utils/launchOutline';
+import { acceptChatDraft, chatTabShown, draftNoteStays, handOverChatDraft, pendingSendStep, rememberDraftNote, rememberedDraftNote, sendDeadline, type DraftNote } from '../../utils/chatDraftHandover';
+import { useWindowLink } from '../../stores/windowLink';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
@@ -197,9 +199,10 @@ export interface ChatTabPanelProps {
   working?: readonly WorkingAgent[];
   /**
    * Shown read-only from another machine (T-116 PR 6): nothing here acts on the chat. The message
-   * box reads `placeholder` and takes no text; with `note` instead, the note replaces it.
+   * box reads `placeholder` and takes no text; with `note` instead, the note replaces it; with
+   * `composer`, that box replaces it (PR 7: typing there engages the Session on its machine).
    */
-  watchOnly?: { placeholder: string } | { note: ReactNode };
+  watchOnly?: { placeholder: string } | { note: ReactNode } | { composer: ReactNode };
   /** Shown instead of "Earlier messages" when they exist but can't be read from here yet (another machine's chat, D-19). */
   earlierNote?: ReactNode;
 }
@@ -470,15 +473,29 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   // The launch outline's message box (index.html) hands over as this tab first paints: its text and
   // caret, focus when it had it, and an Enter pressed before the chat loaded, which sends that text
   // once (D-62) if the chat can send it soon after; an edit or a chat that stays unable drops it.
-  const launchSend = useRef<{ text: string; until: number } | null>(null);
+  const launchSend = useRef<{ text: string; until: number; expiredNote?: string } | null>(null);
+  // Why a handed-over text is in the box unsent. It stays until that text is edited or sent, not
+  // only until the chat's next read clears its error (QA 1781 F-2, D-22).
+  const [draftNote, setShownDraftNote] = useState<DraftNote | null>(() => rememberedDraftNote(panelId));
+  // Remembered per tab, so a remount (a reconnect redraws the chat) keeps showing it.
+  const setDraftNote = useCallback((note: DraftNote | null) => {
+    rememberDraftNote(panelId, note);
+    setShownDraftNote(note);
+  }, [panelId]);
+  const linkUp = useWindowLink(state => state.up);
   /** Re-runs the launch send check: the handover can land after mount, once the box settles, and the send window closes. */
   const [launchTick, setLaunchTick] = useState(0);
+  const watching = watchOnly !== undefined;
   useLayoutEffect(() => {
+    // A chat shown read-only from another machine takes no draft: the live chat there does (T-132).
+    if (watching) return undefined;
     const input = () => document.querySelector<HTMLTextAreaElement>(`textarea[data-chat-composer="${CSS.escape(panelId)}"]`);
-    return takeLaunchDraft(panelId, input, draft => {
+    const take = (draft: LaunchDraft) => {
+      switchMark('chat:draft', { panelId, status: draft.send ? 'send' : 'text' });
       viewer.setDraft(draft.text);
       runtime.thread.composer.setText(draft.text);
-      if (draft.send) launchSend.current = { text: draft.text, until: Date.now() + LAUNCH_SEND_MS };
+      if (draft.send) launchSend.current = { text: draft.text, until: sendDeadline(draft, LAUNCH_SEND_MS), expiredNote: draft.expiredNote };
+      setDraftNote(draft.note ? { text: draft.text, note: draft.note } : null);
       setLaunchTick(tick => tick + 1);
       const box = input();
       if (!box) return;
@@ -487,23 +504,52 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       if (!draft.focused) return;
       box.focus({ preventScroll: true });
       box.setSelectionRange(draft.selectionStart, draft.selectionEnd);
-    });
-  }, [panelId, runtime, viewer]);
+    };
+    // What was typed into this Session on another machine while the window switched here (T-132).
+    const stopAccepting = acceptChatDraft(panelId, take);
+    const stopLaunch = takeLaunchDraft(panelId, input, take);
+    return () => {
+      stopAccepting();
+      stopLaunch();
+      // An Enter still waiting to send outlives this instance (a reconnect redraws the chat): the
+      // next one to show this tab sends it, once.
+      const pending = launchSend.current;
+      if (pending && pending.until > Date.now()) {
+        launchSend.current = null;
+        handOverChatDraft(panelId, { text: pending.text, selectionStart: pending.text.length, selectionEnd: pending.text.length, focused: false, send: true, sendBy: pending.until });
+      }
+    };
+  }, [panelId, runtime, setDraftNote, viewer, watching]);
+  // The live chat painted: an engage waiting on it lets the mirror's view go (T-132).
+  const painted = !watching && view !== undefined;
+  useLayoutEffect(() => {
+    if (painted) chatTabShown(panelId);
+  }, [painted, panelId]);
   useEffect(() => {
     const pending = launchSend.current;
     if (!pending) return;
-    if (Date.now() > pending.until || runtime.thread.composer.getState().text !== pending.text) {
+    const step = pendingSendStep(pending, { edited: runtime.thread.composer.getState().text !== pending.text, now: Date.now(), sendDisabled, linkUp });
+    if (step === 'edited' || step === 'expired') {
+      switchMark('chat:draft-send', { panelId, status: step });
       launchSend.current = null;
+      // The Enter pressed before the chat could send is not lost silently: the text stays, with why (T-132).
+      if (step === 'expired') setDraftNote({ text: pending.text, note: pending.expiredNote ?? 'Not sent: the chat could not take your message in time (its connection may have dropped). It is still here; press Enter to send it.' });
       return;
     }
-    if (sendDisabled) {
+    if (step === 'wait') {
       // Re-checked when the window closes, so a chat that never becomes able to send never sends.
       const timer = setTimeout(() => setLaunchTick(tick => tick + 1), pending.until - Date.now() + 1);
       return () => clearTimeout(timer);
     }
     launchSend.current = null;
+    switchMark('chat:draft-send', { panelId, status: 'sent' });
     void runtime.thread.composer.send();
-  }, [runtime, sendDisabled, launchTick]);
+  }, [runtime, sendDisabled, linkUp, launchTick, setDraftNote, viewer]);
+  useEffect(() => {
+    if (!draftNote) return undefined;
+    const composer = runtime.thread.composer;
+    return composer.subscribe(() => { if (!draftNoteStays(draftNote, composer.getState().text)) setDraftNote(null); });
+  }, [draftNote, runtime, setDraftNote]);
   // Every refusal is shown (assistant-ui's own paste and picker swallow them), and a file
   // that failed while copying leaves no chip behind.
   useEffect(() => runtime.thread.composer.unstable_on('attachmentAddError', event => {
@@ -612,6 +658,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       {view?.banner && <ChatSwitchBanner banner={view.banner} busy={busy || !connected || readOnly}
         onPickAnother={() => setPicking(true)} onDismiss={() => void act(() => client.dismissBanner(panelId))} />}
       {snapshot.error && <div role="alert" className="chat-alert">{snapshot.error}</div>}
+      {draftNote && <div role="alert" className="chat-alert" data-testid="chat-draft-note">{draftNote.note}</div>}
       {picking && <ConversationPicker load={loadConversations} onResume={resumeConversation} onClose={() => setPicking(false)} />}
       {!!attachProblems.length && <div role="alert" className="chat-alert chat-attach-alert">
         <ul>{attachProblems.map((problem, index) => <li key={index}>{problem}</li>)}</ul>
@@ -669,7 +716,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           queued={view.queue.length} pr={pr} agents={agentsWorking} onOpenAgent={actions.onOpenWorker} working={working} sendNowSteers={view.sendNowSteers} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
           onStopTask={taskId => void act(() => client.stopTask(panelId, taskId))} onShowQueue={showQueue} />}
         {readOnly && !watchOnly && <p role="status" className="chat-notice">Read only: you can watch this chat, and its owner sends the messages.</p>}
-        {watchOnly && 'note' in watchOnly ? <div role="status" className="chat-notice" data-testid="chat-watch-note">{watchOnly.note}</div> : <ComposerPrimitive.Root className="needs-full-access chat-composer" data-pane-part="chat-composer">
+        {watchOnly && 'composer' in watchOnly ? watchOnly.composer : watchOnly && 'note' in watchOnly ? <div role="status" className="chat-notice" data-testid="chat-watch-note">{watchOnly.note}</div> : <ComposerPrimitive.Root className="needs-full-access chat-composer" data-pane-part="chat-composer">
           {composerMenu.menu && <ChatComposerMenu id={composerMenu.listId} menu={composerMenu.menu} active={composerMenu.active} onHover={composerMenu.hover} onPick={composerMenu.pick} />}
           <div className="flex flex-wrap gap-2 empty:hidden"><ComposerPrimitive.Attachments components={{ Attachment }} /></div>
           <div className="chat-input-box">

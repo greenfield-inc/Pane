@@ -40,7 +40,7 @@ const SIDE_CHECK_BACKOFF_MS = 60_000;
 const SIDE_CHECK_BACKOFF_MAX_MS = 60 * 60 * 1000;
 
 type RemoteClientOptions = NonNullable<ConstructorParameters<typeof RemotePaneClient>[1]>;
-export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke' | 'suspend' | 'resume' | 'openPortStream' | 'measureLatency'>;
+export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke' | 'suspend' | 'resume' | 'openPortStream' | 'measureLatency' | 'lastHeardAt' | 'profile'>;
 export type CreateMachineClient = (profile: RemotePaneConnectionProfile, options: RemoteClientOptions) => MachineClient;
 
 export interface MachineConnectionsDeps {
@@ -281,6 +281,19 @@ export class MachineConnections {
     return measured;
   }
 
+  /**
+   * The route a saved machine's connection is on, and the address it dialed there, when the machine
+   * is online and sent an event or heartbeat in the last `ms`; null otherwise. A switch to it can skip
+   * the connection checklist and the route's address lookup (T-128).
+   */
+  answeredWithin(machineId: string, ms: number): { routeId: string | null; baseUrl: string } | null {
+    const machine = this.machines.get(machineId);
+    if (machine?.state.status !== 'online') return null;
+    const heard = machine.client.lastHeardAt();
+    if (heard === null || Date.now() - heard > ms) return null;
+    return { routeId: machine.state.routeId ?? null, baseUrl: machine.client.profile.baseUrl };
+  }
+
   /** A saved machine's current state, or undefined for an unknown id. */
   machineState(machineId: string): MachineState | undefined {
     const machine = this.machines.get(machineId);
@@ -288,7 +301,9 @@ export class MachineConnections {
   }
 
   /** An event raised on this computer; list events are forwarded as `LOCAL_MACHINE_ID`'s. */
-  forwardLocal(channel: string, args: unknown[]): void {
+  forwardLocal(channel: string, args: PaneEventArgument[]): void {
+    // This computer's followed chat, shown read-only in a window on another machine (T-116 D-20).
+    if (this.followedChats.size > 0) this.passOnChat(LOCAL_MACHINE_ID, channel, args[0]);
     if (isMachineEventChannel(channel)) this.emit({ type: 'event', machineId: LOCAL_MACHINE_ID, channel, args });
   }
 

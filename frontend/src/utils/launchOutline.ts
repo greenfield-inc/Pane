@@ -13,6 +13,15 @@ export interface LaunchDraft {
   focused: boolean;
   /** Enter was pressed: the chat sends the text once it can. */
   send: boolean;
+  /**
+   * When (epoch ms) the chat must have been able to send it; past it the text stays unsent with
+   * why. Without it the chat waits the launch outline's default 5 s from when it takes the draft.
+   */
+  sendBy?: number;
+  /** Shown beside the text in the chat's box: why it is there unsent (T-132, QA 1781 F-1). */
+  note?: string;
+  /** Shown instead of the chat's own reason if the Enter's deadline passes before it can send (D-22). */
+  expiredNote?: string;
 }
 
 /** How long the outline waits, from the app's start, for the app's first render and the launch chat. */

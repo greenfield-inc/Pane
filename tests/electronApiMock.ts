@@ -2259,6 +2259,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           setRemoteConnectionState({ check: null });
           return success(clone(remoteConnectionState));
         },
+        cancelSwitch: () => success({ cancelled: false }),
       }),
       uiState: namespace({
         getExpanded: () => {

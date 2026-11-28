@@ -5,6 +5,8 @@ import { registerMachineMirrorHandlers } from './machineMirror';
 import type { MachineConnections } from '../services/machineConnections';
 import type { MachineMirror } from '../services/machineMirror';
 import type { MachineMirrorListing } from '../../../shared/types/machineMirror';
+import type { SessionSnapshot } from '../../../shared/types/sessionSnapshot';
+import type { MachineConnectionsEvent } from '../../../shared/types/machineConnections';
 
 function partial<Contract>(value: Partial<Contract>): Contract {
   // SAFETY: each fixture supplies every member the mirror's handlers read.
@@ -12,10 +14,10 @@ function partial<Contract>(value: Partial<Contract>): Contract {
 }
 
 type OnHandler = (event: IpcMainEvent, ...args: Array<string | boolean | object | null>) => void;
-type InvokeHandler = (event: IpcMainInvokeEvent) => MachineMirrorListing[];
+type InvokeHandler = (event: IpcMainInvokeEvent, ...args: string[]) => MachineMirrorListing[] | Promise<MachineMirrorListing[] | SessionSnapshot | null>;
 
 /** The mirror's handlers on a fake ipcMain, with a mirror that can appear later and a window that records what it is sent. */
-function setup(machines: Partial<MachineConnections> = {}) {
+function setup(machines: Partial<MachineConnections> = {}, local?: Parameters<typeof registerMachineMirrorHandlers>[3]) {
   const on = new Map<string, OnHandler>();
   const handle = new Map<string, InvokeHandler>();
   const ipcMain = partial<IpcMain>({
@@ -23,7 +25,7 @@ function setup(machines: Partial<MachineConnections> = {}) {
     handle: (channel: string, fn: InvokeHandler) => { handle.set(channel, fn); },
   });
   let mirror: MachineMirror | null = null;
-  const handlers = registerMachineMirrorHandlers(ipcMain, () => mirror, partial<MachineConnections>(machines));
+  const handlers = registerMachineMirrorHandlers(ipcMain, () => mirror, partial<MachineConnections>(machines), local);
   const sent: Array<[string, { machineId: string }]> = [];
   const emitter = new EventEmitter();
   const contents = Object.assign(emitter, partial<WebContents>({ isDestroyed: () => false, send: (channel: string, payload: { machineId: string }) => { sent.push([channel, payload]); } }));
@@ -36,10 +38,10 @@ function setup(machines: Partial<MachineConnections> = {}) {
 }
 
 describe('the mirror\'s renderer channels (T-116 PR 6)', () => {
-  it('a window that subscribed before the mirror existed hears its changes once it does (review SF-2)', () => {
+  it('a window that subscribed before the mirror existed hears its changes once it does (review SF-2)', async () => {
     const { on, handle, handlers, event, sent, appear, change } = setup();
     on.get('machine-mirror:subscribe')?.(event, true);
-    expect(handle.get('machine-mirror:list')?.(partial<IpcMainInvokeEvent>({}))).toEqual([]);
+    await expect(handle.get('machine-mirror:list')?.(partial<IpcMainInvokeEvent>({}))).resolves.toEqual([]);
 
     appear();
     handlers.mirrorReady();
@@ -62,5 +64,24 @@ describe('the mirror\'s renderer channels (T-116 PR 6)', () => {
     expect(stops.slice(0, 25).every(stop => stop.mock.calls.length === 1)).toBe(true);
     emitter.emit('destroyed');
     expect(stops[25]).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists this computer beside the mirrored machines and reads its Sessions, for its rows in a window on another machine (D-20)', async () => {
+    // SAFETY: the handlers read only a snapshot's session id and revision here.
+    const snapshot = { sessionId: 'a', revision: 7 } as SessionSnapshot;
+    let notice: ((event: MachineConnectionsEvent) => void) | undefined;
+    const { on, handle, event, sent, appear } = setup(
+      { subscribe: fn => { notice = fn; return () => undefined; } },
+      { index: async () => [{ sessionId: 'a', revision: 7 }], snapshot: async id => (id === 'a' ? snapshot : undefined) },
+    );
+    appear();
+    on.get('machine-mirror:subscribe')?.(event, true);
+
+    const listed = await handle.get('machine-mirror:list')?.(partial<IpcMainInvokeEvent>({}));
+    expect(listed).toEqual([{ state: expect.objectContaining({ machineId: 'local', sync: 'live', sessionCount: 1 }), sessions: { a: 7 } }]);
+    await expect(handle.get('machine-mirror:session')?.(partial<IpcMainInvokeEvent>({}), 'local', 'a')).resolves.toBe(snapshot);
+
+    notice?.({ type: 'event', machineId: 'local', channel: 'session-snapshot:changed', args: [{ sessionId: 'a', revision: 8 }] });
+    expect(sent).toContainEqual(['machine-mirror:changed', { machineId: 'local' }]);
   });
 });

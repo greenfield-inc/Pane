@@ -1110,6 +1110,79 @@ describe('remote daemon IPC', () => {
     });
   });
 
+  it('keeps a Remote Access change made while a switch connects, when the switch commits (F-7)', async () => {
+    const ipcMain = createIpcMainStub();
+    const configManager = createConfigManagerStub();
+    registerTestRemoteDaemonHandlers(ipcMain, { configManager });
+    const upsertProfile = ipcMain.handlers.get('remote-daemon:upsert-connection-profile');
+    const updateClientState = ipcMain.handlers.get('remote-daemon:update-client-state');
+    const updateHostConfig = ipcMain.handlers.get('remote-daemon:update-host-config');
+    let connected: (() => void) | undefined;
+    vi.spyOn(remotePaneClientController, 'activateProfile').mockImplementation(() => new Promise((resolve) => {
+      connected = () => resolve({ mode: 'remote', status: 'connected', activeProfileId: 'profile-1', activeProfileLabel: 'Mac mini', activeBaseUrl: 'http://127.0.0.1:42137', lastError: null });
+    }));
+    vi.spyOn(remotePaneClientController, 'commitActivation').mockImplementation(() => undefined);
+    await upsertProfile?.({}, { id: 'profile-1', label: 'Mac mini', baseUrl: 'http://127.0.0.1:42137', token: 'secret-token', transport: 'http+sse' });
+
+    const switching = updateClientState?.({}, { activeProfileId: 'profile-1', mode: 'remote' });
+    await vi.waitFor(() => expect(connected).toBeDefined());
+    // Settings saves another computer and a host setting while the switch is still connecting.
+    await upsertProfile?.({}, { id: 'profile-2', label: 'MacBook', baseUrl: 'http://127.0.0.1:42138', token: 'other-token', transport: 'http+sse' });
+    await updateHostConfig?.({}, { enabled: true, listenHost: '127.0.0.1', listenPort: 42199 });
+    connected?.();
+    await expect(switching).resolves.toMatchObject({ success: true });
+
+    const saved = configManager.getConfig().remoteDaemon;
+    expect(saved?.client).toMatchObject({ activeProfileId: 'profile-1', mode: 'remote' });
+    expect(saved?.client.computers.map(computer => computer.id)).toEqual(['profile-1', 'profile-2']);
+    expect(saved?.host.config).toMatchObject({ enabled: true, listenPort: 42199 });
+  });
+
+  it('a switch cancelled after its dial was ready, before it commits, keeps the machine the window shows and commits nothing (QA 1781 F-3)', async () => {
+    const ipcMain = createIpcMainStub();
+    const configManager = createConfigManagerStub();
+    registerTestRemoteDaemonHandlers(ipcMain, { configManager });
+    const upsertProfile = ipcMain.handlers.get('remote-daemon:upsert-connection-profile');
+    const updateClientState = ipcMain.handlers.get('remote-daemon:update-client-state');
+    vi.spyOn(remotePaneClientController, 'activateProfile').mockResolvedValue({ mode: 'remote', status: 'restoring', activeProfileId: 'profile-1', activeProfileLabel: 'Mac mini', activeBaseUrl: 'http://127.0.0.1:42137', lastError: null });
+    const commit = vi.spyOn(remotePaneClientController, 'commitActivation').mockImplementation(() => undefined);
+    // An arrow came while the config was being written.
+    let writes = 0;
+    vi.spyOn(remotePaneClientController, 'takeCancelBeforeCommit').mockImplementation(() => { writes += 1; return writes === 2; });
+    await upsertProfile?.({}, { id: 'profile-1', label: 'Mac mini', baseUrl: 'http://127.0.0.1:42137', token: 'secret-token', transport: 'http+sse' });
+
+    await expect(updateClientState?.({}, { activeProfileId: 'profile-1', mode: 'remote' })).resolves.toMatchObject({ success: false, error: expect.stringContaining('cancelled') });
+    expect(configManager.getConfig().remoteDaemon?.client).toMatchObject({ mode: 'local', activeProfileId: null });
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it('a cancel says whether it stopped the switch, came after it committed, or found nothing (review 1781 R4-SF-1)', async () => {
+    const ipcMain = createIpcMainStub();
+    registerTestRemoteDaemonHandlers(ipcMain, { configManager: createConfigManagerStub() });
+    const cancel = ipcMain.handlers.get('remote-daemon:cancel-switch');
+    vi.spyOn(remotePaneClientController, 'cancelSwitch').mockReturnValueOnce('committed').mockReturnValueOnce('nothing').mockReturnValueOnce('cancelled');
+    await expect(cancel?.({}, 'build-box')).resolves.toEqual({ success: true, data: { cancelled: false, outcome: 'committed' } });
+    await expect(cancel?.({}, 'build-box')).resolves.toEqual({ success: true, data: { cancelled: false, outcome: 'nothing' } });
+    await expect(cancel?.({}, 'build-box')).resolves.toEqual({ success: true, data: { cancelled: true, outcome: 'cancelled' } });
+  });
+
+  it('a switch whose config write fails is abandoned, its staged connection closed, and nothing committed (review 1781 round 4)', async () => {
+    const ipcMain = createIpcMainStub();
+    const configManager = createConfigManagerStub();
+    registerTestRemoteDaemonHandlers(ipcMain, { configManager });
+    const upsertProfile = ipcMain.handlers.get('remote-daemon:upsert-connection-profile');
+    const updateClientState = ipcMain.handlers.get('remote-daemon:update-client-state');
+    await upsertProfile?.({}, { id: 'profile-1', label: 'Mac mini', baseUrl: 'http://127.0.0.1:42137', token: 'secret-token', transport: 'http+sse' });
+    vi.spyOn(remotePaneClientController, 'activateProfile').mockResolvedValue({ mode: 'remote', status: 'restoring', activeProfileId: 'profile-1', activeProfileLabel: 'Mac mini', activeBaseUrl: 'http://127.0.0.1:42137', lastError: null });
+    const commit = vi.spyOn(remotePaneClientController, 'commitActivation').mockImplementation(() => undefined);
+    const abandon = vi.spyOn(remotePaneClientController, 'abandonActivation').mockImplementation(() => undefined);
+    vi.spyOn(configManager, 'updateConfig').mockRejectedValueOnce(new Error('disk full'));
+
+    await expect(updateClientState?.({}, { activeProfileId: 'profile-1', mode: 'remote' })).resolves.toMatchObject({ success: false });
+    expect(abandon).toHaveBeenCalledWith('profile-1');
+    expect(commit).not.toHaveBeenCalled();
+  });
+
   it('keeps the saved client mode local when remote activation fails', async () => {
     const ipcMain = createIpcMainStub();
     const configManager = createConfigManagerStub();

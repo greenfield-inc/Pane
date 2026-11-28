@@ -12,7 +12,7 @@ import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig, type RemotePa
 import { primaryProfile } from '../../../../shared/types/remoteComputers';
 import type { PaneEventSink } from '../../core/eventSink';
 import { RemotePaneClient, RemotePaneClientController } from './remotePaneClient';
-import { boundary, decodeBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
 import { hashRemoteDaemonToken } from '../auth';
 import { PaneCommandRegistry } from '../commandRegistry';
@@ -1271,6 +1271,201 @@ describe('RemotePaneClientController', () => {
   });
 });
 
+describe('RemotePaneClientController switches fast (T-128)', () => {
+  it('skips the connection checklist for a machine that answered in the last 30 s, and runs it for one that did not', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const config = createDefaultRemoteDaemonConfig();
+    const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [{ id: `public:${server.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: server.baseUrl, token: 'test-token' }] };
+    config.client.computers = [studio];
+    const controller = createController();
+    let checklistShown = false;
+    controller.initialize({ configManager: createConfigManagerStub(config), rendererEventSink: { send() {
+      if (controller.getConnectionState().check) checklistShown = true;
+    } } });
+    let fresh = true;
+    const asked: Array<[string, number]> = [];
+    controller.setRecentAnswers((computerId, ms) => {
+      asked.push([computerId, ms]);
+      return fresh ? { routeId: studio.routes[0].id, baseUrl: server.baseUrl } : null;
+    });
+
+    await controller.activateProfile(primaryProfile(studio));
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(asked).toEqual([['studio-mac', 30_000]]);
+    expect(checklistShown).toBe(false);
+
+    await controller.switchToLocalMode();
+    fresh = false;
+    await controller.activateProfile(primaryProfile(studio));
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(checklistShown).toBe(true);
+    await controller.switchToLocalMode();
+  });
+
+  it('dials the address the machine\'s live connection uses, without a Tailscale lookup, and looks it up only when that dial fails', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const tailscale = { id: 'tailscale:https://studio-mac.tail1234.ts.net:8443', kind: 'tailscale' as const, source: 'found' as const, baseUrl: 'https://studio-mac.tail1234.ts.net:8443', token: 'test-token', tailnetMachine: 'studio-mac', tailnetDomain: 'tail1234.ts.net' };
+    const studio = { id: 'studio-mac', label: 'studio-mac', routes: [tailscale] };
+    const config = createDefaultRemoteDaemonConfig();
+    config.client.computers = [studio];
+    const controller = createController();
+    let lookups = 0;
+    let probes = 0;
+    let checklistShown = false;
+    controller.initialize({
+      configManager: createConfigManagerStub(config),
+      rendererEventSink: { send() {
+        if (controller.getConnectionState().check) checklistShown = true;
+      } },
+      resolveTailnetMachineUrl: async () => { lookups += 1; return server.baseUrl; },
+      checkDependencies: { lookupTailnetMachine: async () => { probes += 1; return { kind: 'not-found', reason: 'not in this test' }; } },
+    });
+    let liveUrl = server.baseUrl;
+    controller.setRecentAnswers(() => ({ routeId: tailscale.id, baseUrl: liveUrl }));
+
+    await controller.activateProfile(primaryProfile(studio));
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(lookups).toBe(0);
+    expect(controller.getConnectionState().activeBaseUrl).toBe(server.baseUrl);
+
+    await controller.switchToLocalMode();
+    // The live connection's address stopped answering between its heartbeat and the switch.
+    liveUrl = 'http://127.0.0.1:1';
+    await controller.activateProfile(primaryProfile(studio));
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(lookups).toBe(1);
+    // Review F-6: the first dial's failure isn't diagnosed while the retry dials; only the retry's
+    // own failure would show the checklist.
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(probes).toBe(0);
+    expect(checklistShown).toBe(false);
+    await controller.switchToLocalMode();
+  });
+
+  // #1767 Bug 1 in the rig: a config write while the switch dialed (config still said this
+  // computer) disconnected the switch's connection, and the one dialed after it told the
+  // renderer the host had not changed, so the landing never armed.
+  it('keeps the switch\'s own connection through a config write that lands while it dials', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const config = createDefaultRemoteDaemonConfig();
+    const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [{ id: `public:${server.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: server.baseUrl, token: 'test-token' }] };
+    config.client.computers = [studio];
+    const configManager = createConfigManagerStub(config);
+    const controller = createController();
+    const restores: boolean[] = [];
+    let wrote = false;
+    controller.initialize({
+      configManager,
+      rendererIds: () => [10],
+      rendererEventSink: { send(channel, payload) {
+        if (!wrote && controller.getConnectionState().status === 'connecting') {
+          wrote = true;
+          // Something unrelated saves config while the switch dials; it still says this computer.
+          queueMicrotask(() => configManager.setRemoteConfig(configManager.getConfig().remoteDaemon));
+        }
+        if (channel === 'remote-daemon:resync-required') {
+          restores.push(decodeBoundary(payload, boundary.object({ hostChanged: boundary.boolean })).hostChanged);
+        }
+      } },
+    });
+    controller.setRecentAnswers(() => ({ routeId: studio.routes[0].id, baseUrl: server.baseUrl }));
+
+    // As the switch's IPC handler does: hold syncs, switch, commit the host to config, resync.
+    const release = controller.holdConfigSync();
+    await controller.activateProfile(primaryProfile(studio));
+    expect(wrote).toBe(true);
+    // Another write after the switch connected, before the handler commits: still this computer.
+    configManager.setRemoteConfig(configManager.getConfig().remoteDaemon);
+    configManager.setRemoteConfig({ ...config, client: { ...config.client, mode: 'remote', activeProfileId: studio.id } });
+    controller.commitActivation();
+    release();
+
+    await waitFor(() => restores.length > 0);
+    expect(restores[0]).toBe(true);
+    await controller.switchToLocalMode();
+  });
+
+  // T-132: a 1 s rest starts the switch to a machine heard from moments ago, which skips the
+  // checklist; an arrow press while it dials must still leave the window where it is (D-6).
+  it('a switch cancelled while it dials a machine heard from moments ago leaves the window on this computer', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const config = createDefaultRemoteDaemonConfig();
+    const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [{ id: `public:${server.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: server.baseUrl, token: 'test-token' }] };
+    config.client.computers = [studio];
+    const controller = createController();
+    let cancelled: boolean | undefined;
+    controller.initialize({ configManager: createConfigManagerStub(config), rendererEventSink: { send() {
+      if (cancelled === undefined && controller.getConnectionState().status === 'connecting') cancelled = controller.cancelActivation('studio-mac');
+    } } });
+    controller.setRecentAnswers(() => ({ routeId: studio.routes[0].id, baseUrl: server.baseUrl }));
+
+    await expect(controller.activateProfile(primaryProfile(studio))).rejects.toMatchObject({ code: 'ERR_REMOTE_SWITCH_CANCELLED' });
+    expect(cancelled).toBe(true);
+    await waitFor(() => controller.getConnectionState().status === 'local');
+    expect(controller.getConnectionState()).toMatchObject({ mode: 'local', activeProfileId: null, check: null });
+    expect(controller.cancelActivation('studio-mac')).toBe(false);
+  });
+
+  // QA 1781 F-3: an arrow just after the switch starts. The cancel returns at once, so the dial it
+  // abandons must never go on to connect and move the window afterwards.
+  it('a switch cancelled at once from this computer never connects to the other machine afterwards', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const config = createDefaultRemoteDaemonConfig();
+    const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [{ id: `public:${server.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: server.baseUrl, token: 'test-token' }] };
+    config.client.computers = [studio];
+    const controller = createController();
+    const states: string[] = [];
+    controller.initialize({ configManager: createConfigManagerStub(config), rendererEventSink: { send() {
+      const state = controller.getConnectionState();
+      states.push(`${state.mode}:${state.status}:${state.activeProfileId}`);
+    } } });
+    controller.setRecentAnswers(() => ({ routeId: studio.routes[0].id, baseUrl: server.baseUrl }));
+
+    const switching = controller.activateProfile(primaryProfile(studio));
+    expect(controller.cancelActivation('studio-mac')).toBe(true);
+    await expect(switching).rejects.toMatchObject({ code: 'ERR_REMOTE_SWITCH_CANCELLED' });
+    await sleep(300);
+    expect(controller.getConnectionState()).toMatchObject({ mode: 'local', activeProfileId: null });
+    expect(controller.getActiveRemoteClient()).toBeNull();
+    expect(states.filter(state => state.startsWith('remote:'))).toEqual([]);
+    expect(server.getEventRequestCount()).toBe(0);
+  });
+
+  it('a switch cancelled part-way leaves the window on its old machine, with no checklist left open', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const config = createDefaultRemoteDaemonConfig();
+    const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [{ id: `public:${server.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: server.baseUrl, token: 'test-token' }] };
+    config.client = { ...config.client, mode: 'remote', activeProfileId: 'studio-mac', computers: [studio] };
+    const controller = createController();
+    controller.initialize({
+      configManager: createConfigManagerStub(config),
+      rendererEventSink: { send() {} },
+      // The other machine's Tailscale lookup never answers.
+      checkDependencies: { lookupTailnetMachine: () => new Promise(() => undefined) },
+    });
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(controller.cancelActivation('build-box')).toBe(false);
+
+    const switching = controller.activateProfile({
+      id: 'build-box', label: 'build-box', baseUrl: 'https://build-box.tail1234.ts.net:8443', token: '', transport: 'http+sse', tailnetMachine: 'build-box', tailnetDomain: 'tail1234.ts.net',
+    });
+    await waitFor(() => controller.getConnectionState().check?.outcome === 'running');
+    // Only a cancel for the machine being switched to stops it (review F-4).
+    expect(controller.cancelActivation('studio-mac')).toBe(false);
+    expect(controller.cancelActivation('build-box')).toBe(true);
+
+    await expect(switching).rejects.toMatchObject({ code: 'ERR_REMOTE_SWITCH_CANCELLED' });
+    expect(controller.getConnectionState()).toMatchObject({ status: 'connected', activeProfileId: 'studio-mac', check: null });
+    await controller.switchToLocalMode();
+  });
+});
+
 describe('RemotePaneClientController links to host ports', () => {
   const cleanups: Array<() => Promise<void> | void> = [];
   afterEach(async () => {
@@ -1714,5 +1909,169 @@ describe('RemotePaneClient reads compressed answers (T-127)', () => {
 
     const raw = Buffer.byteLength(JSON.stringify({ ok: true, result: answer }));
     expect(bytesFromHost() - before).toBeLessThan(raw / 10);
+  });
+});
+
+// Review 1781 SF-1: from a window on another machine (D-20), the dial to the next one keeps the
+// window's own connection until the new one is ready, so a cancel or a failed dial leaves it as it was.
+describe('a switch from a window on another machine keeps that machine until the new one is ready (T-132)', () => {
+  async function onStudio({ renderers = false }: { renderers?: boolean } = {}) {
+    const studioServer = await createTestRemoteServer();
+    const buildServer = await createTestRemoteServer();
+    activeServers.push(studioServer, buildServer);
+    const config = createDefaultRemoteDaemonConfig();
+    const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [{ id: `public:${studioServer.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: studioServer.baseUrl, token: 'test-token' }] };
+    const build = { id: 'build-box', label: 'Build Box', routes: [{ id: `public:${buildServer.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: buildServer.baseUrl, token: 'test-token' }] };
+    config.client = { ...config.client, mode: 'remote', activeProfileId: 'studio-mac', computers: [studio, build] };
+    const controller = createController();
+    const states: string[] = [];
+    controller.initialize({ configManager: createConfigManagerStub(config), rendererIds: renderers ? () => [1] : undefined, rendererEventSink: { send(channel, payload) {
+      const state = controller.getConnectionState();
+      const label = `${state.status}:${state.activeProfileId}`;
+      if (states.at(-1) !== label) states.push(label);
+      // The window restores at once, as a renderer acknowledges a resync.
+      const restore = decodeOptionalBoundary(payload, boundary.object({ restoreId: boundary.number }));
+      if (renderers && channel === 'remote-daemon:resync-required' && restore) queueMicrotask(() => controller.acknowledgeRestore(1, restore.restoreId));
+    } } });
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    states.length = 0;
+    controller.setRecentAnswers(() => ({ routeId: build.routes[0].id, baseUrl: buildServer.baseUrl }));
+    return { controller, states, studio, build, studioServer, buildServer };
+  }
+
+  it('an arrow while it dials stops the dial at once and never drops or redials the machine the window is on', async () => {
+    const { controller, states, build, studioServer, buildServer } = await onStudio();
+    // The other machine never says ready: the dial would hang.
+    buildServer.setEmitReadyEvent(false);
+    const studioDials = studioServer.getEventRequestCount();
+
+    const switching = controller.activateProfile(primaryProfile(build));
+    await waitFor(() => buildServer.getEventRequestCount() > 0);
+    expect(controller.cancelActivation('build-box')).toBe(true);
+
+    await expect(switching).rejects.toMatchObject({ code: 'ERR_REMOTE_SWITCH_CANCELLED' });
+    await sleep(50);
+    expect(states.filter(state => !state.endsWith(':studio-mac'))).toEqual([]);
+    expect(controller.getConnectionState()).toMatchObject({ status: 'connected', activeProfileId: 'studio-mac' });
+    expect(studioServer.getEventRequestCount()).toBe(studioDials);
+    await controller.switchToLocalMode();
+  });
+
+  it('a dial that fails leaves the window on the machine it shows, still connected', async () => {
+    const { controller, states, build, studioServer, buildServer } = await onStudio();
+    buildServer.setEventsReady(false);
+    const studioDials = studioServer.getEventRequestCount();
+    await expect(controller.activateProfile(primaryProfile(build))).rejects.toBeDefined();
+    await sleep(50);
+    expect(controller.getConnectionState()).toMatchObject({ status: 'connected', activeProfileId: 'studio-mac' });
+    expect(studioServer.getEventRequestCount()).toBe(studioDials);
+    expect(states.filter(state => state.startsWith('connected:') && !state.endsWith(':studio-mac'))).toEqual([]);
+    await controller.switchToLocalMode();
+  });
+
+  // Review 1781 R2-SF-1: latest wins (D-6). The state still says connected to studio while the
+  // staged dial runs, so picking studio again must stop that dial, not return early.
+  it('picking the machine the window is on while the dial runs stops the dial, and the window stays there', async () => {
+    const { controller, states, build, studio, studioServer, buildServer } = await onStudio();
+    buildServer.setEmitReadyEvent(false);
+    const studioDials = studioServer.getEventRequestCount();
+    const switching = controller.activateProfile(primaryProfile(build));
+    await waitFor(() => buildServer.getEventRequestCount() > 0);
+
+    await controller.activateProfile(primaryProfile(studio));
+    await expect(switching).rejects.toMatchObject({ code: 'ERR_REMOTE_SWITCH_CANCELLED' });
+    buildServer.setEmitReadyEvent(true);
+    await sleep(100);
+    expect(controller.getConnectionState()).toMatchObject({ status: 'connected', activeProfileId: 'studio-mac' });
+    expect(controller.getActiveRemoteClient()?.profile.id).toBe('studio-mac');
+    expect(states.filter(state => !state.endsWith(':studio-mac'))).toEqual([]);
+    expect(studioServer.getEventRequestCount()).toBe(studioDials);
+    await controller.switchToLocalMode();
+  });
+
+  // Review 1781 R2-SF-2: once the new machine has taken over, a cancel can't stop the switch
+  // (it would redial the old machine). The old link's close is awaited after the takeover.
+  it('a cancel after the new machine took over, while the old link still closes, is refused and the switch completes', async () => {
+    const { controller, build, studioServer } = await onStudio();
+    const old = controller.getActiveRemoteClient();
+    if (!old) throw new Error('The window has no connection to studio.');
+    const realDisconnect = old.disconnect.bind(old);
+    old.disconnect = async () => { await realDisconnect(); await sleep(80); };
+    const studioDials = studioServer.getEventRequestCount();
+    const switching = controller.activateProfile(primaryProfile(build));
+    await waitFor(() => controller.getActiveRemoteClient()?.profile.id === 'build-box');
+
+    expect(controller.cancelActivation('build-box')).toBe(false);
+    await expect(switching).resolves.toBeDefined();
+    await sleep(150);
+    expect(controller.getActiveRemoteClient()?.profile.id).toBe('build-box');
+    expect(studioServer.getEventRequestCount()).toBe(studioDials);
+    await controller.switchToLocalMode();
+  });
+
+  // QA 1781 F-3: an arrow just after the dial is ready, before the switch is committed (its config
+  // written). The renderer still shows the old machine, so the cancel must still stop it.
+  it('a cancel after the dial is ready but before the switch commits leaves the window on its machine, with no redial', async () => {
+    const { controller, build, studioServer, buildServer } = await onStudio({ renderers: true });
+    const studioDials = studioServer.getEventRequestCount();
+    await controller.activateProfile(primaryProfile(build));
+    // Ready, not yet committed: the window still shows studio.
+    expect(controller.getActiveRemoteClient()?.profile.id).toBe('studio-mac');
+    expect(controller.cancelActivation('build-box')).toBe(true);
+    expect(controller.takeCancelBeforeCommit('build-box')).toBe(true);
+    expect(controller.takeCancelBeforeCommit('build-box')).toBe(false);
+    controller.commitActivation();
+    await controller.syncToConfig();
+    await sleep(100);
+    expect(controller.getActiveRemoteClient()?.profile.id).toBe('studio-mac');
+    expect(controller.getConnectionState()).toMatchObject({ status: 'connected', activeProfileId: 'studio-mac' });
+    expect(studioServer.getEventRequestCount()).toBe(studioDials);
+    expect(buildServer.getEventRequestCount()).toBeGreaterThan(0);
+    await controller.switchToLocalMode();
+  });
+
+  // Review 1781 R4-SF-1: the renderer goes back only when the switch really committed, never when
+  // main had nothing to stop (the open never reached a switch).
+  it('answers what a cancel found: stopped, already committed, or nothing to stop', async () => {
+    const { controller, build } = await onStudio({ renderers: true });
+    expect(controller.cancelSwitch('build-box')).toBe('nothing');
+    await controller.activateProfile(primaryProfile(build));
+    controller.commitActivation();
+    expect(controller.cancelSwitch('build-box')).toBe('committed');
+    expect(controller.cancelSwitch('studio-mac')).toBe('nothing');
+    await controller.switchToLocalMode();
+  });
+
+  // Review 1781 round 4: a switch whose config write failed is never committed; its staged
+  // connection closes and the window stays on its machine.
+  it('abandoning a switch that was never committed closes its staged connection', async () => {
+    const { controller, build } = await onStudio({ renderers: true });
+    await controller.activateProfile(primaryProfile(build));
+    controller.abandonActivation('build-box');
+    controller.commitActivation();
+    await sleep(50);
+    expect(controller.getActiveRemoteClient()?.profile.id).toBe('studio-mac');
+    expect(controller.cancelSwitch('build-box')).toBe('nothing');
+    await controller.switchToLocalMode();
+  });
+
+  it('a switch committed with no cancel moves the window then, and a cancel after that is refused', async () => {
+    const { controller, build } = await onStudio({ renderers: true });
+    await controller.activateProfile(primaryProfile(build));
+    expect(controller.takeCancelBeforeCommit('build-box')).toBe(false);
+    controller.commitActivation();
+    expect(controller.getActiveRemoteClient()?.profile.id).toBe('build-box');
+    expect(controller.cancelActivation('build-box')).toBe(false);
+    await controller.switchToLocalMode();
+  });
+
+  it('a switch that completes moves the window to the new machine and closes the old connection', async () => {
+    const { controller, states, build } = await onStudio();
+    await controller.activateProfile(primaryProfile(build));
+    controller.commitActivation();
+    await waitFor(() => controller.getConnectionState().status === 'connected' && controller.getConnectionState().activeProfileId === 'build-box');
+    expect(controller.getActiveRemoteClient()?.profile.id).toBe('build-box');
+    expect(states.at(-1)).toBe('connected:build-box');
+    await controller.switchToLocalMode();
   });
 });

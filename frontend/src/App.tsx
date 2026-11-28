@@ -8,6 +8,8 @@ import { ConnectionChecklist } from './components/ConnectionChecklist';
 import { useRemoteRuntimeState } from './hooks/useRemoteRuntimeState';
 import { useConnectionPresence } from './hooks/useConnectionPresence';
 import { RemoteWorkspace } from './components/RemoteWorkspace';
+import { EngageHold, EngageKept } from './components/RemoteSessionView';
+import { endEngageSettling, engageSettled, setEngageLinkUp, useRemoteEngage } from './services/remoteEngage';
 import { TailnetHttpsBanner } from './components/TailnetHttpsBanner';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { followHostAccess } from './stores/readOnlyHostStore';
@@ -24,6 +26,7 @@ import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/SessionView';
 import { PaneChatIntroOffer } from './components/PaneChatIntroOffer';
 import Welcome from './components/Welcome';
+import { welcomeCheckStep, windowMachineForWelcome } from './utils/welcomeCheck';
 import Help, { KeyboardShortcutSheet } from './components/Help';
 import { useCommittedRef } from './hooks/useCommittedRef';
 import { isWritableCodeEditorFocused } from './utils/hotkeyUtils';
@@ -130,7 +133,8 @@ function App() {
   const analyticsIdentityPromise = useRef<Promise<AnalyticsIdentity | undefined> | null>(null);
   const appFirstOpenedCaptured = useRef(false);
   const onboardingCheckStarted = useRef(false);
-  const welcomeCheckStarted = useRef(false);
+  /** The Welcome check ran or was skipped for good: only this window's own first load decides (F-5). */
+  const welcomeChecked = useRef(false);
   const supportPromptCheckStarted = useRef(false);
 
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -171,9 +175,18 @@ function App() {
   const terminalShortcuts = appConfig?.terminalShortcuts ?? EMPTY_TERMINAL_SHORTCUTS;
   const { isVisible: shortcutHintsVisible } = useShortcutHintsOverlay();
   useFocusedSurfaceScrolling(activeSessionId);
-  const { connectionState } = useRemoteRuntimeState();
+  const { connectionState, connectionKnown, connectionReadFailed } = useRemoteRuntimeState();
   const shownConnectionCheck = connectionState.check?.outcome !== 'passed' ? connectionState.check ?? null : null;
   const { presence: connectionPresence } = useConnectionPresence(connectionState);
+  // An engage that landed keeps the main area live until the connection says connected (T-132).
+  const engageSettling = useRemoteEngage(state => state.settling === true);
+  useEffect(() => {
+    if (engageSettling && engageSettled(connectionState, connectionPresence)) endEngageSettling();
+  }, [engageSettling, connectionPresence, connectionState.mode, connectionState.status]);
+  // An engage that switched waits, held and marked not sent yet, while the link there is down (QA 1781 F-1).
+  useEffect(() => {
+    setEngageLinkUp(engageSettled(connectionState, connectionPresence));
+  }, [connectionPresence, connectionState.mode, connectionState.status]);
 
   const openSettings = useCallback((target?: SettingsTarget) => {
     if (target) {
@@ -686,13 +699,15 @@ function App() {
   }, [hasCheckedOnboarding, hasCheckedAnalyticsDefault]);
 
   useEffect(() => {
-    // Show the welcome screen intelligently based on user state.
-    // This should only run once when the app is loaded, not when sessions change
-    // Don't show welcome until onboarding check has completed and its dialog (if any) is closed
-    if (!isLoaded || welcomeCheckStarted.current || !hasCheckedOnboarding || isOnboardingOpen) {
+    // Show the welcome screen intelligently based on user state, once, on this window's own first
+    // load: never again on a host switch, and never for another machine (QA 1781 F-5).
+    const step = welcomeCheckStep({ checked: welcomeChecked.current, isLoaded, hasCheckedOnboarding, isOnboardingOpen, machine: windowMachineForWelcome(connectionKnown, connectionReadFailed, connectionState.mode) });
+    if (step === 'wait') return;
+    welcomeChecked.current = true;
+    if (step === 'skip') {
+      setHasResolvedStartupDialogs(true);
       return;
     }
-    welcomeCheckStarted.current = true;
     let cancelled = false;
 
     const checkInitialState = async () => {
@@ -725,8 +740,8 @@ function App() {
             const isReturningUserWithNoData = !hasProjects && !hasSessions && hasSeenWelcome;
 
 
-            if (isFirstTimeUser || isReturningUserWithNoData) {
-              if (!cancelled) setIsWelcomeOpen(true);
+            if ((isFirstTimeUser || isReturningUserWithNoData) && !cancelled) {
+              setIsWelcomeOpen(true);
               // Mark that welcome has been shown at least once
               await API.preferences.set('welcome_shown', 'true');
             }
@@ -736,16 +751,15 @@ function App() {
         }
 
       } finally {
-        if (!cancelled) setHasResolvedStartupDialogs(true);
+        setHasResolvedStartupDialogs(true);
       }
     };
 
     void checkInitialState();
-    return () => {
-      cancelled = true;
-      welcomeCheckStarted.current = false;
-    };
-  }, [isLoaded, hasCheckedOnboarding, isOnboardingOpen, completedOnboardingThisSession]);
+    // A switch while it reads (the window's data changed under it): what it read may be the other
+    // machine's, so it shows nothing, and it doesn't run again.
+    return () => { cancelled = true; };
+  }, [isLoaded, hasCheckedOnboarding, isOnboardingOpen, completedOnboardingThisSession, connectionKnown, connectionReadFailed, connectionState.mode]);
 
   /**
    * The once-only Support Pane dialog, for users past the first screen with GitHub CLI ready.
@@ -1030,6 +1044,8 @@ function App() {
 
   // A row opened on a machine that stopped answering shows why in place of the Pane.
   const offlineMachineShown = useAllMachinesStore(state => state.offlineNotice !== null);
+  // An engage keeps another machine's Session on screen through its switch, taking text (T-132).
+  const engaging = useRemoteEngage(state => state.engaging !== undefined || state.settling === true);
 
   return (
     <ContextMenuProvider>
@@ -1093,14 +1109,17 @@ function App() {
           />
         </div>
         {/* The checklist carries its own fix buttons, so it never dims. */}
-        <RemoteWorkspace dimmed={connectionPresence !== 'connected' && !shownConnectionCheck} covered={sidebarMaximized}>
+        <RemoteWorkspace dimmed={connectionPresence !== 'connected' && !shownConnectionCheck && !engaging} covered={sidebarMaximized}>
           {shownConnectionCheck
             ? <ConnectionChecklist check={shownConnectionCheck} onOpenSettings={openSettings} onUpdatePane={() => void updatePane()} />
             : offlineMachineShown
               ? <MachineOfflineView onMachineDetails={() => openSettings({ category: 'remote-access', setting: 'remote-machines' })} />
               : <SessionView />}
+          {!shownConnectionCheck && <EngageHold />}
           <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
         </RemoteWorkspace>
+        {/* Outside the workspace's dimming: what was typed and not sent stays usable (QA 1781 F-1). */}
+        <EngageKept />
         </div>
         <OnboardingDialog
           isOpen={isOnboardingOpen}
