@@ -259,7 +259,10 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   };
   const working = view?.status === 'working' || view?.status === 'blocked';
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
-  const authors = useMemo(() => photo ? replyAuthors(turns, photo.current) : undefined, [photo, turns]);
+  // The tab's profile names the newest replies only when the window reaches the live end and the tab isn't
+  // restarting: a Switch publishes its launch before the replay brings back its divider (QA #1789).
+  const liveEnd = !snapshot.hasNewer && view?.status !== 'starting';
+  const authors = useMemo(() => photo ? replyAuthors(turns, liveEnd ? photo.current : undefined) : undefined, [liveEnd, photo, turns]);
   const waiting = useMemo(() => waitingToolIds(view?.permissions, view?.questions), [view?.permissions, view?.questions]);
   const notes = useMemo(() => workerNotes(turns, workers ?? []), [turns, workers]);
   const agentsWorking = useMemo(() => workingOverride ?? workingAgents(workers), [workingOverride, workers]);

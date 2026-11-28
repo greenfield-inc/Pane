@@ -477,10 +477,11 @@ export class ChatTabManager {
       try { fallback = this.saveFallback(panelId); }
       catch (error) { console.warn(`[ChatTabs] ${panelId}'s conversation was not kept for a failed load on its new profile: ${reasonOf(error)}`); }
     }
-    const profiles = dividerProfiles(launchProfileRef(before.agent, request.launch), launchProfileRef(before.agent, before.launch));
+    // A leading divider starts a new conversation with no replies above it: it names only the profile after it.
+    const after = launchProfileRef(before.agent, request.launch);
     const divider: ChatDivider = keep
-      ? { sessionId: before.acpSessionId, text: request.divider, at, ...withAfter(tab.transcript?.lastReplayedId()), ...profiles }
-      : { leading: true, text: request.divider, at, ...profiles };
+      ? { sessionId: before.acpSessionId, text: request.divider, at, ...withAfter(tab.transcript?.lastReplayedId()), ...dividerProfiles(after, launchProfileRef(before.agent, before.launch)) }
+      : { leading: true, text: request.divider, at, ...dividerProfiles(after, undefined) };
     // The old agent is let go first: from here nothing reaches it, and a start waits until it has ended.
     const releasing = this.release(tab).catch(error => console.warn(`[ChatTabs] ${panelId}'s old agent did not stop cleanly: ${reasonOf(error)}`));
     tab.switching = releasing;
@@ -996,7 +997,7 @@ export class ChatTabManager {
         const at = new Date().toISOString();
         const text = 'Couldn\'t continue the conversation · new conversation, given the transcript';
         const ref = launchProfileRef(state.agent, state.launch);
-        const profiles = dividerProfiles(ref, ref);
+        const profiles = dividerProfiles(ref, undefined);
         this.update(panelId, current => ({ ...current, acpSessionId: undefined, turnTimes: undefined, dividers: [...current.dividers ?? [], { leading: true as const, text, at, ...profiles }].slice(-DIVIDERS_LIMIT) }));
         transcript.divider({ text, at, ...profiles });
         await create();

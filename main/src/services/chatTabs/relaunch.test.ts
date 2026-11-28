@@ -148,6 +148,8 @@ describe('chat tab relaunch (T-63 Reload and Switch profile)', () => {
     expect(readFileSync(file, 'utf8')).toContain('remember PERSIMMON');
     const shown = rows(manager.view('p1'));
     expect(shown[0]).toBe('--- Switched to Lab two · new Codex conversation, given the transcript ---');
+    // A leading divider has no replies above it, so it names only who writes from here on (QA #1789 finding 3).
+    expect(dividerContents(manager.view('p1'))).toEqual([{ type: 'pane_divider', text: expect.any(String), at: expect.any(String), profile: 'lab/two' }]);
     expect(shown[1]).toBe(`you: Codex keeps each profile's conversations apart. The earlier conversation in this Session is saved in ${file}. Read it first, then carry on from where it left off.`);
     // The divider stays at the start of the new conversation after a restart.
     await manager.restart('p1');

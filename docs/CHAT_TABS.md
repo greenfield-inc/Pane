@@ -821,16 +821,18 @@ loaded again with the new launch; `loadFallback` names the private transcript (i
 the tab's chat-tabs folder) a failed load falls back to. Each change adds a `dividers` entry, a
 `pane_divider` row that the history replay puts back after the message it followed,
 as it does turn times. The entry names the profile the tab runs from there on
-(`profile`) and the one before (`previous`), as refs (`pane/<agent>` for the agent
-on its own). With Profiles off, nothing calls it, and a request still
-waiting is dropped.
+(`profile`, a ref; `pane/<agent>` for the agent on its own); one in a kept
+conversation also names the profile before it (`previous`). With Profiles off,
+nothing calls it, and a request still waiting is dropped.
 
 With Profiles on, a Session's chat, and any chat tab running a named profile, shows
 the agent's photo: on its tab in place of the agent mark, on each divider (the new
 profile's), and beside each reply when the chat pane is at least 800 px wide;
 narrower, the photo and the profile's name sit at the top of the chat instead. Each
-reply keeps the photo of the profile that wrote it, read from the dividers around it;
-a reply before a divider saved without its profiles shows none.
+reply keeps the photo of the profile that wrote it, read from the dividers around it.
+The tab's own profile names the newest replies only while the chat shows the live end
+of the conversation and isn't restarting; otherwise they take the last divider's. A
+reply nothing names (before a divider saved without its profiles) shows no photo.
 
 ## Older clients
 

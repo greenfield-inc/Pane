@@ -47,6 +47,14 @@ describe('replyAuthors (T-63 round 5: each reply keeps the photo of the profile 
     expect(authors(messages, 'greenfield/business')).toEqual(['Old. → none', 'New. → greenfield/business']);
   });
 
+  it('without a trusted current profile (restarting, or paged back), replies after the last divider take that divider\'s profile', () => {
+    // QA #1789 findings 1 and 2: a restart publishes the new launch before its divider arrives, and an
+    // older page stops short of the newest divider; neither may give old replies the live profile.
+    const messages = [user('u1', 'Hi'), say('a1', 'Old.'), end('t1'), divider('d1', { profile: 'lab/two', previous: 'lab/one' }), user('u2', 'Next'), say('a2', 'Two.')];
+    expect(authors(messages, undefined)).toEqual(['Old. → lab/one', 'Two. → lab/two']);
+    expect(authors([user('u1', 'Hi'), say('a1', 'Unknown.')], undefined)).toEqual(['Unknown. → none']);
+  });
+
   it('shows no photo when the tab has no profile to show', () => {
     expect(authors([user('u1', 'Hi'), say('a1', 'One.')], undefined)).toEqual(['One. → none']);
   });
