@@ -61,6 +61,60 @@ a saved one is ignored and dropped when the Session's agent or launch command
 changes, and `chat-tab:profiles` returns an empty list. Turning Profiles on or off
 applies to the next start of a Session's agent.
 
+### Create New and Session rows (Profiles on)
+
+With Profiles on, **New**, the `+` beside Sessions and Search's **New Session**
+open **Create New** instead of the dialogs below. It asks, in order:
+
+1. **To** (required): one type-ahead of Claude and Codex on their own, this
+   machine's listed Agent Farm profiles, then Other agents (Cursor, OpenCode, Pi,
+   which start directly). Type to filter, **↑**/**↓** to move, **Return** picks
+   and moves on. A profile Agent Farm marks unlisted (such as a subagent's own)
+   isn't offered; an Agent Farm too old to say lists every profile. For now
+   (until T-83) To shows only a short list of installed profiles,
+   `greenfield/orchestrator`, `greenfield/business` and `greenfield/seo`
+   (`shared/agentProfiles.ts`); any other installed profile isn't offered yet.
+   It starts on the last choice made here.
+2. **Name** (optional): left empty, the Session is named from its first message.
+3. **Message** (optional): the agent's first message, sent once as a one-time
+   opening prompt. PNG, JPEG, WebP and GIF images up to 5 MB (a chat's limit)
+   can be attached (the button, paste or drop) when the Session will open in a
+   chat on this computer: Chat tabs on, an agent with a chat, its own launch, and
+   not WSL. They go to its chat with the message; if that send fails, the message
+   and images wait unsent in the chat's composer. **Return** creates;
+   **Shift+Return** adds a line.
+4. **Run on**: the machine you last created on, else this one. Another machine
+   lists its own profiles and WSL distributions, creates there, and Pane
+   switches to it. The draft stays on the machine it shows: if that machine
+   drops offline, Create waits until it is back or you pick another.
+
+Create waits, with the reason under the message, while the first message
+couldn't all be delivered: images are still being read, attached images can't
+go to that Session (another machine, WSL, an agent without a chat, a launch
+that runs a terminal), or the text would go to a terminal whose shell is
+PowerShell or cmd, which can't take it on the launch line (turn on Chat tabs,
+or create without a message). Nothing in the draft is cleared. A Session that
+resumes with a custom command can't take a first message either: with launch
+settings left alone, a default custom resume is left out when there is a
+message; one you set in More options holds Create. Launch settings left alone
+are the chosen agent's defaults; a profile sends none.
+
+**Create session** has a menu that switches it to **Create pane** (the project,
+base branch and Pane name), and Create New opens in that mode next time.
+**More options** holds every setting the old dialogs had: for a Session, what
+it's for, Start pinned, Run agent in (the Run on machine's WSL distributions),
+and the launch command and behavior; for a Pane, Start pinned, Use worktree and
+the number of Panes. Create is only on the main screen: **Back** returns there.
+A project's `+` opens Create New as a Pane in that project, on this computer.
+
+Session rows show the profile's avatar at the row's left padding (a profile's
+initials on a tint, `--color-avatar-1` to `--color-avatar-8`; Claude's or Codex's
+logo for the agent on its own and for older Sessions; another agent's initial).
+A Session with Panes shows its expand chevron in the avatar's place on hover or
+keyboard focus. While it works, a grey spinner sits on the right, before the
+approvals count and, in All machines, the machine mark; an idle row shows none.
+With Profiles off, New, the `+` and the rows are as described below.
+
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle
 on top and that kind's form below. When the desktop has saved other machines,
 a **Machine** picker sits between them. It starts on the machine you last

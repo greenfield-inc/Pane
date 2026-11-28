@@ -63,6 +63,7 @@ import type {
   OrchestrationSessionRecord,
   OrchestrationSessionSelector,
   SessionActivity,
+  SessionRuntimes,
   OrchestrationSessionUpdateInput,
   OrchestrationSessionView,
 } from '../../../shared/types/orchestrationSession';
@@ -290,7 +291,7 @@ interface ElectronAPI {
   };
 
   orchestrationSessions: {
-    runtimes: () => Promise<IPCResponse<{ distributions: string[] }>>;
+    runtimes: () => Promise<IPCResponse<SessionRuntimes>>;
     /** Summary records (T-127): read a Session's activity log and profile with `get`. */
     list: () => Promise<IPCResponse<OrchestrationSessionListResult<OrchestrationSessionSummary>>>;
     select: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionListResult<OrchestrationSessionSummary>>>;

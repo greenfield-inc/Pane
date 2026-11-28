@@ -674,6 +674,15 @@
   --color-machine-4: #bef264; /* lime */
   --color-machine-5: #fdba74; /* orange */
   --color-machine-6: #fb7185; /* rose */
+  /* Profile avatar tints (T-63): a profile without a photo shows its initials on one of these. */
+  --color-avatar-1: #f0a07a;
+  --color-avatar-2: #86a8f0;
+  --color-avatar-3: #6fd1a0;
+  --color-avatar-4: #b896f0;
+  --color-avatar-5: #e8bd66;
+  --color-avatar-6: #f08aaa;
+  --color-avatar-7: #6cc8da;
+  --color-avatar-8: #b3c46f;
 }
 
 /* Light Theme - GitHub-inspired clean white */
@@ -842,6 +851,15 @@
   --color-machine-4: #4d7c0f;
   --color-machine-5: #c2410c;
   --color-machine-6: #e11d48;
+  /* Profile avatar tints (T-63): a profile without a photo shows its initials on one of these. */
+  --color-avatar-1: #d9774b;
+  --color-avatar-2: #4b7bd8;
+  --color-avatar-3: #2f9e6b;
+  --color-avatar-4: #8a5cd6;
+  --color-avatar-5: #c9922e;
+  --color-avatar-6: #d4527a;
+  --color-avatar-7: #2c9bb0;
+  --color-avatar-8: #6f7d3a;
 }
 
 /* OLED Black Theme - True black for OLED displays */
@@ -2570,6 +2588,15 @@
   --color-machine-4: #4d7c0f;
   --color-machine-5: #c2410c;
   --color-machine-6: #e11d48;
+  /* Profile avatar tints (T-63): a profile without a photo shows its initials on one of these. */
+  --color-avatar-1: #d9774b;
+  --color-avatar-2: #4b7bd8;
+  --color-avatar-3: #2f9e6b;
+  --color-avatar-4: #8a5cd6;
+  --color-avatar-5: #c9922e;
+  --color-avatar-6: #d4527a;
+  --color-avatar-7: #2c9bb0;
+  --color-avatar-8: #6f7d3a;
   --status-on-tint-mix: 65%;
   /* Backgrounds — page / sheet / margin tonal steps */
   --color-bg-primary: var(--folio-paper);
@@ -2739,6 +2766,15 @@
   --color-machine-4: #4d7c0f;
   --color-machine-5: #c2410c;
   --color-machine-6: #e11d48;
+  /* Profile avatar tints (T-63): a profile without a photo shows its initials on one of these. */
+  --color-avatar-1: #d9774b;
+  --color-avatar-2: #4b7bd8;
+  --color-avatar-3: #2f9e6b;
+  --color-avatar-4: #8a5cd6;
+  --color-avatar-5: #c9922e;
+  --color-avatar-6: #d4527a;
+  --color-avatar-7: #2c9bb0;
+  --color-avatar-8: #6f7d3a;
   --status-on-tint-mix: 65%;
   /* Backgrounds — stock / sheet / halftone tonal steps */
   --color-bg-primary: var(--news-paper);
@@ -2908,6 +2944,15 @@
   --color-machine-4: #bef264;
   --color-machine-5: #fdba74;
   --color-machine-6: #fb7185;
+  /* Profile avatar tints (T-63): a profile without a photo shows its initials on one of these. */
+  --color-avatar-1: #f0a07a;
+  --color-avatar-2: #86a8f0;
+  --color-avatar-3: #6fd1a0;
+  --color-avatar-4: #b896f0;
+  --color-avatar-5: #e8bd66;
+  --color-avatar-6: #f08aaa;
+  --color-avatar-7: #6cc8da;
+  --color-avatar-8: #b3c46f;
   --status-on-tint-mix: 65%;
   /* Backgrounds — TWO-TONE foundation, sunken editor */
   --color-bg-primary: var(--walnut-900);

@@ -1,5 +1,6 @@
 import { customCommandResumeSchema } from '../../../shared/types/customCommandResume';
 import { listWSLDistributions } from '../utils/wslUtils';
+import { terminalPanelManager } from '../services/terminalPanelManager';
 import type { IpcMain } from 'electron';
 import { readOnlyPaneCaller, teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
@@ -95,8 +96,13 @@ export function registerOrchestrationSessionHandlers(
   commandRegistry: PaneCommandRegistry,
 ): void {
   const manager = services.orchestrationSessionManager;
+  // Where a new Session can run here, and what Create New (T-63) needs to know before it sends a
+  // first message: whether a terminal agent can take it on its launch line (PowerShell and cmd can't)
+  // and whether chat tabs, which can, are on.
   commandRegistry.register('orchestration-sessions:runtimes', async () => invokeSafely(async () => ({
     distributions: process.platform === 'win32' ? await listWSLDistributions().catch(() => []) : [],
+    promptAtLaunch: terminalPanelManager.launchShellIsPosix(),
+    chatTabs: services.configManager.getConfig().chatTabsEnabled === true,
   })));
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:runtimes');
   const requireManager = () => {

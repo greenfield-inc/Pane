@@ -60,7 +60,8 @@ import { InterceptorToast } from '../terminal/InterceptorToast';
 import { HostUploadList } from '../terminal/HostUploadList';
 import { attachTerminalPaste, uploadToTerminal, useHostUploads } from '../../hooks/useHostUploads';
 import { usePanelStore } from '../../stores/panelStore';
-import { areKeyboardShortcutsEnabled, useConfigStore } from '../../stores/configStore';
+import { areKeyboardShortcutsEnabled, isProfilesEnabled, useConfigStore } from '../../stores/configStore';
+import { keepsFocusOnActivation } from './terminalActivationFocus';
 import type { InterceptorState, TerminalSuggestion } from '../../services/terminalInterceptor/types';
 import { markPaneTerminalShown, markPanelOutput, startSendPrompt } from '../../utils/journeyTimings';
 import { onTerminalReflow } from '../../utils/terminalReflow';
@@ -2074,9 +2075,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
 
     const focusAfterActivation = () => {
       if (!autoFocus || findBarHasFocus(panel.id)) return;
-      // The sidebar cursor is DOM focus. A replay may finish after the user has
-      // moved that cursor, and focusing xterm would send their next key there.
-      if (document.activeElement?.matches('[data-sidebar-item]:focus-visible')) return;
+      if (keepsFocusOnActivation(document.activeElement, isProfilesEnabled(useConfigStore.getState().config))) return;
       xtermRef.current?.focus();
     };
 

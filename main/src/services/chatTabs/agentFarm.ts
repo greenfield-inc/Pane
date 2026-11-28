@@ -9,7 +9,7 @@ import type { ResolvedLaunch } from './manager';
 import { hostCommand, type HostCommand } from '../agentChat/hostCommand';
 import { agentConfig } from '../../../../shared/agents';
 import type { AgentFarmProcess } from '../agentFarm/bundledAgentFarm';
-import { plainProfileAgent } from '../agentFarm/agentFarmProfiles';
+import { plainProfileAgent } from '../../../../shared/agentProfiles';
 import { grantPaneMcp, paneMcpChatServer } from '../paneMcpEndpoint';
 import { PANE_MCP_PLUGIN_DENY_SETTINGS } from '../paneMcpNames';
 

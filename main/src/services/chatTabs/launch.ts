@@ -22,7 +22,7 @@ import { boundary, decodeOptionalBoundary, type JsonObject } from '../../../../s
 import { claudeSessionFolderSettings, isSessionFolderSettings } from '../agents/sessionFolderAccess';
 import type { ResolvedProjectEnv } from '../projectEnvVars';
 import { clearSessionProfile, sessionGitCeiling } from '../sessionWorkspace';
-import { plainProfileAgent } from '../agentFarm/agentFarmProfiles';
+import { plainProfileAgent } from '../../../../shared/agentProfiles';
 import { profilesOn } from '../agentFarm/profilesFeature';
 
 /** API keys a person may set for chat tabs on this machine, kept in the OS secure store. */

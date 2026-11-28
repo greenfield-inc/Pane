@@ -28,6 +28,7 @@ const BROWSER_SPECS = [
   'codeless-remote.spec.ts',
   'command-palette.spec.ts',
   'controller.spec.ts',
+  'create-new.spec.ts',
   'commit-dialog.spec.ts',
   'desktop-notifications.spec.ts',
   'device-tab.spec.ts',

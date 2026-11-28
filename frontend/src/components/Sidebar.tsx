@@ -3,6 +3,7 @@ import { isReadOnlyHost, useReadOnlyHost } from '../stores/readOnlyHostStore';
 import { useActiveMachineStore } from '../stores/activeMachineStore';
 import { NewDialog } from './NewDialog';
 import { onOpenNewDialogRequest } from '../utils/openNewDialog';
+import { onOpenNewPaneRequest, onOpenNewSessionRequest } from '../utils/openNewSession';
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
@@ -43,7 +44,7 @@ import { RemoteHostSwitcher } from './RemoteHostSwitcher';
 import { AllMachinesSidebar } from './machines/AllMachinesSidebar';
 import { usePaneSort } from '../hooks/usePaneSort';
 import { isAllMachinesOn, startAllMachinesFeed, useAllMachinesStore } from '../stores/allMachinesStore';
-import { isMissionControlEnabled, isTodosEnabled, useConfigStore } from '../stores/configStore';
+import { isMissionControlEnabled, isProfilesEnabled, isTodosEnabled, useConfigStore } from '../stores/configStore';
 import { usePanelStore } from '../stores/panelStore';
 import { rollupAgentDisplayStatus, rollupSessionAgentState, toAgentDisplayStatus } from '../utils/agentStatus';
 import { createProjectById, getPinnedSessions, groupSessionsByProject } from '../utils/sessionOrdering';
@@ -394,6 +395,10 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
   // State for collapsed sidebar
   const [projects, setProjects] = useState<Project[]>([]);
   const [showNewDialog, setShowNewDialog] = useState(false);
+  // Profiles on (T-63): New Session (the + beside Sessions, Search, the shortcut) opens Create New as a Session.
+  const [newDialogMode, setNewDialogMode] = useState<'session' | 'pane' | undefined>(undefined);
+  // A project's + (Profiles on): Create New as a Pane in that project.
+  const [newDialogProjectId, setNewDialogProjectId] = useState<number | undefined>(undefined);
   const [compactSessionMenu, setCompactSessionMenu] = useState<CompactSessionMenuState | null>(null);
   const activeProjectId = useNavigationStore((state) => state.activeProjectId);
   const activeView = useNavigationStore((state) => state.activeView);
@@ -427,6 +432,18 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
 
   // Home's Get Started "New" opens this same dialog.
   useEffect(() => onOpenNewDialogRequest(() => { if (!isReadOnlyHost()) setShowNewDialog(true); }), []);
+  useEffect(() => onOpenNewSessionRequest(() => {
+    if (isReadOnlyHost()) return;
+    if (!isProfilesEnabled(useConfigStore.getState().config)) return;
+    setNewDialogMode('session');
+    setShowNewDialog(true);
+  }), []);
+  useEffect(() => onOpenNewPaneRequest(projectId => {
+    if (!isProfilesEnabled(useConfigStore.getState().config)) return;
+    setNewDialogMode('pane');
+    setNewDialogProjectId(projectId);
+    setShowNewDialog(true);
+  }), []);
 
   const handleRefreshGitStatus = async () => {
     try {
@@ -972,7 +989,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
           </div>
         </div>
 
-        {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} machines={machines} onSwitchMachine={selectMachine} onClose={() => setShowNewDialog(false)} />}
+        {showNewDialog && <NewDialog projects={projects} defaultProjectId={newDialogProjectId ?? sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} fromProject={newDialogProjectId !== undefined} machines={machines} onSwitchMachine={selectMachine} initialMode={newDialogMode} onClose={() => { setShowNewDialog(false); setNewDialogMode(undefined); setNewDialogProjectId(undefined); }} />}
 
         <CompactSessionMenu
           menu={compactSessionMenu}
@@ -1140,7 +1157,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
 
         </div>
     </div>
-    {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} machines={machines} onSwitchMachine={selectMachine} onClose={() => setShowNewDialog(false)} />}
+    {showNewDialog && <NewDialog projects={projects} defaultProjectId={newDialogProjectId ?? sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} fromProject={newDialogProjectId !== undefined} machines={machines} onSwitchMachine={selectMachine} initialMode={newDialogMode} onClose={() => { setShowNewDialog(false); setNewDialogMode(undefined); setNewDialogProjectId(undefined); }} />}
     </>
   );
 }

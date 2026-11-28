@@ -30,6 +30,8 @@ import { cn } from '../utils/cn';
 import { openPaneTarget } from './terminal/openPaneLink';
 import { rememberOnMachine } from '../utils/machineRowActions';
 import { OrchestrationSessionForm } from './CreateOrchestrationSessionDialog';
+import { CreateNewDialog } from './createNew/CreateNewDialog';
+import { isProfilesEnabled, useConfigStore } from '../stores/configStore';
 import { CreatePaneForm } from './CreateSessionDialog';
 import { MachineMark } from './machines/MachineMark';
 import { SegmentedControl } from './settings/SettingsControls';
@@ -37,7 +39,11 @@ import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
 import { Bone, Skeleton, TextBone, LoadingStatus, useSkeletonHold } from './ui/Skeleton';
 
-interface NewDialogProps {
+export interface NewDialogProps {
+  /** Create New (Profiles on) only: open as New Session (the + beside Sessions), else as last used. */
+  initialMode?: 'session' | 'pane';
+  /** Create New only: opened from a project's +, so it starts on this computer with `defaultProjectId` picked. */
+  fromProject?: boolean;
   /** The repositories of the machine the app is on. */
   projects: Project[];
   defaultProjectId?: number;
@@ -151,7 +157,13 @@ function MachinePicker({ machines, selectedId, lastUsedId, disabled, onPick }: {
 
 // One modal owns focus for both forms. The section + controls continue to use
 // the standalone dialogs around these same forms.
-export function NewDialog({ projects, defaultProjectId, machines: entries, onSwitchMachine, onClose }: NewDialogProps) {
+export function NewDialog(props: NewDialogProps) {
+  // With Profiles on (T-63), New is the Create New dialog; off, it stays as it was.
+  const profiles = useConfigStore(state => isProfilesEnabled(state.config));
+  return profiles ? <CreateNewDialog {...props} /> : <ClassicNewDialog {...props} />;
+}
+
+function ClassicNewDialog({ projects, defaultProjectId, machines: entries, onSwitchMachine, onClose }: NewDialogProps) {
   const [kind, setKind] = useState<'session' | 'pane'>('session');
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [readAttempt, setReadAttempt] = useState(0);

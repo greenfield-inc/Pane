@@ -5,6 +5,7 @@ import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
 import { SessionSnapshotService } from '../services/sessionSnapshots';
 import { PaneError } from '../../../shared/paneError';
 import type { AppServices } from './types';
+import { terminalPanelManager } from '../services/terminalPanelManager';
 
 describe('orchestration-sessions:create', () => {
   it('passes a requested pin and blank-name intent through to the new Session', async () => {
@@ -21,6 +22,25 @@ describe('orchestration-sessions:create', () => {
     await registry.invokeRemote('orchestration-sessions:create', [{ name: 'New chat', nameFromFirstMessage: true, agent: 'codex', isPinned: true }]);
 
     expect(create.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ name: 'New chat', nameFromFirstMessage: true, isPinned: true }));
+  });
+});
+
+describe('orchestration-sessions:runtimes', () => {
+  it('says whether a terminal launch line can carry a first message and whether chat tabs are on (T-63, F-4)', async () => {
+    const posix = vi.spyOn(terminalPanelManager, 'launchShellIsPosix').mockReturnValue(false);
+    const registry = new PaneCommandRegistry();
+    registerOrchestrationSessionHandlers(
+      // SAFETY: The handlers only call ipcMain.handle, and this test invokes the registry directly.
+      { handle: () => undefined } as IpcMain,
+      // SAFETY: The runtimes channel reads only configManager.getConfig.
+      { configManager: { getConfig: () => ({ chatTabsEnabled: true }) } } as AppServices,
+      registry,
+    );
+
+    const result = await registry.invokeRemote('orchestration-sessions:runtimes', []);
+
+    expect(result).toEqual({ success: true, data: expect.objectContaining({ promptAtLaunch: false, chatTabs: true }) });
+    posix.mockRestore();
   });
 });
 

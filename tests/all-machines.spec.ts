@@ -4,6 +4,10 @@ import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../s
 import type { TailnetMachineList } from '../shared/types/workspaceAccess';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import { notifyFixture } from './fixtures/notifySnapshot';
+import { layoutBox } from './orchestrationSessionsFixture';
+
+/** Profiles on (T-63): avatar rows. */
+const PROFILES_ON = { appearanceMode: 'system', sessionProfilesEnabled: true };
 
 type MachinesMock = {
   getMachineRuns: () => Array<{ machineId: string; command: MachineCommand }>;
@@ -193,6 +197,72 @@ test('All machines shows each machine\'s own Session activity, and an offline ma
   await (await mock(page)).evaluate((api, list) => api.emitMachineEvent({ type: 'machines', machines: list }), offline);
   await expect(icon('Backup rotation')).toHaveAttribute('data-state', 'idle');
   await page.screenshot({ path: testInfo.outputPath('j13-all-machines-offline.png') });
+});
+
+test('with Profiles off, a Session row keeps its activity icon after the chevron, and no avatar (T-63)', async ({ page }) => {
+  await openAllMachines(page);
+  const row = sessionRows(page).filter({ hasText: 'Spring sale launch' });
+  await expect(row.getByTestId('profile-avatar')).toHaveCount(0);
+  await expect(row.getByTestId('session-activity-icon')).toHaveAttribute('data-state', 'idle');
+  const toggle = await layoutBox(row.getByRole('button', { name: /^(Expand|Collapse) Spring sale launch/ }));
+  const name = await layoutBox(row.locator('span.truncate').first());
+  expect(name.x - (toggle.x + toggle.width)).toBe(6 + 12 + 6);
+});
+
+test('a Session row shows its avatar at the row\'s padding, and while it works a spinner before its count and machine mark (T-63, J18)', async ({ page }, testInfo) => {
+  const withProfile = { ...reads, build: { ...reads.build, 'orchestration-sessions:list': { success: true, data: { sessions: [
+    { ...session('s1', 'Backup rotation', ['b2']), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h' } },
+  ] } } } };
+  await openAllMachines(page, 'light', { extra: { machineConnections: { machines, reads: withProfile }, initialConfig: PROFILES_ON } });
+  const row = sessionRows(page).filter({ hasText: 'Backup rotation' });
+  const plain = sessionRows(page).filter({ hasText: 'Spring sale launch' });
+  await expect(row.getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Profile Greenfield orchestrator');
+  await expect(plain.getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Claude, no profile');
+  // No reserved left slot: the avatar starts at the row's 8px padding and the name 6px after it,
+  // and a Session with Panes shows its chevron over the avatar only on hover or keyboard focus.
+  const offsets = async (target: typeof row) => {
+    const box = await layoutBox(target);
+    return { avatar: (await layoutBox(target.getByTestId('profile-avatar'))).x - box.x, name: (await layoutBox(target.locator('span.truncate').first())).x - box.x };
+  };
+  expect(await offsets(row)).toEqual({ avatar: 8, name: 8 + 16 + 6 });
+  expect(await offsets(plain)).toEqual({ avatar: 8, name: 8 + 16 + 6 });
+  const toggle = row.getByRole('button', { name: 'Expand Backup rotation', exact: true });
+  expect(await layoutBox(toggle)).toEqual(await layoutBox(row.getByTestId('profile-avatar')));
+  await page.mouse.move(900, 600);
+  await expect(toggle).toHaveCSS('opacity', '0');
+  await row.hover();
+  await expect(toggle).toHaveCSS('opacity', '1');
+  await expect(row.getByTestId('session-activity-icon')).toHaveCount(0);
+  await (await mock(page)).evaluate((api, build) => api.emitMachineEvent(
+    { type: 'event', machineId: 'build', channel: 'orchestration-sessions:activity', args: [] }, { build },
+  ), { 'orchestration-sessions:activity-list': { success: true, data: [{ sessionId: 's1', state: 'working', workingPanes: 0 }] } });
+  const spinner = row.getByTestId('session-activity-icon');
+  await expect(spinner).toHaveAttribute('data-state', 'working');
+  // The right side reads spinner, then the Pane count (or approvals badge), then the machine mark.
+  const spinnerBox = await layoutBox(spinner);
+  const countBox = await layoutBox(row.getByTestId('session-approvals-slot'));
+  const markBox = await layoutBox(row.getByTestId('all-machines-mark-slot'));
+  await expect(row.getByTestId('session-approvals-slot')).toHaveText('1');
+  expect(spinnerBox.x + spinnerBox.width).toBeLessThanOrEqual(countBox.x);
+  expect(countBox.x + countBox.width).toBeLessThanOrEqual(markBox.x);
+  expect(await offsets(row)).toEqual({ avatar: 8, name: 8 + 16 + 6 });
+  await page.screenshot({ path: testInfo.outputPath('j18-all-machines-rows.png') });
+});
+
+test('a working Session with approvals waiting reads spinner, badge, machine mark (T-63)', async ({ page }) => {
+  const working = { ...reads, local: { ...reads.local, 'orchestration-sessions:activity-list': { success: true, data: [{ sessionId: 's1', state: 'working', workingPanes: 0 }] } } };
+  const notifySnapshot = { settings: notifyFixture().settings, history: [], items: [
+    { id: 'q-row', ui: 'approve' as const, title: 'Apply migration?', source: { name: 'checkout', agent: 'Claude', session: { id: 's1', name: 'Spring sale launch' } }, state: 'waiting' as const, createdAt: Date.now() },
+  ] };
+  await openAllMachines(page, 'light', { extra: { machineConnections: { machines, reads: working }, notifySnapshot, initialConfig: PROFILES_ON } });
+  const row = sessionRows(page).filter({ hasText: 'Spring sale launch' });
+  const badge = row.getByTestId('session-approvals-count');
+  await expect(badge).toHaveText('1');
+  const spinnerBox = await layoutBox(row.getByTestId('session-activity-icon'));
+  const badgeBox = await layoutBox(badge);
+  const markBox = await layoutBox(row.getByTestId('all-machines-mark-slot'));
+  expect(spinnerBox.x + spinnerBox.width).toBeLessThanOrEqual(badgeBox.x);
+  expect(badgeBox.x + badgeBox.width).toBeLessThanOrEqual(markBox.x);
 });
 
 test('switching to All machines opens no project, and what you open is remembered across a relaunch', async ({ page, browser }) => {

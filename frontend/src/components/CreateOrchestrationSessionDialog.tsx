@@ -37,7 +37,7 @@ const DIRECT_OPENCODE_COMMAND = /^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:env\s+(?:
  * The app's default launch settings as offered for `agent`. OpenCode Sessions refuse wrappers and
  * custom resume, so those defaults are left out for OpenCode rather than offered and then refused.
  */
-function defaultLaunch(config: AppConfig | null, agent: PaneChatAgent): Pick<SessionCreationForm, 'launchCommand' | 'customResume'> {
+export function defaultLaunch(config: AppConfig | null, agent: PaneChatAgent): Pick<SessionCreationForm, 'launchCommand' | 'customResume'> {
   const launchCommand = config?.defaultSessionCommand ?? '';
   if (agent !== 'opencode') return { launchCommand, customResume: config?.defaultSessionResume ?? null };
   return { launchCommand: !launchCommand.trim() || DIRECT_OPENCODE_COMMAND.test(launchCommand.trim()) ? launchCommand : '', customResume: null };

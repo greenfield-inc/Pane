@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { configuredAgent } from '../../../../shared/agents';
 import { PROFILE_REF_PATTERN } from '../../../../shared/types/agentFarmProfiles';
-import { panePluginFiles, parseProfileList, parseProfileListLine, plainProfileAgent, plainProfileAgents, plainProfileRef } from './agentFarmProfiles';
+import { panePluginFiles, parseProfileList, parseProfileListLine } from './agentFarmProfiles';
+import { plainProfileAgent, plainProfileAgents, plainProfileRef } from '../../../../shared/agentProfiles';
 
 // Lines as Agent Farm 0.2.34's `profiles list` prints them.
 const LIST = [
@@ -28,6 +29,13 @@ describe('parseProfileList', () => {
       // Pane's plain profile: hidden, and "default" effort means none was set.
       { ref: 'pane/claude', plugin: 'pane', version: '1.0.0', harness: 'claude', model: 'claude-opus-5-5', hidden: true },
     ]);
+  });
+
+  it('marks a profile its plugin unlists, and leaves listing unsaid for an Agent Farm that says nothing (T-63)', () => {
+    expect(parseProfileListLine('greenfield/planner -> planner | plugin greenfield 0.0.47 | claude | claude-opus-5-5 high | native default | unlisted'))
+      .toMatchObject({ ref: 'greenfield/planner', listed: false });
+    expect(parseProfileListLine('greenfield/orchestrator -> orchestrator | plugin greenfield 0.0.47 | claude | claude-opus-5-5 high | native default'))
+      .not.toHaveProperty('listed');
   });
 
   it('skips a line in another shape', () => {

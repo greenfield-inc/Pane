@@ -11,9 +11,10 @@ interface SessionActivityProps {
 /**
  * A Session's activity icon (Option 1, D-363): Pane's working spinner while the host says the
  * Session is working, else an empty ring in the same fixed 12 px box. Never red: the approvals
- * count and the expanded Pane rows carry "needs input".
+ * count and the expanded Pane rows carry "needs input". Desktop Session rows show only the
+ * spinner, `neutral` (grey, as the T-63 design draws it), beside the avatar that took its place.
  */
-export function SessionActivityIcon({ state, className }: { state: SessionActivity['state']; className?: string }) {
+export function SessionActivityIcon({ state, className, neutral = false }: { state: SessionActivity['state']; className?: string; neutral?: boolean }) {
   const working = state === 'working';
   return (
     <span
@@ -27,17 +28,28 @@ export function SessionActivityIcon({ state, className }: { state: SessionActivi
       <span
         className={cn(
           'inline-block box-border w-3 h-3 rounded-full border-2',
-          working ? 'border-status-info/30 border-t-status-info animate-spin' : 'border-text-muted/45',
+          working
+            ? neutral ? 'border-text-tertiary/35 border-t-text-secondary animate-spin' : 'border-status-info/30 border-t-status-info animate-spin'
+            : 'border-text-muted/45',
         )}
       />
     </span>
   );
 }
 
-/** The Session row's icon, from the host's activity for this Session. */
+/** The phone's Session row icon, from the host's activity for this Session. */
 export function SessionActivityDot({ session }: SessionActivityProps) {
   const { state } = useSessionActivity(session.id);
   return <SessionActivityIcon state={state} />;
+}
+
+/**
+ * The desktop Session row's working spinner (T-63): shown only while the host says the Session works, in
+ * the row's trailing slot, where the machine mark sits in All machines. Idle shows nothing.
+ */
+export function SessionWorkingSpinner({ session }: { session: OrchestrationSessionSummary }) {
+  const { state } = useSessionActivity(session.id);
+  return state === 'working' ? <SessionActivityIcon state={state} neutral /> : null;
 }
 
 /** How much delegated work is in flight, in place of the plain child count. */
