@@ -154,7 +154,8 @@ the agent to finish its current reply, then restart its chat tab on the new laun
   profiles (Reload only), refuses with why.
 - When this computer's Agent Farm no longer lists a Session's profile (greenfield
   0.1.0 removed most of them), neither as a profile nor as an agent a profile
-  links to (a Session started from a launch link's command runs one), the row shows a red dot, Reload profile reads
+  links to (a Session started from a launch link's command runs one), or its
+  profile no longer has the Session's saved variant, the row shows a red dot, Reload profile reads
   *profile gone* and refuses (`SESSION_PROFILE_GONE`), and Switch profile reads
   *pick again*: the person picks a profile again. A list Pane can't read, or one with
   nothing from the profile's plugin yet (Pane's first start), marks nothing.

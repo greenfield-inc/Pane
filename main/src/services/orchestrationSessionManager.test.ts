@@ -616,6 +616,20 @@ describe('OrchestrationSessionManager', () => {
         expect(switched.session.agentProfileGone).toBeUndefined();
       }));
 
+      // Review F-6: the plugin keeps the profile but drops the Session's variant.
+      it('marks a Session whose saved variant its profile no longer has, and Reload asks to pick again', async () => withChatTabs(async (fixture, farm) => {
+        const port = chatTabs();
+        fixture.manager.attachChatTabs(port);
+        const created = await fixture.manager.create({ name: 'Ran codex', agentProfile: 'greenfield/orchestrator:codex', agent: 'codex' });
+        await fixture.manager.refreshPluginHashes(true);
+        expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileGone).toBeUndefined();
+        farm.profiles.mockResolvedValue({ profiles: [{ ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.1.0', harness: 'claude', hidden: false, defaultVariant: 'claude', variants: [{ name: 'claude', model: 'claude-opus-5-5' }] }] });
+        await fixture.manager.refreshPluginHashes(true);
+        expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileGone).toBe(true);
+        await expect(fixture.manager.reloadProfile({ sessionId: created.session.id })).rejects.toMatchObject({ code: 'SESSION_PROFILE_GONE' });
+        expect(port.relaunch).not.toHaveBeenCalled();
+      }));
+
       it('with Profiles off, refuses Switch and Reload, reads no plugin and shows no changed mark, as on main', async () => withChatTabs(async (fixture, farm) => {
         const port = chatTabs();
         fixture.manager.attachChatTabs(port);
