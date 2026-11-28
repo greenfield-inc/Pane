@@ -721,3 +721,33 @@ describe('profile sync: the Profiles switch (D-474)', () => {
     expect(status.computers).toEqual([{ key: 'off', id: '', name: 'old-mac', state: 'off', waiting: [], error: 'Profiles is off on old-mac. Turn it on there to sync.' }]);
   }, 60_000);
 });
+
+describe('profile sync: changes made outside Pane (review F-1, #1785)', () => {
+  it('waits while Agent Farm holds its install lock, syncs once it is let go, and ignores an abandoned lock', async () => {
+    const a = computer('mac-a', 'a');
+    const root = agentFarmConfigRoot(a.paneDir);
+    const lock = path.join(root, '.plugins', 'install.lock');
+    let changes = 0;
+    const stop = a.host.watchOutside(() => { changes += 1; });
+    try {
+      // An update paused part way through: its lock is held and half its files are written.
+      mkdirSync(lock, { recursive: true });
+      mkdirSync(path.join(root, 'plugins', 'paused'), { recursive: true });
+      writeFileSync(path.join(root, 'plugins', 'paused', 'plugin.yaml'), 'name: paused\n');
+      await new Promise(resolve => setTimeout(resolve, 1_500));
+      expect(changes).toBe(0);
+      // The update commits and lets go of the lock: the change syncs then.
+      rmSync(lock, { recursive: true });
+      await vi.waitFor(() => expect(changes).toBeGreaterThan(0), { timeout: 5_000, interval: 50 });
+      // A lock a killed install left behind long ago doesn't hold sync back.
+      mkdirSync(lock);
+      const old = new Date(Date.now() - 60 * 60_000);
+      utimesSync(lock, old, old);
+      const before = changes;
+      writeFileSync(path.join(root, 'plugins', 'paused', 'plugin.yaml'), 'name: paused\nversion: 2\n');
+      await vi.waitFor(() => expect(changes).toBeGreaterThan(before), { timeout: 5_000, interval: 50 });
+    } finally {
+      stop();
+    }
+  }, 20_000);
+});

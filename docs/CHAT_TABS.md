@@ -740,7 +740,8 @@ plugin, and sends it to every computer that is behind. The newest save wins;
 equal times go to the lower install id; nothing is merged. It runs on start,
 after a save here, when a plugin, receipt or display override in
 `<PANE_DIR>/agent-farm` changes outside Pane (a file watcher, while the switch
-is on), when a computer comes back online or reports
+is on; a change waits while Agent Farm holds `.plugins/install.lock`, unless the
+lock is over 10 minutes old), when a computer comes back online or reports
 `profiles:changed`, and for one plugin before a Session starts, switches to or
 reloads it (here, or on the machine a remote Session is created on). That
 Session sync reads and is sent only its own profile's receipt and record, and it
