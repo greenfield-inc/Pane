@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { discoverTailnetMachines, resolveTailnetMachineUrl, savedSecretKey, type WorkspaceProbe, type WorkspaceProbeResult } from './tailnetMachines';
+import { discoverTailnetMachines, resolveTailnetMachineUrl, savedSecretKey, tailnetLoginMatches, tailnetRelayKey, type WorkspaceCall, type WorkspaceProbe, type WorkspaceProbeResult } from './tailnetMachines';
 
 const status = {
   BackendState: 'Running',
@@ -158,5 +158,49 @@ describe('resolveTailnetMachineUrl', () => {
   it('says so when the machine is not on its tailnet any more', async () => {
     await expect(resolveTailnetMachineUrl({ name: 'gone', domain: 'tail1.ts.net' }, async () => JSON.stringify(status)))
       .rejects.toThrow('gone is not on your current tailnet (example.org).');
+  });
+});
+
+describe('tailnetLoginMatches', () => {
+  const read = (value: typeof status | null) => async () => (value === null ? null : JSON.stringify(value));
+
+  it('is true for a machine whose Tailscale owner is this computer\'s login, including one offline now', async () => {
+    expect(await tailnetLoginMatches({ name: 'my-mac', domain: 'tail1.ts.net' }, read(status))).toBe(true);
+    expect(await tailnetLoginMatches({ name: 'MY-LINUX', domain: 'TAIL1.ts.net' }, read(status))).toBe(true);
+  });
+
+  it('is false for another login\'s machine, a tagged one, a missing one, or one saved on another tailnet', async () => {
+    expect(await tailnetLoginMatches({ name: 'shared-box', domain: 'tail1.ts.net' }, read(status))).toBe(false);
+    expect(await tailnetLoginMatches({ name: 'ci', domain: 'tail1.ts.net' }, read(status))).toBe(false);
+    expect(await tailnetLoginMatches({ name: 'gone', domain: 'tail1.ts.net' }, read(status))).toBe(false);
+    expect(await tailnetLoginMatches({ name: 'my-mac', domain: 'tail2.ts.net' }, read(status))).toBe(false);
+  });
+
+  it('cannot say when Tailscale is missing, signed out or unreadable', async () => {
+    expect(await tailnetLoginMatches({ name: 'my-mac', domain: 'tail1.ts.net' }, read(null))).toBeUndefined();
+    expect(await tailnetLoginMatches({ name: 'my-mac', domain: 'tail1.ts.net' }, read({ ...status, BackendState: 'NeedsLogin' }))).toBeUndefined();
+    expect(await tailnetLoginMatches({ name: 'my-mac', domain: 'tail1.ts.net' }, async () => '{not json')).toBeUndefined();
+  });
+});
+
+describe('tailnetRelayKey', () => {
+  const read = async () => JSON.stringify(status);
+  const report = { machineId: 'mac-install', name: 'my-mac', relay: { id: 'mac-relay', address: 'https://mac-relay.runpane.net', fingerprint: 'fp-mac', local: [] } };
+
+  it('reads the relay key from the machine its Tailscale name reaches, sending the route\'s secret', async () => {
+    const calls: Array<{ ip: string; channel: string; secret?: string }> = [];
+    const call: WorkspaceCall = async (machine, channel, _args, secret) => { calls.push({ ip: machine.ip, channel, secret }); return { kind: 'answered', statusCode: 200, ok: true, result: report }; };
+    expect(await tailnetRelayKey({ name: 'my-mac', domain: 'tail1.ts.net' }, 'token-mac', read, call)).toEqual({ computerId: 'mac-relay', fingerprint: 'fp-mac' });
+    expect(calls).toEqual([{ ip: '100.64.0.2', channel: 'computers:routes-report', secret: 'token-mac' }]);
+  });
+
+  it('is null for a machine with no relay key, and undefined when it can\'t be reached or is on another tailnet', async () => {
+    const { relay: _relay, ...withoutRelay } = report;
+    const noRelay: WorkspaceCall = async () => ({ kind: 'answered', statusCode: 200, ok: true, result: withoutRelay });
+    expect(await tailnetRelayKey({ name: 'my-mac', domain: 'tail1.ts.net' }, '', read, noRelay)).toBeNull();
+    expect(await tailnetRelayKey({ name: 'my-mac', domain: 'tail1.ts.net' }, '', read, async () => ({ kind: 'unreachable', detail: 'timeout' }))).toBeUndefined();
+    expect(await tailnetRelayKey({ name: 'my-mac', domain: 'tail1.ts.net' }, '', read, async () => ({ kind: 'answered', statusCode: 200, ok: true, result: 'garbage' }))).toBeUndefined();
+    expect(await tailnetRelayKey({ name: 'my-mac', domain: 'tail2.ts.net' }, '', read, noRelay)).toBeUndefined();
+    expect(await tailnetRelayKey({ name: 'gone', domain: 'tail1.ts.net' }, '', read, noRelay)).toBeUndefined();
   });
 });

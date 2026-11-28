@@ -172,14 +172,14 @@ export class SessionSnapshotService implements PaneEventSink {
       const snapshot: SessionSnapshot = {
         sessionId: record.id,
         revision: sessionRevision,
-        session: readableCopy(record),
-        chat: { ...chat, transcript: chat.transcript && withoutInlineData(changedSince(chat.transcript, chat.messageCount, held, this.chats.get(chatPanelId))) },
-        tabs: this.sources.tabs(record.internalSessionId).filter(tab => isReadableTabType(tab.type)).map(tab => readableCopy(tab)),
+        session: record,
+        chat: { ...chat, transcript: chat.transcript && changedSince(chat.transcript, chat.messageCount, held, this.chats.get(chatPanelId)) },
+        tabs: this.sources.tabs(record.internalSessionId),
         layout: this.sources.layout(record.internalSessionId),
       };
       // A chat whose agent hasn't run since this Pane started has no transcript here yet; that says nothing of its messages.
       if (!chat.transcript) snapshot.transcriptUnknown = true;
-      snapshots.push(snapshot);
+      snapshots.push(projectSnapshot(snapshot));
     }
     return { revision, epoch: this.epoch, sessionIds, snapshots };
   }
@@ -193,8 +193,9 @@ export class SessionSnapshotService implements PaneEventSink {
   /** Remembers which message a chat event changed, so a desktop gets earlier messages that changed too. */
   private track(event: { panelId: string; generation: number; revision: number; index?: number }): void {
     let changes = this.chats.get(event.panelId);
-    if (!changes || changes.generation !== event.generation || event.index === undefined || event.revision <= changes.latest) {
-      // A new conversation, or an event that names no message: watch afresh from the next change.
+    if (!changes || changes.generation !== event.generation || event.index === undefined || event.revision !== changes.latest + 1) {
+      // A new conversation, an event that names no message, or a revision committed with no event:
+      // what changed before is unknown, so watch afresh from here.
       changes = { generation: event.generation, from: event.index === undefined ? event.revision + 1 : event.revision, latest: event.revision, changed: new Map() };
       this.chats.set(event.panelId, changes);
       if (event.index === undefined) return;
@@ -311,15 +312,62 @@ function changedSince(transcript: ChatTabTranscript, messageCount: number, held:
   return { ...transcript, start: from, messages: transcript.messages.slice(from - transcript.start) };
 }
 
-function withoutInlineData(transcript: ChatTabTranscript): ChatTabTranscript {
-  return { ...transcript, messages: transcript.messages.map(message => ({ ...message, parts: message.parts.map(lighterPart) })) };
+/**
+ * What may leave the host and be kept by another machine: the record and tabs as a Read only
+ * viewer sees them (no launch settings, only chat and terminal tabs with the state they show), and
+ * every string over 4 KB outside a message's own text, in the transcript, a waiting approval or a
+ * question's form, replaced by its length. The host sends it, and the desktop applies it again before storing.
+ */
+export function projectSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
+  const projected: SessionSnapshot = {
+    sessionId: snapshot.sessionId,
+    revision: snapshot.revision,
+    session: readableCopy(snapshot.session),
+    chat: projectChat(snapshot.chat),
+    tabs: snapshot.tabs.filter(tab => isReadableTabType(tab.type)).map(tab => readableCopy(tab)),
+    layout: snapshot.layout,
+  };
+  if (snapshot.transcriptUnknown === true) projected.transcriptUnknown = true;
+  return projected;
+}
+
+/** The chat view's own fields only (review S-5), with the 4 KB cut on the transcript, approvals and questions. */
+function projectChat(chat: ChatTabView): ChatTabView {
+  const projected: ChatTabView = {
+    panelId: chat.panelId,
+    agent: chat.agent,
+    generation: chat.generation,
+    status: chat.status,
+    canAttachImages: chat.canAttachImages,
+    controls: chat.controls,
+    commands: chat.commands,
+    permissions: chat.permissions.map(lighter),
+    questions: chat.questions.map(lighter),
+    queue: chat.queue,
+    messageCount: chat.messageCount,
+  };
+  if (chat.transcript) projected.transcript = { ...chat.transcript, messages: chat.transcript.messages.map(message => ({ ...message, parts: message.parts.map(lighterPart) })) };
+  if (chat.problem) projected.problem = chat.problem;
+  if (chat.notice !== undefined) projected.notice = chat.notice;
+  if (chat.banner) projected.banner = chat.banner;
+  if (chat.context) projected.context = chat.context;
+  if (chat.tasks) projected.tasks = chat.tasks;
+  if (chat.clearedAt !== undefined) projected.clearedAt = chat.clearedAt;
+  if (chat.sendNowSteers) projected.sendNowSteers = chat.sendNowSteers;
+  if (chat.mentions) projected.mentions = chat.mentions;
+  return projected;
 }
 
 /** A part with every string over 4 KB replaced in place by its length; a message's own text is kept whole. */
 function lighterPart(part: AgentChatPart): AgentChatPart {
   if (part.type === 'text' || part.type === 'thought') return part;
-  // SAFETY: the replacer only swaps long strings for an omitted marker, so the part keeps its kind and keys.
-  return JSON.parse(JSON.stringify(part, omitLong)) as AgentChatPart;
+  return lighter(part);
+}
+
+/** A copy with every string over 4 KB replaced in place by its length. */
+function lighter<Value extends object>(value: Value): Value {
+  // SAFETY: the replacer only swaps long strings for an omitted marker, so the value keeps its kind and keys.
+  return JSON.parse(JSON.stringify(value, omitLong)) as Value;
 }
 
 function omitLong(key: string, value: JsonValue): JsonValue {

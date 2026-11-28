@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { dropRemoteConnection, openConnectedRemotePwa, restoreRemoteConnection } from './remotePwaMock';
+import { dropRemoteConnection, openConnectedRemotePwa, reloadRemotePwa, restoreRemoteConnection } from './remotePwaMock';
 
 // The Remote Pane PWA sidebar mirrors the desktop one: Pinned, Sessions,
 // Repositories and Archived sections over the connected host's state.
@@ -35,7 +35,7 @@ test('Start pinned puts a new Session in Pinned and is remembered on this device
   await expect(sheet).toBeHidden();
   await expect(page.getByRole('group', { name: 'Pinned' }).getByRole('button', { name: 'Open Session Pinned at birth' })).toBeVisible();
 
-  await page.reload();
+  await reloadRemotePwa(page);
   await page.getByRole('button', { name: 'New Session' }).click();
   await expect(sheet.getByRole('checkbox', { name: 'Start pinned' })).toBeChecked();
 });
@@ -129,19 +129,19 @@ test('archiving a Session from its row menu asks first and can be undone from th
 
 test('reopening keeps the last host through an outage and Disconnect returns to the connect form', async ({ page }) => {
   await openConnectedRemotePwa(page);
-  await page.reload();
+  await reloadRemotePwa(page);
   await expect(page.getByRole('tablist', { name: 'Remote tool panels' })).toBeVisible();
 
   const health = 'http://anim-pane.test/remote/browser/health';
   await page.route(health, route => route.abort());
-  await page.reload();
+  await reloadRemotePwa(page);
   // Startup failure keeps the selected host and its bounded recovery cycle.
   await expect(page.getByRole('button', { name: 'Disconnect' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connect', exact: true })).toHaveCount(0);
   await page.unroute(health);
   await expect(page.getByRole('tablist', { name: 'Remote tool panels' })).toBeVisible({ timeout: 25_000 });
   await page.getByRole('button', { name: 'Disconnect' }).click();
-  await page.reload();
+  await reloadRemotePwa(page);
   await expect(page.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
 });
 
@@ -168,7 +168,7 @@ test('collapsed sections stay collapsed on this device after a reload', async ({
   await page.getByRole('button', { name: 'Repositories', exact: true }).click();
   await expect(paneRow(page, 'scrub Sentry request bodies')).toBeHidden();
 
-  await page.reload();
+  await reloadRemotePwa(page);
   await expect(page.getByRole('button', { name: 'Repositories', exact: true })).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByRole('button', { name: 'Sessions', exact: true })).toHaveAttribute('aria-expanded', 'true');
   await expect(paneRow(page, 'scrub Sentry request bodies')).toBeHidden();
@@ -272,7 +272,7 @@ test('Sessions start collapsed and this device remembers which ones were opened'
   await expect(releaseToggle).toHaveAttribute('aria-expanded', 'true');
   await expect(sessionsGroup(page).getByRole('button', { name: /^server-side funnel events/ })).toBeVisible();
 
-  await page.reload();
+  await reloadRemotePwa(page);
   await expect(releaseToggle).toHaveAttribute('aria-expanded', 'true');
   await expect(sessionsGroup(page).getByRole('button', { name: /^server-side funnel events/ })).toBeVisible();
   await expect(billingToggle).toHaveAttribute('aria-expanded', 'false');

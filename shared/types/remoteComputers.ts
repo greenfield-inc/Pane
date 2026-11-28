@@ -53,6 +53,19 @@ export interface RemoteComputer {
   os?: ComputerOs;
   /** "Linked by <name>": who linked it, when a link did. */
   linkedBy?: string;
+  /**
+   * How this computer knows the saved one is the person's own (D-500): `tailscale` when its
+   * Tailscale owner is this computer's Tailscale login. Checked again each time it is opened or
+   * connects; absent when it has no Tailscale name here or another login owns it.
+   */
+  mine?: 'tailscale';
+  /**
+   * The relay key (id and fingerprint) of the machine `mine` was proved for (review MF-1). While
+   * connected over a route pinned to another key, or to none, the mark doesn't count.
+   */
+  mineRelay?: { computerId: string; fingerprint: string };
+  /** "This is my computer" in Settings › Remote Access, when the person set it; it wins over `mine` both ways. */
+  mineOverride?: boolean;
   routes: ComputerRoute[];
 }
 
@@ -92,17 +105,22 @@ const routeSchema: BoundarySchema<ComputerRoute> = boundary.object({
   ssh: boundary.optional(boundary.object({ host: boundary.nonEmptyString, remotePort: boundary.number })),
 });
 
-/** A saved computer with its routes and OS read separately, so a route or OS a later Pane added drops alone. */
+/** A saved computer with its routes, OS and ownership read separately, so a value a later Pane added drops alone. */
 const computerSchema = boundary.object({
   id: boundary.nonEmptyString,
   label: boundary.nonEmptyString,
   machineId: boundary.optional(boundary.nonEmptyString),
   os: boundary.optional(boundary.json),
   linkedBy: boundary.optional(boundary.nonEmptyString),
+  mine: boundary.optional(boundary.json),
+  mineOverride: boundary.optional(boundary.json),
+  mineRelay: boundary.optional(boundary.json),
   routes: boundary.array(boundary.json),
 });
 
 const osSchema = boundary.enumeration('macOS', 'Windows', 'Linux');
+const mineSchema = boundary.literal('tailscale');
+const relayKeySchema = boundary.object({ computerId: boundary.nonEmptyString, fingerprint: boundary.nonEmptyString });
 
 const reportSchema: BoundarySchema<ComputerRoutesReport> = boundary.object({
   machineId: boundary.nonEmptyString,
@@ -138,7 +156,7 @@ export function decodeComputers(value: JsonValue | undefined, log: (line: string
       log(`[computers] dropped saved computer ${index + 1}: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
-    const { os, routes: savedRoutes, ...fields } = saved;
+    const { os, mine, mineOverride, mineRelay, routes: savedRoutes, ...fields } = saved;
     const routes = savedRoutes.flatMap((route) => {
       try {
         return [decodeBoundary(route, routeSchema)];
@@ -154,6 +172,11 @@ export function decodeComputers(value: JsonValue | undefined, log: (line: string
     const computer: RemoteComputer = { ...fields, routes };
     const known = decodeOptionalBoundary(os, osSchema);
     if (known) computer.os = known;
+    if (decodeOptionalBoundary(mine, mineSchema)) computer.mine = 'tailscale';
+    const override = decodeOptionalBoundary(mineOverride, boundary.boolean);
+    if (override !== undefined) computer.mineOverride = override;
+    const bound = decodeOptionalBoundary(mineRelay, relayKeySchema);
+    if (bound && computer.mine) computer.mineRelay = bound;
     return [computer];
   });
 }
@@ -247,6 +270,16 @@ export function routeFromProfile(profile: RemotePaneConnectionProfile, source?: 
  */
 export function isWatchedComputer(computer: Pick<RemoteComputer, 'routes'>): boolean {
   return computer.routes.some((route) => tokenAccess(route.token) === 'read');
+}
+
+/**
+ * Whether a saved computer is the person's own, so its chats may be mirrored here (D-500): never one
+ * this computer only watches; otherwise "This is my computer" when the person set it, else a
+ * Tailscale owner that is this computer's login.
+ */
+export function isOwnComputer(computer: Pick<RemoteComputer, 'routes' | 'mine' | 'mineOverride'>): boolean {
+  if (isWatchedComputer(computer)) return false;
+  return computer.mineOverride ?? computer.mine === 'tailscale';
 }
 
 /** One route of a computer in the shape the connection code takes: the profile id is the computer's. */
@@ -457,6 +490,7 @@ export function applyRoutesReport(
   computerId: string,
   via: ComputerRoute,
   report: ComputerRoutesReport,
+  options: { verifiedTailnet?: boolean } = {},
 ): ComputersChange {
   const computer = computers.find((candidate) => candidate.id === computerId);
   if (!computer) return { computers: [...computers], id: computerId };
@@ -464,9 +498,19 @@ export function applyRoutesReport(
     && via.relay.computerId === report.relay.id && via.relay.fingerprint === report.relay.fingerprint;
   const pinned = (route: ComputerRoute, record: RemoteComputer) => route.relay === undefined
     || record.routes.some((own) => own.relay?.computerId === route.relay?.computerId && own.relay?.fingerprint === route.relay?.fingerprint);
-  const found = foundRoutes(report, via.token).filter((route) => proven || pinned(route, computer));
   const holder = computers.find((candidate) => candidate.id !== computerId && candidate.machineId === report.machineId);
   const confirmed = proven && holder !== undefined && reportNamesKeyOf(holder, report);
+  // Its Tailscale name is its own, whoever claimed it first, when it is proved yours for the very key this report's
+  // route is pinned to (review S-8), or a check over Tailscale found that key at the name (`verifiedTailnetName`, S-9).
+  const provedYours = proven && ((computer.mine === 'tailscale' && via.relay !== undefined
+    && computer.mineRelay?.computerId === via.relay.computerId && computer.mineRelay.fingerprint === via.relay.fingerprint)
+    || options.verifiedTailnet === true);
+  // A Tailscale name another saved computer has is that computer's: a host claiming it gets no route to it (review MF-1).
+  const takenNames = provedYours ? new Set<string>() : new Set(computers
+    .filter((candidate) => candidate.id !== computerId && !(confirmed && candidate === holder))
+    .flatMap((candidate) => candidate.routes.flatMap((route) => (route.tailnetMachine && route.tailnetDomain ? [tailnetKey(route.tailnetMachine, route.tailnetDomain)] : []))));
+  const found = foundRoutes(report, via.token).filter((route) => (proven || pinned(route, computer))
+    && !(route.tailnetMachine && route.tailnetDomain && takenNames.has(tailnetKey(route.tailnetMachine, route.tailnetDomain))));
   if (computer.machineId && computer.machineId !== report.machineId && (!holder || confirmed)) {
     const remaining = computers.map((candidate) => (candidate.id === computerId
       ? { ...candidate, routes: candidate.routes.filter((route) => route.id !== via.id) }
@@ -481,11 +525,57 @@ export function applyRoutesReport(
   // Another saved record with this install id and the key this route just checked is the same computer: fold it in.
   const twin = confirmed ? holder : undefined;
   if (twin) updated.routes = withRoutes(updated.routes, twin.routes);
+  const ownNames = new Set(provedYours ? found.flatMap((route) => (route.tailnetMachine && route.tailnetDomain ? [tailnetKey(route.tailnetMachine, route.tailnetDomain)] : [])) : []);
+  // Another record's route under one of those names that a host reported (`found`) was a claim, and goes. A route
+  // the person or this computer saved stays, and a record is never deleted: one left with no other route keeps it (review S-10).
+  const withoutClaims = (candidate: RemoteComputer): RemoteComputer => {
+    if (ownNames.size === 0) return candidate;
+    const routes = candidate.routes.filter((route) => !(route.source === 'found' && route.tailnetMachine && route.tailnetDomain
+      && ownNames.has(tailnetKey(route.tailnetMachine, route.tailnetDomain))));
+    return routes.length === candidate.routes.length || routes.length === 0 ? candidate : { ...candidate, routes };
+  };
   return {
-    computers: computers.filter((candidate) => candidate !== twin).map((candidate) => (candidate.id === computerId ? updated : candidate)),
+    computers: computers.filter((candidate) => candidate !== twin).map((candidate) => (candidate.id === computerId ? updated : withoutClaims(candidate))),
     id: computerId,
   };
 }
+
+function tailnetKey(machine: string, domain: string): string {
+  return `${machine.toLowerCase()}@${domain.toLowerCase()}`;
+}
+
+/**
+ * Whether a report's Tailscale name, taken by another saved record, is this computer's own (review
+ * S-9): the report names the key its route is pinned to, and the machine at that name, read over
+ * Tailscale (`relayKeyAt`), holds the same key. Asks nothing when the name isn't taken. With `memory`,
+ * a check that failed for a name and key isn't asked again for a day (review S-11).
+ */
+export async function verifiedTailnetName(
+  computers: readonly RemoteComputer[],
+  computerId: string,
+  via: ComputerRoute,
+  report: ComputerRoutesReport,
+  relayKeyAt: (tailnet: { name: string; domain: string }, secret: string) => Promise<{ computerId: string; fingerprint: string } | null | undefined>,
+  memory?: { failures: Map<string, number>; now: number },
+): Promise<boolean> {
+  const tailnet = report.tailnet;
+  const pin = via.relay;
+  if (!tailnet || !pin || report.relay?.id !== pin.computerId || report.relay.fingerprint !== pin.fingerprint) return false;
+  const name = tailnetKey(tailnet.machine, tailnet.domain);
+  const taken = computers.some((candidate) => candidate.id !== computerId
+    && candidate.routes.some((route) => route.tailnetMachine && route.tailnetDomain && tailnetKey(route.tailnetMachine, route.tailnetDomain) === name));
+  if (!taken) return false;
+  const remembered = `${name}\n${pin.computerId}\n${pin.fingerprint}`;
+  if (memory && (memory.failures.get(remembered) ?? 0) > memory.now) return false;
+  const held = await relayKeyAt({ name: tailnet.machine, domain: tailnet.domain }, via.token);
+  const verified = held?.computerId === pin.computerId && held.fingerprint === pin.fingerprint;
+  if (memory && verified) memory.failures.delete(remembered);
+  else if (memory) memory.failures.set(remembered, memory.now + NAME_CHECK_AGAIN_MS);
+  return verified;
+}
+
+/** A Tailscale name check that failed is asked again after this long (review S-11). */
+const NAME_CHECK_AGAIN_MS = 24 * 60 * 60 * 1000;
 
 /** Whether a report's relay id and key fingerprint are the ones a saved record pins. */
 function reportNamesKeyOf(computer: RemoteComputer, report: ComputerRoutesReport): boolean {

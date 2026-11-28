@@ -958,6 +958,16 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (url) report.publicUrl = url;
         return Promise.resolve(report);
       }
+      if (channel === 'computers:set-mine') {
+        // SAFETY: the renderer sends { computerId, mine } to this command.
+        const { computerId, mine } = args[0] as { computerId: string; mine: boolean | null };
+        const computer = seededComputers.find((candidate) => candidate.id === computerId);
+        if (!computer) return Promise.reject(new Error(`Error invoking remote method 'computers:set-mine': Error: No saved computer ${computerId}.`));
+        if (mine === null) delete computer.mineOverride;
+        else computer.mineOverride = mine;
+        syncRemoteDaemonConfig();
+        return Promise.resolve(clone(computer));
+      }
       if (channel === 'computers:reorder-routes') {
         // SAFETY: the renderer sends { computerId, routeIds } to this command.
         const { computerId, routeIds } = args[0] as { computerId: string; routeIds: string[] };

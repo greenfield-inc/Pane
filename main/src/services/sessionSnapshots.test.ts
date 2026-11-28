@@ -206,6 +206,48 @@ describe('SessionSnapshotService', () => {
     expect(snapshot.chat.transcript?.messages).toEqual([]);
   });
 
+  it('sends the whole window when a change came with no event, so it cannot say which message changed', async () => {
+    const host = fakeHost([hostSession('a', { messages: 3 })]);
+    const service = new SessionSnapshotService(host.sources);
+    await service.snapshots({});
+    host.write(service, 'a', tool('a', 'in_progress'));
+    host.write(service, 'a', tool('b', 'in_progress'));
+    vi.advanceTimersByTime(10);
+    const pending = await service.snapshots({});
+    // Tool a finishes in a commit no event reports; then tool b changes with one.
+    const session = host.byId.get('a')!;
+    session.messages[3] = tool('a', 'completed');
+    session.revision += 1;
+    vi.advanceTimersByTime(10);
+    host.write(service, 'a', tool('b', 'completed'));
+
+    const [update] = (await service.snapshots({ since: pending.revision, epoch: pending.epoch, held: heldAfter(pending) })).snapshots;
+
+    expect(update.chat.transcript?.start).toBe(0);
+    expect(update.chat.transcript?.messages.map(entry => entry.id)).toEqual(['m0', 'm1', 'm2', 'tool:a', 'tool:b']);
+  });
+
+  it('cuts long strings in a waiting approval\'s tool call and a question\'s form too', async () => {
+    const host = fakeHost([hostSession('a')]);
+    const chat = host.sources.chat;
+    const file = 'z'.repeat(50_000);
+    vi.spyOn(host.sources, 'chat').mockImplementation((panelId, limit) => {
+      const view = chat(panelId, limit)!;
+      return {
+        ...view,
+        permissions: [{ id: 'p1', generation: 1, title: 'Write a.ts', toolCall: { rawInput: { path: 'a.ts', content: file } }, options: [] }],
+        questions: [{ id: 'q1', generation: 1, message: 'Pick', schema: { type: 'object', description: file } }],
+      };
+    });
+    const service = new SessionSnapshotService(host.sources);
+
+    const [snapshot] = (await service.snapshots({})).snapshots;
+
+    expect(snapshot.chat.permissions[0]?.toolCall).toEqual({ rawInput: { path: 'a.ts', content: { omitted: { field: 'content', length: 50_000 } } } });
+    expect(snapshot.chat.questions[0]?.schema).toEqual({ type: 'object', description: { omitted: { field: 'description', length: 50_000 } } });
+    expect(JSON.stringify(snapshot)).not.toContain(file);
+  });
+
   it('sends the whole window when the desktop holds another conversation, a gap, or changes from before it was watching', async () => {
     const host = fakeHost([hostSession('a', { messages: 60 })]);
     const service = new SessionSnapshotService(host.sources);

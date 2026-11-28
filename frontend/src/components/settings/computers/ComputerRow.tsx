@@ -2,12 +2,13 @@ import { useState, type DragEvent, type KeyboardEvent, type ReactNode } from 're
 import { ChevronDown, GripVertical, Link2, Trash2 } from 'lucide-react';
 import { Button, IconButton } from '../../ui/Button';
 import { Input } from '../../ui/Input';
+import { Toggle } from '../../ui/Toggle';
 import { MachineMark } from '../../machines/MachineMark';
 import { ReadOnlyPill } from '../../machines/ReadOnlyPill';
 import { RoutePillView, RoutePills } from './RoutePills';
 import { THIS_COMPUTER, type MachineEntry, type RoutePill } from '../../../utils/machineList';
 import { cn } from '../../../utils/cn';
-import type { ComputerRoute, RemoteComputer } from '../../../../../shared/types/remoteComputers';
+import { isOwnComputer, type ComputerRoute, type RemoteComputer } from '../../../../../shared/types/remoteComputers';
 
 const ROW = 'px-4 py-3';
 
@@ -29,6 +30,10 @@ export interface ComputerRowProps {
   onAddRoute: () => void;
   /** Saves a new route order; resolves to an error line, or null. */
   onReorder: (routeIds: string[]) => Promise<string | null>;
+  /** Saves "This is my computer": on, off, or null to follow Tailscale again; resolves to an error line, or null. */
+  onSetMine: (mine: boolean | null) => Promise<string | null>;
+  /** Tailscale is signed out or missing here, so its owner check can't run. */
+  tailscaleSignedOut?: boolean;
   onUnlink: () => void;
   onDetails: () => void;
   /** Under the row: the active computer's last error and its fixes. */
@@ -38,7 +43,7 @@ export interface ComputerRowProps {
 }
 
 /** One computer in Settings › Remote Access › Computers: its routes as pills, and its detail when expanded. */
-export function ComputerRow({ machine, expanded, onToggle, disabled, busy, password, onPasswordChange, onPasswordCancel, onPick, onLink, onAddRoute, onReorder, onUnlink, onDetails, footer, localDetail }: ComputerRowProps) {
+export function ComputerRow({ machine, expanded, onToggle, disabled, busy, password, onPasswordChange, onPasswordCancel, onPick, onLink, onAddRoute, onReorder, onSetMine, tailscaleSignedOut = false, onUnlink, onDetails, footer, localDetail }: ComputerRowProps) {
   const dimmed = machine.presence === 'dimmed';
   const computer = machine.computer;
   const detailId = `computer-detail-${machine.id}`;
@@ -88,7 +93,7 @@ export function ComputerRow({ machine, expanded, onToggle, disabled, busy, passw
       {footer}
       {localDetail && expanded && <div id={detailId}>{localDetail}</div>}
       {computer && expanded && (
-        <ComputerDetail id={detailId} computer={computer} readOnly={machine.readOnly === true} routes={machine.routes ?? []} onAddRoute={onAddRoute} onReorder={onReorder} onUnlink={onUnlink} onDetails={onDetails} />
+        <ComputerDetail id={detailId} computer={computer} readOnly={machine.readOnly === true} routes={machine.routes ?? []} onAddRoute={onAddRoute} onReorder={onReorder} onSetMine={onSetMine} tailscaleSignedOut={tailscaleSignedOut} onUnlink={onUnlink} onDetails={onDetails} />
       )}
     </div>
   );
@@ -126,6 +131,16 @@ function linkedSentence(computer: RemoteComputer): string {
   return 'Found on Tailscale; not linked';
 }
 
+/** Whether this computer keeps the saved one's chats, and why, in one sentence (D-500). */
+function mineSentence(computer: RemoteComputer, tailscaleSignedOut: boolean): string {
+  if (computer.mineOverride === true) return 'This is my computer: you turned it on, so its chats are kept here to switch to at once.';
+  if (computer.mineOverride === false) return 'You turned This is my computer off, so its chats are never kept here.';
+  if (computer.mine === 'tailscale') return 'Signed in to Tailscale as you, so its chats are kept here to switch to at once.';
+  // No Tailscale identity here: the check can't run, which says nothing about whose computer it is.
+  if (tailscaleSignedOut) return "Tailscale is signed out here, so Pane can't tell if this computer is yours, and its chats aren't kept here. Turn on This is my computer if it is yours.";
+  return 'Not on your Tailscale login, so its chats are never kept here. Turn on This is my computer if it is yours.';
+}
+
 function moved<T>(items: readonly T[], from: number, to: number): T[] {
   const next = [...items];
   const [item] = next.splice(from, 1);
@@ -141,12 +156,14 @@ interface ComputerDetailProps {
   routes: readonly RoutePill[];
   onAddRoute: () => void;
   onReorder: (routeIds: string[]) => Promise<string | null>;
+  onSetMine: (mine: boolean | null) => Promise<string | null>;
+  tailscaleSignedOut: boolean;
   onUnlink: () => void;
   onDetails: () => void;
 }
 
 /** Routes in order with drag to reorder, Add route, who linked it, and unlink. */
-function ComputerDetail({ id, computer, readOnly, routes, onAddRoute, onReorder, onUnlink, onDetails }: ComputerDetailProps) {
+function ComputerDetail({ id, computer, readOnly, routes, onAddRoute, onReorder, onSetMine, tailscaleSignedOut, onUnlink, onDetails }: ComputerDetailProps) {
   // The order shown while a reorder saves; the saved order replaces it once the config reloads.
   const [order, setOrder] = useState<string[] | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
@@ -158,6 +175,12 @@ function ComputerDetail({ id, computer, readOnly, routes, onAddRoute, onReorder,
   const byId = new Map(computer.routes.map((route) => [route.id, route]));
   // A watched computer isn't linked with this one, so there is nothing to unlink there.
   const unlinkable = !readOnly && computer.routes.some((route) => route.relay);
+
+  const setMine = async (mine: boolean | null) => {
+    setError(null);
+    const failure = await onSetMine(mine);
+    if (failure) setError(failure);
+  };
 
   const save = async (next: string[]) => {
     if (next.join('\n') === ids.join('\n')) return;
@@ -225,6 +248,23 @@ function ComputerDetail({ id, computer, readOnly, routes, onAddRoute, onReorder,
         <dd><button type="button" className="text-xs font-medium text-interactive-text hover:underline" onClick={onAddRoute}>Add route</button></dd>
         <dt className="text-text-tertiary">Linked</dt>
         <dd className="col-span-2 text-text-secondary">{readOnly ? `Read only: ${computer.label} shared it with this computer` : linkedSentence(computer)}</dd>
+        {!readOnly && (
+          <>
+            <dt className="text-text-tertiary">Yours</dt>
+            <dd className="text-text-secondary" data-testid="computer-mine">
+              {mineSentence(computer, tailscaleSignedOut)}
+              {computer.mineOverride !== undefined && (
+                <>
+                  {' '}
+                  <button type="button" className="text-xs font-medium text-interactive-text hover:underline" onClick={() => void setMine(null)}>Use Tailscale</button>
+                </>
+              )}
+            </dd>
+            <dd>
+              <Toggle size="sm" checked={isOwnComputer(computer)} aria-label="This is my computer" onChange={(mine) => void setMine(mine)} />
+            </dd>
+          </>
+        )}
       </dl>
       {error && <p className="text-xs text-status-error" role="alert">{error}</p>}
       <div className="flex flex-wrap items-center justify-between gap-2">

@@ -1051,7 +1051,8 @@ per unarchived chat Session. It holds:
 
 Any string over 4 KB outside a message's own text is replaced in place by
 `{ omitted: { field, length } }`. That covers an image's `data`, a `data:` URI,
-a resource's `blob` or `text`, and a tool's input or output.
+a resource's `blob` or `text`, a tool's input or output, a waiting approval's
+tool call and a question's form.
 
 Each snapshot has a `revision` that rises on any change to the record (except
 order and selection), the tabs, the layout or the chat.
@@ -1078,6 +1079,75 @@ A change also sends `session-snapshot:changed` `{ sessionId, revision }` on the
 event stream, at most once a second per Session. Reading creates no tab and
 starts no agent. Only the owner's own devices get an answer; teammates and Read
 only devices are refused with `SESSION_SNAPSHOTS_OWNER_ONLY`.
+
+The desktop keeps a mirror of these snapshots for each of the owner's other
+machines (`main/src/services/machineMirror.ts`). Each machine has a folder,
+`<PANE_DIR>/machine-mirror/<machine id>/` (0700), holding an `index.json` and
+one `<session id>.json` per Session (each 0600, written to a temporary file
+and renamed; at most one save every 2 s per machine, the index last). Main
+keeps every machine's index in memory (each Session's revision, size and held
+window) and the 30 Sessions read or changed most recently, across all
+machines; any other Session is read from its file (under 10 ms for 100 KB).
+It reads `snapshots` once when a machine connects or resyncs, then after its
+`session-snapshot:changed` notices, batched for 250 ms. Each read sends back
+`since`, `epoch` and `held`, so only changed messages cross. A machine stays
+at 25 MB at most; when it is over, the Sessions changed longest ago (lowest
+snapshot revision) are left out first.
+
+Only the person's own machines are mirrored (D-500). A saved computer is
+theirs when its Tailscale owner, as this computer's Tailscale reports it, is
+this computer's own Tailscale login. That is checked each time a connection
+starts on, or moves to, one of the computer's Tailscale routes, where
+Tailscale itself names the peer, and saved on it as `mine: 'tailscale'`. A
+Tailscale name a host reported about itself is never trusted on its own. On a
+connection over Same network or the relay, which are pinned to the computer's
+relay key, a side check makes one short read over each of its Tailscale routes,
+through this computer's Tailscale (`computers:routes-report`, as this
+computer's login). Only a machine there that holds the same relay key is the
+one connected, so only its Tailscale owner sets or clears the mark. It runs
+once per connect while the computer is unmarked (backing off after one that
+proved nothing, up to an hour) and once a day after a result either way. When
+Tailscale here can't say, the last result is kept.
+
+The mark is bound to the relay key of the machine it was proved for
+(`mineRelay`): read with `computers:routes-report` over the proving Tailscale
+connection, or the key the side check matched. While connected, it counts on a
+Tailscale route (checked by name on every connect) and on a Same network or
+relay route only when that route is pinned to the same key; on any other key or
+route the machine is not mirrored until proved again. While offline the mark
+stands, so the saved copy stays. A Tailscale route a host reports under a name
+another saved computer already has is refused, unless the name is the
+reporting computer's own: it is proved yours for the key its route is pinned
+to, or a read over Tailscale finds that same key at the name (a read that
+fails is not repeated for that name and key for a day). Then the other
+record's routes under it that a host reported are dropped; a route the person
+or this computer saved stays, and no record is deleted. A machine with no
+Tailscale name here (relay only, say) or owned by another login is not
+mirrored. **This is my computer** in Settings › Remote Access › Computers
+(`mineOverride`) wins over the check both ways: on mirrors the machine, off
+never does; **Use Tailscale** goes back to the check. The host's
+`SESSION_SNAPSHOTS_OWNER_ONLY` check stays as a second layer.
+
+Some machines are never copied, and their folder is removed:
+- a machine that is not the person's own (see above);
+- a machine this computer only watches (a Read only token), whatever the
+  switch says;
+- a machine whose host answers `SESSION_SNAPSHOTS_OWNER_ONLY` (tried again on
+  its next connection);
+- a machine that is forgotten;
+- a machine not seen for 30 days.
+
+A Session whose file is lost or unreadable is never rebuilt from a delta:
+its held window is dropped and the next read lists every Session again, so
+the host sends that one whole. At start, index entries whose file is missing
+are dropped the same way.
+
+A snapshot marked `transcriptUnknown` (its host restarted and hasn't run the
+chat's agent since) keeps the messages and count the mirror already holds, in
+any host run, until a snapshot with a transcript arrives. A machine whose Pane
+has no snapshots (`ERR_HOST_OUTDATED`, or `ERR_UNKNOWN_CHANNEL` from an older
+host) is left alone until it reconnects. Each machine's state is `live`,
+`catching-up` or `offline`, with `lastSeenAt`.
 
 The existing
 `pane-chat:*` channels remain compatibility endpoints for the imported legacy

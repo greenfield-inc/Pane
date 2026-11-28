@@ -370,6 +370,27 @@ export async function openConnectedRemotePwa(
   return fixtures.host;
 }
 
+/**
+ * How long a reload may take to show the PWA's first screen. A shard that starts
+ * with a remote PWA test reloads against a cold Vite server, which can take well
+ * over the default 5 s to serve the app's modules again.
+ */
+const REMOTE_PWA_RELOAD_TIMEOUT_MS = 20_000;
+
+/**
+ * Reloads the PWA and waits until it has drawn its first screen: the panel tabs,
+ * the Disconnect button of a host it is still reaching, or the connect form.
+ * The test's own assertions then run against a loaded app.
+ */
+export async function reloadRemotePwa(page: Page): Promise<void> {
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByRole('tablist', { name: 'Remote tool panels' })
+    .or(page.getByRole('button', { name: 'Disconnect' }))
+    .or(page.getByRole('button', { name: 'Connect', exact: true }))
+    .first()
+    .waitFor({ timeout: REMOTE_PWA_RELOAD_TIMEOUT_MS });
+}
+
 /** Changes what the host answers to `ports:list` from now on, without sending `ports:changed`. */
 export function setRemoteHostPorts(page: Page, ports: ListeningPortsSnapshot): void {
   const host = pageHosts.get(page);
