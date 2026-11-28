@@ -97,7 +97,6 @@ export const NOT_IN_CI = {
   'tests/orchestration-sessions.known-bug.spec.ts': 'Fails on product bug #1560 (closing an unfocused Session tile only focuses it); back in CI once fixed.',
   'tests/remote-pwa-browser.known-bug.spec.ts': 'Fails on product bug #1559 (the phone never gets a port address asked for during restore); back in CI once fixed.',
   'tests/sidebar-compact.known-bug.spec.ts': 'Fails on product bug #1561 (the compact rail toggle is covered in a short window); back in CI once fixed.',
-  'tests/review-availability.known-bug.spec.ts': 'Fails on product bug #1562 (Add tool labels cut twice off macOS); back in CI once fixed.',
   'tests/command-palette.speed.spec.ts': 'Speed budgets (16 ms ranking, 100 ms repaint) that a 4-vCPU CI runner misses; run by hand.',
   'mobile/android/app/src/test/java/com/getcapacitor/myapp/ExampleUnitTest.java': 'Capacitor template placeholder (asserts 2 + 2 = 4); proposed for removal.',
   'mobile/android/app/src/androidTest/java/com/getcapacitor/myapp/ExampleInstrumentedTest.java': 'Capacitor template placeholder (checks the package name on a device); proposed for removal.',
