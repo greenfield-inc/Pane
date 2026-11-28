@@ -316,6 +316,7 @@ describe('OrchestrationSessionManager', () => {
         { ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false, defaultVariant: 'claude', variants: [{ name: 'claude', model: 'claude-opus-5-5' }, { name: 'codex', model: 'gpt-6-astra' }] },
         { ref: 'greenfield/product-researcher', plugin: 'greenfield', version: '0.0.46', harness: 'codex', hidden: false },
       ] })),
+      harness: vi.fn(async (ref: string) => (ref === 'greenfield/orchestrator:codex' ? 'codex' : undefined)),
     });
     const withChatTabs = async (run: (fixture: ReturnType<typeof createFixture>, port: ReturnType<typeof agentFarm>) => Promise<void>, installed?: string[], profiles = true) => {
       const fixture = createFixture();
@@ -382,12 +383,15 @@ describe('OrchestrationSessionManager', () => {
       const created = await fixture.manager.create({ name: 'From the dialog', agent: 'claude', launchCommand: 'agent-farm run greenfield/orchestrator --arg task=x' });
       expect(created.session.agentProfile).toEqual({ ref: 'greenfield/orchestrator', hash: 'hash-greenfield' });
       expect(created.panel.state.customState).toMatchObject({ launch: { kind: 'profile', profile: 'greenfield/orchestrator', args: { task: 'x' } } });
+      // A launch command's profile isn't Pane's choice, so it keeps running through Agent Farm with Profiles off (review F-2).
+      expect(created.panel.state.customState).not.toHaveProperty('launch.fromSession');
     }));
 
     it('starts a named profile with the agent it runs, and refuses one this computer lacks', async () => withChatTabs(async fixture => {
       const created = await fixture.manager.create({ name: 'Researcher', agentProfile: 'greenfield/product-researcher' });
       expect(created.session).toMatchObject({ agent: 'codex', launchCommand: '', agentProfile: { ref: 'greenfield/product-researcher', hash: 'hash-greenfield' } });
-      expect(created.panel.state.customState).toMatchObject({ agent: 'codex', launch: { kind: 'profile', profile: 'greenfield/product-researcher' } });
+      // Marked as Pane's choice, so the next start with Profiles off runs Codex directly (review F-2).
+      expect(created.panel.state.customState).toMatchObject({ agent: 'codex', launch: { kind: 'profile', profile: 'greenfield/product-researcher', fromSession: true } });
       await expect(fixture.manager.create({ name: 'Unknown', agentProfile: 'team/missing' })).rejects.toMatchObject({ code: 'SESSION_PROFILE_UNKNOWN' });
       await expect(fixture.manager.create({ name: 'Resumed', agent: 'claude', agentProfile: 'pane/claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' })).rejects.toMatchObject({ code: 'SESSION_PROFILE_UNSUPPORTED' });
       expect(fixture.store.read().sessions.map(session => session.name)).not.toEqual(expect.arrayContaining(['Unknown']));
@@ -416,16 +420,20 @@ describe('OrchestrationSessionManager', () => {
       expect(view.panel.state.customState).toMatchObject({ launch: { kind: 'agent' } });
     }));
 
-    // QA F1, F2: a variant must exist, and one that isn't the default names its agent.
+    // QA F1, F2, review F-4: a variant must exist, and one that isn't the default runs the agent Agent Farm says it does.
     it('checks a named variant before creating anything', async () => withChatTabs(async fixture => {
       await expect(fixture.manager.create({ name: 'No such variant', agentProfile: 'greenfield/orchestrator:nope' })).rejects.toMatchObject({ code: 'SESSION_PROFILE_UNKNOWN', next: expect.stringContaining('claude, codex') });
       await expect(fixture.manager.create({ name: 'Plain variant', agentProfile: 'pane/claude:x' })).rejects.toMatchObject({ code: 'SESSION_PROFILE_UNKNOWN' });
-      await expect(fixture.manager.create({ name: 'Which agent', agentProfile: 'greenfield/orchestrator:codex' })).rejects.toMatchObject({ code: 'SESSION_PROFILE_AGENT_REQUIRED' });
+      // The caller's agent must be the one the variant really runs; a mismatch saves nothing.
+      await expect(fixture.manager.create({ name: 'Wrong agent', agent: 'claude', agentProfile: 'greenfield/orchestrator:codex' })).rejects.toMatchObject({ code: 'SESSION_PROFILE_AGENT_MISMATCH', next: expect.stringContaining('codex') });
       const codex = await fixture.manager.create({ name: 'Codex variant', agent: 'codex', agentProfile: 'greenfield/orchestrator:codex' });
       expect(codex.session).toMatchObject({ agent: 'codex', agentProfile: { ref: 'greenfield/orchestrator:codex' } });
+      // Without an agent, the variant picks its own.
+      const picked = await fixture.manager.create({ name: 'Variant picks', agentProfile: 'greenfield/orchestrator:codex' });
+      expect(picked.session.agent).toBe('codex');
       const byDefault = await fixture.manager.create({ name: 'Default variant', agentProfile: 'greenfield/orchestrator:claude' });
       expect(byDefault.session.agent).toBe('claude');
-      expect(fixture.store.read().sessions.map(session => session.name)).not.toEqual(expect.arrayContaining(['No such variant', 'Plain variant', 'Which agent']));
+      expect(fixture.store.read().sessions.map(session => session.name)).not.toEqual(expect.arrayContaining(['No such variant', 'Plain variant', 'Wrong agent']));
     }));
 
     // QA F3: a new launch command alone must not turn a named profile into the plain one.

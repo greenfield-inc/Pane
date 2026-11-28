@@ -13,7 +13,7 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { panelManager } from './panelManager';
 import { getChatTabManager } from './chatTabs';
 import { sessionChatLaunch } from './chatTabs/launch';
-import { agentFarmConfigRoot, listPaneAgentFarmProfiles } from './agentFarm/bundledAgentFarm';
+import { agentFarmConfigRoot, listPaneAgentFarmProfiles, paneAgentFarmHarness } from './agentFarm/bundledAgentFarm';
 import { installedPluginHash, plainProfileAgent, plainProfileRef, profilePlugin } from './agentFarm/agentFarmProfiles';
 import { profilesEnabled } from './agentFarm/profilesFeature';
 import type { AgentFarmProfileList, SessionAgentProfile } from '../../../shared/types/agentFarmProfiles';
@@ -33,6 +33,8 @@ export interface SessionAgentFarm {
   /** An installed plugin's content hash, or undefined when it isn't installed. */
   pluginHash(plugin: string): Promise<string | undefined>;
   profiles(): Promise<AgentFarmProfileList>;
+  /** The harness a profile variant (`plugin/profile:variant`) really runs, or undefined when it can't be read. */
+  harness(ref: string): Promise<string | undefined>;
 }
 import { terminalPanelManager } from './terminalPanelManager';
 import { databaseService } from './database';
@@ -1440,7 +1442,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     // which keeps the full access its launch command gave it. A launch command's own profile stays as it is.
     // With Profiles off (Settings › Advanced), a saved profile is ignored and the agent starts as on main.
     if (!record.agentProfile || !this.profilesOn() || !('launch' in result) || result.launch.kind !== 'agent') return result;
-    const launch: ChatTabLaunch = { kind: 'profile', profile: record.agentProfile.ref };
+    const launch: ChatTabLaunch = { kind: 'profile', profile: record.agentProfile.ref, fromSession: true };
     if (result.launch.fullAccess === true || result.launch.mode) launch.fullAccess = true;
     return { launch };
   }
@@ -1457,6 +1459,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     return this.agentFarmPort ?? {
       pluginHash: plugin => installedPluginHash(agentFarmConfigRoot(getAppDirectory()), plugin),
       profiles: () => listPaneAgentFarmProfiles(getAppDirectory()),
+      harness: ref => paneAgentFarmHarness(getAppDirectory(), ref),
     };
   }
 
@@ -1500,11 +1503,16 @@ export class OrchestrationSessionManager extends EventEmitter {
       if (variant && !entry.variants?.some(candidate => candidate.name === variant)) {
         refuse('SESSION_PROFILE_UNKNOWN', `${qualified} has no variant named ${variant}.`, entry.variants?.length ? `Pick one of ${entry.variants.map(candidate => candidate.name).join(', ')}.` : `Name ${qualified} without a variant.`);
       }
-      // The list gives only the default variant's harness; another variant's comes from the caller.
+      // The list gives only the default variant's harness; Agent Farm says another variant's, checked
+      // before anything is saved, so the chat can't refuse it later (review F-4).
       const otherVariant = !!variant && variant !== entry.defaultVariant;
-      if (otherVariant && !input.agent) refuse('SESSION_PROFILE_AGENT_REQUIRED', `Pane can't tell which agent the variant ${ref} runs.`, 'Pass agent (claude or codex) with the profile.');
-      agent = normalizePaneChatAgent(otherVariant && input.agent ? input.agent : entry.harness);
-      if (!agentConfig(agent)?.chat?.adapter || (!otherVariant && agent !== entry.harness)) refuse('SESSION_PROFILE_UNSUPPORTED', `The profile ${ref} runs ${entry.harness}, which Pane can't start through Agent Farm.`, 'Pick a Claude or Codex profile.');
+      const harness = otherVariant ? await this.agentFarm().harness(ref) : entry.harness;
+      if (!harness) return refuse('SESSION_PROFILE_UNKNOWN', `Pane couldn't read which agent the variant ${ref} runs from its Agent Farm.`, 'Restart Pane so it sets up its Agent Farm, then try again.');
+      if (otherVariant && input.agent && normalizePaneChatAgent(input.agent) !== harness) {
+        refuse('SESSION_PROFILE_AGENT_MISMATCH', `The variant ${ref} runs ${harness}, not ${input.agent}.`, `Pass agent ${harness}, or leave out agent so the profile picks it.`);
+      }
+      agent = normalizePaneChatAgent(harness);
+      if (!agentConfig(agent)?.chat?.adapter || agent !== harness) refuse('SESSION_PROFILE_UNSUPPORTED', `The profile ${ref} runs ${harness}, which Pane can't start through Agent Farm.`, 'Pick a Claude or Codex profile.');
     }
     if (!agent || terminal(agent)) return refuse('SESSION_PROFILE_UNSUPPORTED', `This app can't show the chat tab a profile runs in, so the Session can't start with ${ref}.`, 'Create the Session from the desktop app, or leave out the profile.');
     const hash = await this.agentFarm().pluginHash(profilePlugin(ref));

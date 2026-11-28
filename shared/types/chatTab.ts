@@ -23,8 +23,10 @@ export type ChatTabLaunch =
   /**
    * An Agent Farm profile. `fullAccess` applies only to Pane's plain profiles (pane/claude, pane/codex),
    * which keep the permissions the agent had before Agent Farm ran it; every other profile sets its own.
+   * `fromSession`: Pane chose the profile from its Session's Agent Farm profile (T-63), not from a launch
+   * command, so the agent starts on its own again once Profiles is off.
    */
-  | { kind: 'profile'; profile: string; args?: Record<string, string>; fullAccess?: true };
+  | { kind: 'profile'; profile: string; args?: Record<string, string>; fullAccess?: true; fromSession?: true };
 
 /** Last known runtime state. `stopped` always carries a `problem` or an explicit stop. */
 export type ChatTabStatus = 'starting' | 'idle' | 'working' | 'blocked' | 'stopped';

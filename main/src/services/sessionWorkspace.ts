@@ -95,25 +95,56 @@ const PROFILE_END = '<!-- pane-session-profile:end -->';
 const PROFILE_MARKERS: BlockMarkers = { begin: PROFILE_START, end: PROFILE_END, repair: 'try again' };
 /** The Session's Agent Farm profile instructions, which Pane rewrites at every start of its agent (T-63). */
 const SESSION_PROFILE_FILE = 'PROFILE.md';
+/** The first line of a PROFILE.md Pane wrote; Pane replaces or removes only a file that starts with it (review F-1). */
+const PROFILE_FILE_MARKER = '<!-- pane-session-profile-file: Pane writes this file at every start of the Session\'s agent. -->';
+/** How a PROFILE.md this branch wrote before it carried the marker begins, so Pane still owns those. */
+const LEGACY_PROFILE_FILE = /^# Agent Farm profile: \S+\n\nPane writes this file from the profile at every start of this Session's agent;/;
 
-/**
- * Puts a Session's Agent Farm profile instructions in its folder: PROFILE.md, and the same text in
- * its own marked section of AGENTS.md (which CLAUDE.md imports), because a resumed conversation
- * reads instruction files again but not a launch's system prompt. Both are rewritten at every
- * start, so a reload or switch reaches the agent. Only a folder under Pane's sessions folder is written.
- */
-export function writeSessionProfile(sessionFolder: string, profile: string, instructions: string): void {
+/** The Session folder for `sessionFolder`, or a refusal when it isn't one directly under Pane's sessions folder. */
+function ownSessionFolder(sessionFolder: string): string {
   const root = path.resolve(sessionGitCeiling());
   const cwd = path.resolve(sessionFolder);
   if (path.dirname(cwd) !== root || fs.lstatSync(cwd).isSymbolicLink()) {
     throw new PaneError('SESSION_PROFILE_FOLDER', `Pane writes a Session's profile only into its own Session folder, not ${sessionFolder}.`, 'Start the Session again from its row in the sidebar.');
   }
+  return cwd;
+}
+
+/**
+ * Whether PROFILE.md in a Session folder is Pane's to replace or remove: nothing there, or a regular
+ * file Pane wrote. A file a person or agent wrote there is theirs and stays as it is (review F-1).
+ */
+function paneOwnsProfileFile(file: string): 'missing' | 'pane' | 'theirs' {
+  const current = lstatOrMissing(file);
+  if (!current) return 'missing';
+  if (!current.isFile()) return 'theirs';
+  const text = fs.readFileSync(file, 'utf8');
+  return text.startsWith(PROFILE_FILE_MARKER) || LEGACY_PROFILE_FILE.test(text) ? 'pane' : 'theirs';
+}
+
+/**
+ * Puts a Session's Agent Farm profile instructions in its folder: PROFILE.md, and the same text in
+ * its own marked section of AGENTS.md (which CLAUDE.md imports), because a resumed conversation
+ * reads instruction files again but not a launch's system prompt. Both are rewritten at every
+ * start, so a reload or switch reaches the agent. Only a folder under Pane's sessions folder is
+ * written, and a PROFILE.md Pane didn't write stays as it is: the AGENTS.md section alone then
+ * carries the profile (review F-1).
+ */
+export function writeSessionProfile(sessionFolder: string, profile: string, instructions: string): void {
+  const cwd = ownSessionFolder(sessionFolder);
   const text = instructions.trim();
   const file = path.join(cwd, SESSION_PROFILE_FILE);
-  writeFileWithoutFollowingLinks(file, `# Agent Farm profile: ${profile}\n\nPane writes this file from the profile at every start of this Session's agent; edit the profile instead.\n\n${text}\n`);
+  const owner = paneOwnsProfileFile(file);
+  if (owner !== 'theirs') {
+    writeFileWithoutFollowingLinks(file, `${PROFILE_FILE_MARKER}\n# Agent Farm profile: ${profile}\n\nPane writes this file from the profile at every start of this Session's agent; edit the profile instead.\n\n${text}\n`);
+  } else if (!lstatOrMissing(file)?.isFile()) {
+    throw new PaneError('SESSION_PROFILE_FILE', `${file} is not a regular file (it may be a link), so Pane did not write the Session's profile there.`, `Remove ${file}, then start the Session again.`);
+  }
   const section = [
     '## Agent Farm profile',
-    `This Session runs the Agent Farm profile ${profile}. Its instructions follow (Pane keeps the same text in ${SESSION_PROFILE_FILE}). Where they disagree with the Pane Session rules above, the Pane rules win.`,
+    owner === 'theirs'
+      ? `This Session runs the Agent Farm profile ${profile}. Its instructions follow (${SESSION_PROFILE_FILE} here is not Pane's and is not this profile). Where they disagree with the Pane Session rules above, the Pane rules win.`
+      : `This Session runs the Agent Farm profile ${profile}. Its instructions follow (Pane keeps the same text in ${SESSION_PROFILE_FILE}). Where they disagree with the Pane Session rules above, the Pane rules win.`,
     '',
     text,
   ].join('\n');
@@ -159,15 +190,17 @@ function lstatOrMissing(file: string): fs.Stats | undefined {
 }
 
 /**
- * Takes a Session's profile out of its folder (PROFILE.md and its AGENTS.md section) while Profiles
- * is off (T-63), so its agent starts with main's instructions. Best effort: a file Pane can't change
+ * Takes a Session's profile out of its folder (a PROFILE.md Pane wrote, and its AGENTS.md section)
+ * when its agent starts without one (T-63), so it starts with main's instructions. Best effort: a file Pane can't change
  * is logged and left as it is.
  */
 export function clearSessionProfile(sessionFolder: string): void {
   const cwd = path.resolve(sessionFolder);
   try {
+    ownSessionFolder(cwd);
     const file = path.join(cwd, SESSION_PROFILE_FILE);
-    if (lstatOrMissing(file)?.isFile()) fs.rmSync(file, { force: true });
+    // Only a PROFILE.md Pane wrote; one a person or agent wrote stays (review F-1).
+    if (paneOwnsProfileFile(file) === 'pane') fs.rmSync(file, { force: true });
     writeOwnedBlock(path.join(cwd, 'AGENTS.md'), PROFILE_MARKERS, undefined);
   } catch (error) {
     console.warn(`[Sessions] Pane couldn't take the Agent Farm profile out of ${cwd}: ${error instanceof Error ? error.message : String(error)}. Remove PROFILE.md and the profile section of AGENTS.md there by hand.`);

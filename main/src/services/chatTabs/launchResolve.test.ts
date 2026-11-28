@@ -11,7 +11,7 @@ import { ConfigManager } from '../configManager';
 import { PaneMcpEndpoint, setPaneMcpEndpoint } from '../paneMcpEndpoint';
 import { TabListener } from '../tabListener';
 import type { JsonObject } from '../../../../shared/validation/boundaryDecoder';
-import { AgentChatLauncher, withoutPlainProfile } from './launch';
+import { AgentChatLauncher, withoutPaneProfile } from './launch';
 
 const bin = mkdtempSync(path.join(tmpdir(), 'pane-chat-launch-bin-'));
 
@@ -106,11 +106,48 @@ describe.skipIf(process.platform === 'win32')('how a chat tab starts each kind o
 describe('a plain profile tab with Profiles off', () => {
   const state = (launch: ChatPanelState['launch'], agent = 'claude'): ChatPanelState => ({ agent, launch, cwd: bin, status: 'starting' });
   it('starts the agent on its own, with the access it had, only while Profiles is off', () => {
-    expect(withoutPlainProfile(state({ kind: 'profile', profile: 'pane/claude', fullAccess: true }), () => false).launch).toEqual({ kind: 'agent', fullAccess: true });
-    expect(withoutPlainProfile(state({ kind: 'profile', profile: 'pane/codex' }, 'codex'), () => false).launch).toEqual({ kind: 'agent' });
-    expect(withoutPlainProfile(state({ kind: 'profile', profile: 'pane/claude' }), () => true).launch).toEqual({ kind: 'profile', profile: 'pane/claude' });
+    expect(withoutPaneProfile(state({ kind: 'profile', profile: 'pane/claude', fullAccess: true }), () => false).launch).toEqual({ kind: 'agent', fullAccess: true });
+    expect(withoutPaneProfile(state({ kind: 'profile', profile: 'pane/codex' }, 'codex'), () => false).launch).toEqual({ kind: 'agent' });
+    expect(withoutPaneProfile(state({ kind: 'profile', profile: 'pane/claude' }), () => true).launch).toEqual({ kind: 'profile', profile: 'pane/claude' });
     // Any other profile, or a plain profile for another agent, is left for Agent Farm, as on main.
-    expect(withoutPlainProfile(state({ kind: 'profile', profile: 'greenfield/orchestrator' }), () => false).launch).toEqual({ kind: 'profile', profile: 'greenfield/orchestrator' });
-    expect(withoutPlainProfile(state({ kind: 'profile', profile: 'pane/codex' }), () => false).launch).toEqual({ kind: 'profile', profile: 'pane/codex' });
+    expect(withoutPaneProfile(state({ kind: 'profile', profile: 'greenfield/orchestrator' }), () => false).launch).toEqual({ kind: 'profile', profile: 'greenfield/orchestrator' });
+    expect(withoutPaneProfile(state({ kind: 'profile', profile: 'pane/codex' }), () => false).launch).toEqual({ kind: 'profile', profile: 'pane/codex' });
+  });
+
+  // Review F-2: a Session's own named profile, which Pane chose, also falls back while Profiles is off.
+  it("starts a Session's own named profile's agent on its own while Profiles is off, but keeps a launch command's", () => {
+    expect(withoutPaneProfile(state({ kind: 'profile', profile: 'greenfield/orchestrator', fromSession: true }), () => false).launch).toEqual({ kind: 'agent' });
+    expect(withoutPaneProfile(state({ kind: 'profile', profile: 'greenfield/orchestrator', fromSession: true, fullAccess: true }), () => false).launch).toEqual({ kind: 'agent', fullAccess: true });
+    expect(withoutPaneProfile(state({ kind: 'profile', profile: 'greenfield/orchestrator', fromSession: true }), () => true).launch).toEqual({ kind: 'profile', profile: 'greenfield/orchestrator', fromSession: true });
+  });
+});
+
+describe.skipIf(process.platform === 'win32')("a Session's chat that starts without Agent Farm (review F-2)", () => {
+  const sessionLauncher = (on: boolean, cleared: string[]) => new AgentChatLauncher({
+    secrets: { apiKey: () => undefined }, context: { unsupportedHost: () => undefined, projectEnv: async () => ({ env: {}, warnings: [] }) },
+    findExecutable: name => (['claude', 'opencode'].includes(name) ? path.join(bin, name) : null),
+    profiles: { resolve: async () => { throw new Error('Agent Farm must not run'); } },
+    profilesOn: () => on, clearSessionProfile: folder => cleared.push(folder),
+  });
+  const sessionState = (agent: string, launch: ChatPanelState['launch']): ChatPanelState => ({ agent, launch, cwd: bin, status: 'starting', orchestrationSessionId: 'o-1', sessionFolder: bin });
+
+  it("starts a named-profile Session's agent directly and takes its profile out of the folder once Profiles is off", async () => {
+    const cleared: string[] = [];
+    const launch = await sessionLauncher(false, cleared).resolve(panel, sessionState('claude', { kind: 'profile', profile: 'greenfield/orchestrator', fromSession: true }));
+    expect(launch.command.args[0]).toMatch(/claude-agent-acp/);
+    expect(cleared).toEqual([bin]);
+  });
+
+  it('takes the profile out when a Session switches to a direct agent while Profiles is on', async () => {
+    const cleared: string[] = [];
+    await sessionLauncher(true, cleared).resolve(panel, sessionState('opencode', { kind: 'agent' }));
+    expect(cleared).toEqual([bin]);
+  });
+
+  it('leaves the profile to Agent Farm while Profiles is on, and a tab outside a Session alone', async () => {
+    const cleared: string[] = [];
+    await expect(sessionLauncher(true, cleared).resolve(panel, sessionState('claude', { kind: 'profile', profile: 'greenfield/orchestrator', fromSession: true }))).rejects.toThrow('Agent Farm must not run');
+    await sessionLauncher(false, cleared).resolve(panel, { agent: 'claude', launch: { kind: 'agent' }, cwd: bin, status: 'starting' });
+    expect(cleared).toEqual([]);
   });
 });

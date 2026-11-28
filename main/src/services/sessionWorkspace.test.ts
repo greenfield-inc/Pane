@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
-import { prepareSessionWorkspace, sessionWorkspacePath, isPristineSessionWorkspace, sessionGitCeiling, discardSessionScaffold, statusPageRenderer, writeSessionProfile } from './sessionWorkspace';
+import { prepareSessionWorkspace, sessionWorkspacePath, isPristineSessionWorkspace, sessionGitCeiling, discardSessionScaffold, statusPageRenderer, writeSessionProfile, clearSessionProfile } from './sessionWorkspace';
 
 describe('Session workspace instructions', () => {
   const previousPaneDir = process.env.PANE_DIR;
@@ -361,6 +361,33 @@ describe('A Session\'s Agent Farm profile in its folder (T-63)', () => {
     else await expect(fs.lstat(target)).rejects.toMatchObject({ code: 'ENOENT' });
     expect((await fs.lstat(path.join(folder, 'PROFILE.md'))).isSymbolicLink()).toBe(true);
     expect((await fs.readdir(folder)).filter(name => name.includes('.tmp'))).toEqual([]);
+  });
+
+  // Review F-1: a PROFILE.md a person or agent wrote is theirs; Pane replaces and removes only its own.
+  it('keeps a PROFILE.md Pane did not write, and still puts the profile in AGENTS.md', async () => {
+    const folder = prepareSessionWorkspace('theirs');
+    const file = path.join(folder, 'PROFILE.md');
+    await fs.writeFile(file, '# My profile notes\n');
+    writeSessionProfile(folder, 'greenfield/orchestrator', 'Marker: QUINCE');
+    expect(await fs.readFile(file, 'utf8')).toBe('# My profile notes\n');
+    const agents = await fs.readFile(path.join(folder, 'AGENTS.md'), 'utf8');
+    expect(agents).toContain('Marker: QUINCE');
+    expect(agents).toContain('PROFILE.md here is not Pane\'s');
+    clearSessionProfile(folder);
+    expect(await fs.readFile(file, 'utf8')).toBe('# My profile notes\n');
+    expect(await fs.readFile(path.join(folder, 'AGENTS.md'), 'utf8')).not.toContain('Marker: QUINCE');
+  });
+
+  it('removes only the PROFILE.md Pane wrote, including one from before its marker', async () => {
+    const folder = prepareSessionWorkspace('ours');
+    const file = path.join(folder, 'PROFILE.md');
+    writeSessionProfile(folder, 'x/y', 'Marker: FIG');
+    clearSessionProfile(folder);
+    await expect(fs.lstat(file)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await fs.readFile(path.join(folder, 'AGENTS.md'), 'utf8')).not.toContain('Marker: FIG');
+    await fs.writeFile(file, "# Agent Farm profile: x/y\n\nPane writes this file from the profile at every start of this Session's agent; edit the profile instead.\n\nold\n");
+    clearSessionProfile(folder);
+    await expect(fs.lstat(file)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('writes only into a Session folder under Pane\'s sessions folder', async () => {

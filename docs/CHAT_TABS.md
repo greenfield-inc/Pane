@@ -655,7 +655,9 @@ When Pane resolves a Session's printed launch it:
   `CODEX_CONFIG` `developer_instructions`, both with LAUNCH CONTEXT) into the
   Session folder as `PROFILE.md` and a marked section of its `AGENTS.md`, which
   `CLAUDE.md` imports. A resumed conversation reads instruction files again but not
-  a launch's system prompt, so a later reload or switch of profile reaches it;
+  a launch's system prompt, so a later reload or switch of profile reaches it.
+  Pane marks its `PROFILE.md` on the first line and replaces or removes only a
+  marked one: a `PROFILE.md` a person or agent wrote stays as it is;
 - turns Claude's `strictMcpConfig` off, so the person's own MCP servers stay, and
   adds Pane's MCP server over HTTP with the deny for the Claude plugin's own `pane`
   server, as a plain chat tab does. Codex keeps its config through Agent Farm's
@@ -664,13 +666,17 @@ When Pane resolves a Session's printed launch it:
   Pane started it directly, unless the Session's launch gave it full access
   (`fullAccess` on the profile launch). Every other profile keeps Agent Farm's mode.
 
-A profile chat tab outside a Session runs exactly as printed.
+A profile chat tab outside a Session runs exactly as printed. A Session's agent that
+starts without Agent Farm (Profiles off, or a direct agent such as OpenCode) has
+Pane's `PROFILE.md` and `AGENTS.md` profile section taken out of its folder first.
 
 With Profiles off, none of this happens and Sessions start as before T-63: a
 profile launch (a launch command's `agent-farm run <profile>`) runs exactly as
-printed, Session folders get no `PROFILE.md` (one written while Profiles was on is
-removed at the agent's next start), a tab saved with `pane/<agent>` starts that
-agent on its own (`withoutPlainProfile` in `chatTabs/launch.ts`), and
+printed, Session folders get no `PROFILE.md` (Pane's own, written while Profiles was
+on, is removed at the agent's next start, a chat restart included), a tab saved with
+a profile Pane chose (`pane/<agent>`, or the Session's named profile, marked
+`fromSession`) starts that agent on its own (`withoutPaneProfile` in
+`chatTabs/launch.ts`), and
 `chat-tab:profiles` lists nothing. Pane still installs its `pane` plugin into its own
 Agent Farm at start either way: nothing reads it while Profiles is off, and turning
 Profiles on then needs no restart.

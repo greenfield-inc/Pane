@@ -137,6 +137,23 @@ export async function listPaneAgentFarmProfiles(paneDir: string, env: NodeJS.Pro
   }
 }
 
+/**
+ * The harness a profile or variant (`plugin/profile[:variant]`) really runs, from `agent-farm inspect`
+ * in Pane's own Agent Farm; undefined when the bundle is missing or the profile can't be read.
+ * A Session checks a variant's agent with it before it is saved (review F-4).
+ */
+export async function paneAgentFarmHarness(paneDir: string, ref: string, env: NodeJS.ProcessEnv = process.env, run: AgentFarmRunner = runAgentFarm): Promise<string | undefined> {
+  const agentFarm = paneAgentFarmProcess(paneDir, ['inspect', ref], { env, profiles: true });
+  if (!agentFarm) return undefined;
+  try {
+    const inspected = decodeOptionalBoundary(JSON.parse(await run(agentFarm)), boundary.object({ agents: boundary.record(boundary.jsonObject) }));
+    return decodeOptionalBoundary(inspected?.agents.main?.harness, boundary.nonEmptyString);
+  } catch (error) {
+    console.warn(`[AgentFarm] Pane couldn't read which agent ${ref} runs: ${reasonOf(error)}`);
+    return undefined;
+  }
+}
+
 /** The bundled Agent Farm's state after a start's install. */
 export interface BundledAgentFarmStatus {
   state: 'missing' | 'ready' | 'failed';

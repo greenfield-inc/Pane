@@ -12,6 +12,7 @@ import {
   agentFarmTelemetrySync,
   bundledAgentFarmProcess,
   installBundledAgentFarm,
+  paneAgentFarmHarness,
   paneAgentFarmProcess,
   writeAgentFarmTelemetry,
   type AgentFarmProcess,
@@ -559,6 +560,18 @@ describe('writeAgentFarmTelemetry when a settings.json write fails', () => {
     await writeAgentFarmTelemetry(paneDir, undefined);
     expect(settings()).toEqual({ enabled: false, directory });
   });
+});
+
+// Review F-4: a Session checks a non-default variant's agent with Agent Farm before it is saved.
+describe('paneAgentFarmHarness with the pinned package', () => {
+  it('reads the harness a variant really runs, and undefined for a profile Agent Farm lacks', async () => {
+    const paneDir = tempDir();
+    const status = await installBundledAgentFarm({ paneDir, telemetry: false, log: () => undefined });
+    expect(status.state).toBe('ready');
+    expect(await paneAgentFarmHarness(paneDir, 'greenfield/orchestrator:codex')).toBe('codex');
+    expect(await paneAgentFarmHarness(paneDir, 'greenfield/orchestrator')).toBe('claude');
+    expect(await paneAgentFarmHarness(paneDir, 'greenfield/no-such-profile')).toBeUndefined();
+  }, 120_000);
 });
 
 describe('paneAgentFarmProcess', () => {
