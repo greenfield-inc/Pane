@@ -611,8 +611,11 @@ edited greenfield from Agent Farm 0.2 can name a variant 0.3 refuses, and then
 `profiles list` fails for every plugin, leaving New Session with no named
 profiles) is saved unchanged, its files and receipt, with a `README.txt` on what
 happened, in `<PANE_DIR>/agent-farm/recovered/<name>-<version>-<time>/`, and the
-copy this Pane ships is installed in its place; the log names the folder. If
-that copy can't be saved, the edit is kept as it is. This holds with Profiles on or off, so
+copy this Pane ships is installed in its place; the log names the folder. With
+Profiles on, the Profiles tab says so once ("Your edits to <plugin> didn't work
+with this version of Agent Farm. They're saved in <folder>."), with Open folder
+and a dismiss button; dismissing it marks the folder's `recovery.json`, so it
+stays dismissed. If that copy can't be saved, the edit is kept as it is. This holds with Profiles on or off, so
 turning Profiles off never lets an update overwrite a plugin edited while it
 was on. An install that never finished (its lock, a
 plugin Pane was installing then, recorded in `pane-installing.json`, or one with

@@ -22,6 +22,7 @@ import {
 } from './bundledAgentFarm';
 import { parseProfileList } from './agentFarmProfiles';
 import { writeProfileSync } from './profileSyncFile';
+import { pendingRecoveries } from './agentFarmRecovery';
 import { configuredAgent } from '../../../../shared/agents';
 
 const temporary: string[] = [];
@@ -484,6 +485,8 @@ describe('installBundledAgentFarm with the pinned package', () => {
     expect(readFileSync(seo, 'utf8')).toBe(stock);
     expect(existsSync(path.join(configRoot, 'drafts'))).toBe(false);
     expect(logs.join('\n')).toContain(`Pane saved it unchanged in ${folder}`);
+    // The Profiles tab tells you once (agentFarmRecovery.ts).
+    expect(await pendingRecoveries(configRoot)).toEqual([{ id: path.basename(folder), plugin: 'greenfield', folder }]);
     const listed = await listPaneAgentFarmProfiles(paneDir);
     expect(listed.error).toBeUndefined();
     expect(listed.profiles.map((entry) => entry.ref)).toEqual(expect.arrayContaining(['greenfield/seo', 'greenfield/business', 'greenfield/orchestrator']));

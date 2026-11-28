@@ -54,6 +54,10 @@ interface ProfilesState {
   parseYaml: (source: string) => Promise<{ data?: JsonValue; error?: string }>;
   setPhoto: (ref: string, base64: string) => Promise<void>;
   removePhoto: (ref: string) => Promise<void>;
+  /** Hides a saved-aside plugin's notice for good (#1740 review F-3). */
+  dismissRecovery: (id: string) => Promise<void>;
+  /** Opens the folder a saved-aside plugin is in. */
+  openRecovery: (id: string) => Promise<void>;
   /** How each of your other computers stands with this one's profiles; null until read. */
   sync: ProfileSyncStatus | null;
   loadSync: () => Promise<void>;
@@ -316,6 +320,17 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
     removePhoto: async (ref) => {
       await answer(api().removePhoto(ref), nothing);
       await get().loadPhotos();
+    },
+    dismissRecovery: async (id) => {
+      await answer(api().dismissRecovery(id), nothing);
+      set(state => {
+        if (!state.overview?.recovered) return {};
+        const recovered = state.overview.recovered.filter(item => item.id !== id);
+        return { overview: { ...state.overview, recovered: recovered.length ? recovered : undefined } };
+      });
+    },
+    openRecovery: async (id) => {
+      await answer(api().openRecovery(id), nothing);
     },
     sync: null,
     loadSync: async () => {

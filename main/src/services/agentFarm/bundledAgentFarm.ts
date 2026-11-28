@@ -9,6 +9,7 @@ import { reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { hashDirectory } from '../skillCacheManager';
 import { syncedPluginEdits } from './profileSyncFile';
+import { writeRecoveryNote } from './agentFarmRecovery';
 import { panePluginFiles, panePluginInstalled, parseProfileList, writePanePluginSource } from './agentFarmProfiles';
 import { PANE_PROFILE_PLUGIN } from '../../../../shared/agentProfiles';
 import type { AgentFarmProfileList } from '../../../../shared/types/agentFarmProfiles';
@@ -499,6 +500,8 @@ async function saveRecoveryCopy(configRoot: string, name: string, bundleVersion:
     `To bring your changes back, copy what you need from plugin/ into ${name} in the Profiles editor; it checks each save.`,
     '',
   ].join('\n'));
+  // The Profiles tab's one-time notice reads this (agentFarmRecovery.ts).
+  await writeRecoveryNote(folder, { plugin: name, version, reason });
   return folder;
 }
 

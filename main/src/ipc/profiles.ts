@@ -190,6 +190,13 @@ export function registerProfileHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
   // The preview's YAML view and a Markdown file's front-matter: the renderer has no YAML parser of its own.
   ipcMain.handle('profiles:parse-yaml', (_event, source: PaneCommandValue) => respond(() => parseYaml(decodeBoundary(source, text))));
   ipcMain.handle('profiles:remove-photo', (_event, ref: PaneCommandValue) => respond(() => editor.removePhoto(decodeBoundary(ref, text))));
+  // The one-time notice for an edited plugin Pane saved aside and replaced (#1740 review F-3).
+  ipcMain.handle('profiles:dismiss-recovery', (_event, id: PaneCommandValue) => respond(() => editor.dismissRecovery(decodeBoundary(id, text))));
+  ipcMain.handle('profiles:open-recovery', (_event, id: PaneCommandValue) => respond(async () => {
+    const folder = await editor.recoveryFolder(decodeBoundary(id, text));
+    const { openLocalFolder } = await import('../utils/openExternalUrl');
+    await openLocalFolder(folder);
+  }));
   ipcMain.handle('profiles:sync-status', () => respond(() => coordinator.status()));
   ipcMain.handle('profiles:sync-now', () => respond(() => coordinator.syncNow()));
 

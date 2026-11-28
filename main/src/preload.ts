@@ -447,6 +447,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     removePhoto: (ref: string): Promise<IPCResponse> => ipcRenderer.invoke('profiles:remove-photo', ref),
     setDetails: (plugin: string, profile: string, details: { title: string; description: string }): Promise<IPCResponse> => ipcRenderer.invoke('profiles:set-details', plugin, profile, details),
     parseYaml: (source: string): Promise<IPCResponse> => ipcRenderer.invoke('profiles:parse-yaml', source),
+    dismissRecovery: (id: string): Promise<IPCResponse> => ipcRenderer.invoke('profiles:dismiss-recovery', id),
+    openRecovery: (id: string): Promise<IPCResponse> => ipcRenderer.invoke('profiles:open-recovery', id),
     syncStatus: (): Promise<IPCResponse> => ipcRenderer.invoke('profiles:sync-status'),
     syncNow: (): Promise<IPCResponse> => ipcRenderer.invoke('profiles:sync-now'),
     /** Each computer's sync state, whenever a sync starts or ends (T-63 PR 6). */

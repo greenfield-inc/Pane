@@ -1588,6 +1588,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         setPhoto: (ref: string, base64: string) => { photos.profiles[ref] = `data:image/png;base64,${base64}`; return ok(null); },
         removePhoto: (ref: string) => { delete photos.profiles[ref]; return ok(null); },
+        // The saved-aside plugin notice (#1740 review F-3): dismiss drops it from the list for good.
+        dismissRecovery: (id: string) => {
+          if (state.overview.recovered) state.overview.recovered = state.overview.recovered.filter(item => item.id !== id);
+          return ok(null);
+        },
+        openRecovery: () => ok(null),
         // Profile sync (T-63 PR 6): each other computer's state; Sync now reports the online ones up to date.
         syncStatus: () => ok(sync),
         syncNow: () => {
@@ -1619,6 +1625,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       removePhoto: record('removePhoto', profilesApi.removePhoto),
       setDetails: record('setDetails', profilesApi.setDetails),
       parseYaml: record('parseYaml', profilesApi.parseYaml),
+      dismissRecovery: record('dismissRecovery', profilesApi.dismissRecovery),
+      openRecovery: record('openRecovery', profilesApi.openRecovery),
     };
     const electronAPI = {
       // Absent without the option, so the Profiles row stays hidden in other specs.

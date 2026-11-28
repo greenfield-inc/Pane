@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { Bot, ChevronDown, ChevronRight, FileText, ImageIcon, Pencil, Pin, Plus, RefreshCw, RotateCcw, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, Bot, ChevronDown, ChevronRight, FileText, FolderOpen, ImageIcon, Pencil, Pin, Plus, RefreshCw, RotateCcw, Sparkles, X } from 'lucide-react';
 import { DEFAULT_AGENT_ID, agentLabel, configuredAgent } from '../../../../shared/agents';
 import { isTemporarilyShownProfile, plainProfileAgents } from '../../../../shared/agentProfiles';
-import { PROFILE_NAME_PATTERN, type ProfileNewFileKind, type ProfilePlugin, type ProfileSummary } from '../../../../shared/types/profileEditor';
+import { PROFILE_NAME_PATTERN, type ProfileNewFileKind, type ProfilePlugin, type ProfileRecovery, type ProfileSummary } from '../../../../shared/types/profileEditor';
 import { isProfilesEnabled, useConfigStore } from '../../stores/configStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { profilePhotoSource, useProfilesStore } from '../../stores/profilesStore';
@@ -71,6 +71,46 @@ function Notice({ text, onDismiss }: { text: string; onDismiss: () => void }) {
   return (
     <div role="status" {...pause} data-testid="profiles-notice" className="fixed bottom-12 left-1/2 z-50 max-w-[min(560px,calc(100vw-2rem))] -translate-x-1/2 rounded-md border border-border-primary bg-surface-primary px-3 py-2 text-[13px] text-text-primary shadow-dropdown">
       {text}
+    </div>
+  );
+}
+
+/**
+ * The one-time notice for an edited bundled plugin this Agent Farm rejected, which Pane saved aside
+ * and replaced with the copy it ships (#1740 review F-3). Dismissed, it never shows again.
+ */
+function RecoveryNotice({ recovery }: { recovery: ProfileRecovery }) {
+  const dismiss = useProfilesStore(state => state.dismissRecovery);
+  const openFolder = useProfilesStore(state => state.openRecovery);
+  const [error, setError] = useState<string | null>(null);
+  const run = (work: () => Promise<void>) => {
+    setError(null);
+    work().catch((failure: Error) => setError(failure.message));
+  };
+  return (
+    <div className="mx-auto mt-4 max-w-[820px] px-6">
+      <div role="status" data-testid={`profiles-recovery-${recovery.id}`} className="flex items-start gap-3 rounded-md border border-status-warning/40 bg-status-warning/10 px-4 py-3 text-[13px] text-text-primary">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          <p>Your edits to {recovery.plugin} didn&apos;t work with this version of Agent Farm. They&apos;re saved in <span className="break-all font-mono text-[12px]">{recovery.folder}</span>.</p>
+          {error && <p role="alert" className="mt-1 text-status-error">{error}</p>}
+          <div className="mt-2 flex gap-2">
+            <Button size="sm" variant="secondary" data-testid="profiles-recovery-open" className="gap-1.5" onClick={() => run(() => openFolder(recovery.id))}>
+              <FolderOpen className="h-3.5 w-3.5" aria-hidden="true" />Open folder
+            </Button>
+          </div>
+        </div>
+        <button
+          type="button"
+          aria-label={`Dismiss the notice about ${recovery.plugin}`}
+          title="Dismiss"
+          data-testid="profiles-recovery-dismiss"
+          onClick={() => run(() => dismiss(recovery.id))}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-tertiary hover:bg-surface-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
+        >
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -195,6 +235,7 @@ export function ProfilesView() {
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
               {error && <p role="alert" className="mx-auto mt-6 max-w-[820px] px-6 text-[13px] text-status-error">{error}</p>}
+              {overview?.recovered?.map(recovery => <RecoveryNotice key={recovery.id} recovery={recovery} />)}
               {overview?.error && <p role="alert" className="mx-auto mt-6 max-w-[820px] px-6 text-[13px] text-status-warning">{overview.error}</p>}
               {!overview && loading && <p className="mx-auto mt-6 max-w-[820px] px-6 text-[13px] text-text-tertiary">Reading profiles…</p>}
               {overview && <ProfileList plugins={overview.plugins} />}

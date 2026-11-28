@@ -3,7 +3,7 @@ import { gotoApp } from './electronApiMock';
 import { dismissStartupDialogs, installSessionsFixture, sessionFixture } from './orchestrationSessionsFixture';
 import { expectNoAxeViolations } from './axeTest';
 import type { AgentFarmProfileEntry } from '../shared/types/agentFarmProfiles';
-import type { ProfilePlugin, ProfileSubagentNode, ProfileSummary, ProfileTreeNode, ProfilesOverview } from '../shared/types/profileEditor';
+import type { ProfilePlugin, ProfileRecovery, ProfileSubagentNode, ProfileSummary, ProfileTreeNode, ProfilesOverview } from '../shared/types/profileEditor';
 import type { ProfileSyncStatus } from '../shared/types/profileSync';
 
 /**
@@ -99,9 +99,12 @@ const PALETTE_PROFILES: AgentFarmProfileEntry[] = [
   { ref: 'greenfield/seo', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false },
 ];
 
-async function installProfiles(page: Page, options: { theme?: string; saveError?: string; pins?: string[]; on?: boolean; sync?: ProfileSyncStatus } = {}): Promise<void> {
+interface ProfilesOptions { theme?: string; saveError?: string; pins?: string[]; on?: boolean; sync?: ProfileSyncStatus; recovered?: ProfileRecovery[] }
+
+async function installProfiles(page: Page, options: ProfilesOptions = {}): Promise<void> {
   await page.setViewportSize({ width: 1440, height: 900 });
   const data = fixture();
+  if (options.recovered) data.overview.recovered = options.recovered;
   await installSessionsFixture(page, [
     { ...sessionFixture('s1', 'Session profiles plan', '', '', '2026-11-25T08:00:00.000Z'), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h1' } },
     { ...sessionFixture('s2', 'Weekend blog post', '', '', '2026-11-25T08:01:00.000Z'), agentProfile: { ref: 'pane/claude', hash: 'h' } },
@@ -115,7 +118,7 @@ async function installProfiles(page: Page, options: { theme?: string; saveError?
   await dismissStartupDialogs(page);
 }
 
-async function openProfilesTab(page: Page, options: { theme?: string; saveError?: string; pins?: string[]; sync?: ProfileSyncStatus } = {}): Promise<void> {
+async function openProfilesTab(page: Page, options: Omit<ProfilesOptions, 'on'> = {}): Promise<void> {
   await installProfiles(page, options);
   await page.getByTestId('profiles-nav').click();
   await expect(page.getByTestId('profiles-view')).toBeVisible();
@@ -412,6 +415,39 @@ for (const theme of ['light', 'dark']) {
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+s' : 'Control+s');
     await expect(page.getByTestId('profiles-notice')).toHaveText('Saved greenfield/agents/business.md. Sending it to build-box; travel-laptop gets it when it reconnects. 2 Sessions can reload it.');
     await shot(page, `sync7-saved-${theme}`);
+  });
+}
+
+// #1740 review F-3: an edited greenfield this Agent Farm rejected was saved aside and replaced.
+const RECOVERED: ProfileRecovery = {
+  id: 'greenfield-0.0.46-2026-11-27T10-00-00-000Z',
+  plugin: 'greenfield',
+  folder: '/Users/you/.pane/agent-farm/recovered/greenfield-0.0.46-2026-11-27T10-00-00-000Z',
+};
+
+const profilesCalls = (page: Page) =>
+  // SAFETY: installElectronApiMock adds this control before the app loads.
+  page.evaluate(() => (window as typeof window & { __paneTestElectronMock: { getProfilesCalls: () => string[] } }).__paneTestElectronMock.getProfilesCalls());
+
+for (const theme of ['light', 'dark']) {
+  test(`a plugin Pane saved aside shows a notice once: Open folder opens it, and dismissed it stays gone (${theme})`, async ({ page }) => {
+    await openProfilesTab(page, { theme, recovered: [RECOVERED] });
+    const notice = page.getByTestId(`profiles-recovery-${RECOVERED.id}`);
+    await expect(notice).toHaveText(`Your edits to greenfield didn't work with this version of Agent Farm. They're saved in ${RECOVERED.folder}.Open folder`);
+    await shot(page, `recovery-notice-${theme}`);
+    await expectNoAxeViolations(page, { include: `[data-testid="profiles-recovery-${RECOVERED.id}"]` });
+    await notice.getByRole('button', { name: 'Open folder' }).click();
+    await expect.poll(() => profilesCalls(page)).toContain('openRecovery');
+    await expect(notice).toBeVisible();
+    await notice.getByRole('button', { name: 'Dismiss the notice about greenfield' }).click();
+    await expect(notice).toHaveCount(0);
+    expect(await profilesCalls(page)).toContain('dismissRecovery');
+    // Leaving and coming back reads the list again, and the notice doesn't return.
+    await page.getByTestId('profiles-nav').click();
+    await page.getByTestId('profiles-nav').click();
+    await expect(page.getByTestId('profiles-view')).toBeVisible();
+    await expect(page.getByTestId('profile-row-greenfield-orchestrator')).toBeVisible();
+    await expect(page.getByTestId(`profiles-recovery-${RECOVERED.id}`)).toHaveCount(0);
   });
 }
 

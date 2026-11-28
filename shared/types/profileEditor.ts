@@ -10,6 +10,20 @@ export interface ProfilesOverview {
   machine: string;
   /** Why the list is empty or incomplete, and what to do; absent when every plugin was read. */
   error?: string;
+  /**
+   * Edited bundled plugins this Agent Farm rejected, which Pane saved aside and replaced with the
+   * shipped copy (#1740 review F-3), whose one-time notice hasn't been dismissed. Absent when none.
+   */
+  recovered?: ProfileRecovery[];
+}
+
+/** One saved-aside plugin the tab tells you about once. */
+export interface ProfileRecovery {
+  /** The recovery folder's name, which dismiss and open take. */
+  id: string;
+  plugin: string;
+  /** Where your edited copy is saved. */
+  folder: string;
 }
 
 export interface ProfilePlugin {
@@ -165,6 +179,7 @@ export const profilesOverviewSchema: BoundarySchema<ProfilesOverview> = boundary
   plugins: boundary.array(profilePluginSchema),
   machine: boundary.string,
   error: boundary.optional(boundary.string),
+  recovered: boundary.optional(boundary.array(boundary.object({ id: boundary.string, plugin: boundary.string, folder: boundary.string }))),
 });
 
 export const profilePhotosSchema: BoundarySchema<ProfilePhotos> = boundary.object({
