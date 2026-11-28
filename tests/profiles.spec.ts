@@ -134,13 +134,25 @@ const PALETTE_PROFILES: AgentFarmProfileEntry[] = [
   { ref: 'greenfield/seo', plugin: 'greenfield', version: '0.1.0', harness: 'claude', hidden: false, title: 'SEO' },
 ];
 
-interface ProfilesOptions { theme?: string; saveError?: string; pins?: string[]; on?: boolean; sync?: ProfileSyncStatus; pane?: boolean; recovered?: ProfileRecovery[]; adjust?: (data: ReturnType<typeof fixture>) => void }
+interface ProfilesOptions { theme?: string; saveError?: string; pins?: string[]; on?: boolean; sync?: ProfileSyncStatus; pane?: boolean; plannerCover?: boolean; recovered?: ProfileRecovery[]; adjust?: (data: ReturnType<typeof fixture>) => void }
 
 async function installProfiles(page: Page, options: ProfilesOptions = {}): Promise<void> {
   await page.setViewportSize({ width: 1440, height: 900 });
   const data = fixture();
   if (options.recovered) data.overview.recovered = options.recovered;
   options.adjust?.(data);
+  // With `plannerCover`, the Planner link opens the Business profile, whose own cover file it then shows.
+  if (options.plannerCover) {
+    const greenfield = data.overview.plugins[0];
+    const business = greenfield.profiles.find(item => item.name === 'business');
+    const planner = greenfield.profiles.find(item => item.name === 'orchestrator')?.tree.find(node => node.id === 'orchestrator/subagents');
+    const node = planner?.kind === 'folder' ? planner.children.find(child => child.id === 'orchestrator/sub:planner') : undefined;
+    if (!business || node?.kind !== 'subagent') throw new Error('The profiles fixture has no Planner link or Business profile.');
+    node.profile = business.ref;
+    business.cover = 'covers/business.html';
+    greenfield.files = [...greenfield.files, 'covers/business.html'].sort();
+    data.files['greenfield/covers/business.html'] = '<html><head><title>Planner</title></head><body><h1>Planner cover</h1></body></html>';
+  }
   // With `pane`, Session s1 holds one Pane, for opening an agent in a tab from the tree (T-83 P4).
   const associations = options.pane ? [{ paneId: TAB_PANE, panelIds: [], attachedAt: '2026-11-25T08:00:00.000Z' }] : [];
   await installSessionsFixture(page, [
@@ -720,6 +732,21 @@ test('the cover and ⌘↩ open the agent in a tab too (T-83 P4)', async ({ page
   await page.keyboard.press('ControlOrMeta+Enter');
   await expect.poll(async () => (await panelCreates(page)).at(-1)?.title).toBe('Advisor');
   expect((await panelCreates(page)).at(-1)).toMatchObject({ state: { customState: { initialCommand: 'agent-farm run greenfield/advisor' } } });
+});
+
+test('an agent whose cover is its own file opens in a tab from the cover header (T-83 P4, review F-4)', async ({ page }) => {
+  await installProfiles(page, { pane: true, plannerCover: true });
+  await page.getByRole('button', { name: 'Expand Session profiles plan Panes', exact: true }).click();
+  await page.getByRole('button', { name: 'feature/onboarding', exact: true }).first().click();
+  await page.getByTestId('profiles-nav').click();
+  await page.getByTestId('profile-row-greenfield-orchestrator').click();
+  const tree = page.getByRole('tree', { name: 'greenfield/orchestrator files' });
+  await tree.getByTestId('profiles-tree-orchestrator/sub:planner').click();
+  await expect(page.getByTestId('profiles-cover-note')).toHaveText('From the subagent’s profile: covers/business.html');
+  await expect(page.getByTestId('profiles-cover-open-tab')).toHaveAttribute('title', 'Open Planner in a tab in feature/onboarding');
+  await page.getByTestId('profiles-cover-open-tab').click();
+  await expect.poll(async () => (await panelCreates(page)).at(-1)?.title).toBe('Planner');
+  await expect(page.getByRole('tab', { name: /Planner/ })).toHaveAttribute('aria-selected', 'true');
 });
 
 test('with no Pane to open in, the tab action says so and starts nothing (T-83 P4)', async ({ page }) => {

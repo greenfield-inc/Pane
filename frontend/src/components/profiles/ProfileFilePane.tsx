@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FileText, LayoutTemplate, Pencil, Save } from 'lucide-react';
+import { FileText, LayoutTemplate, Pencil, Save, SquareTerminal } from 'lucide-react';
 import { agentLabel } from '../../../../shared/agents';
 import type { ProfilePlugin, ProfileSubagentNode, ProfileSummary } from '../../../../shared/types/profileEditor';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
@@ -11,6 +11,7 @@ import { TODOS_HEADER_BUTTON } from '../todos/todoStyles';
 import { GeneratedCover, HtmlPage, MarkdownWithMeta, YamlPreview } from './ProfilePreviews';
 import { findNode, previewKind, subagentLabel } from './profilePreview';
 import { savedSyncText } from './profileSyncText';
+import { tabActionLabel, tabCommand, useTabPane } from './subagentTab';
 import { isProfilesEnabled, useConfigStore } from '../../stores/configStore';
 
 const MOD = isMac() ? '⌘' : 'Ctrl+';
@@ -55,6 +56,7 @@ export function ProfileFilePane({ plugin, profile, file, notify, onShow, onOpenT
   const save = useProfilesStore(state => state.save);
   const resolveDiskChange = useProfilesStore(state => state.resolveDiskChange);
   const sessions = useSessionsOnPlugin(plugin);
+  const tabPaneNow = useTabPane();
   const [editing, setEditing] = useState(draft !== undefined);
   const [readError, setReadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -151,6 +153,12 @@ export function ProfileFilePane({ plugin, profile, file, notify, onShow, onOpenT
         {cover ? <LayoutTemplate className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" /> : <FileText className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" />}
         <span className={cover ? 'truncate text-[13.5px] font-semibold' : 'truncate font-mono text-[13px] font-semibold'} data-testid="profiles-path">{heading}</span>
         <span className="flex-1" />
+        {/* A linked agent with its own cover file shows that file, not the generated cover, so its tab action lives here (review F-4). */}
+        {subagent && path && !editing && tabCommand(subagent) && (
+          <button type="button" className={TODOS_HEADER_BUTTON} data-testid="profiles-cover-open-tab" title={tabActionLabel(subagent, tabPaneNow)} onClick={() => onOpenTab(subagent)}>
+            <SquareTerminal className="h-3.5 w-3.5" aria-hidden="true" />Open in a tab
+          </button>
+        )}
         {subagentProfile && !editing && (
           <button type="button" className={TODOS_HEADER_BUTTON} data-testid="profiles-open-subagent-profile" onClick={() => open(plugin.name, subagentProfile.name)}>Open its profile</button>
         )}

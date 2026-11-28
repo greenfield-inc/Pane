@@ -12,7 +12,8 @@ import { openSubagentTab as openWith, tabActionLabel, tabCommand, tabPane } from
 const createPanel = vi.fn<(request: CreatePanelRequest) => Promise<ToolPanel>>();
 const activatePanel = vi.fn<(paneId: string, panelId: string) => Promise<void>>(async () => undefined);
 const leaveProfilesFor = vi.fn<(paneId: string) => Promise<void>>(async () => undefined);
-const openSubagentTab = (node: ProfileSubagentNode) => openWith(node, { createPanel, showPane: leaveProfilesFor, activatePanel });
+let generation = 0;
+const openSubagentTab = (node: ProfileSubagentNode) => openWith(node, { createPanel, showPane: leaveProfilesFor, activatePanel, hostGeneration: () => generation });
 
 /** A terminal tab as the host returns it. */
 function terminalTab(id: string, sessionId: string, title: string): ToolPanel {
@@ -65,6 +66,8 @@ describe('openSubagentTab', () => {
   const initial = {
     config: useConfigStore.getState().config,
     profilesReturn: useNavigationStore.getState().profilesReturn,
+    activeView: useNavigationStore.getState().activeView,
+    activationRequests: usePanelStore.getState().activationRequests,
     sessions: useSessionStore.getState().sessions,
   };
 
@@ -74,13 +77,16 @@ describe('openSubagentTab', () => {
     leaveProfilesFor.mockClear();
     // SAFETY: the module reads only sessionProfilesEnabled.
     useConfigStore.setState({ config: { sessionProfilesEnabled: true } as AppConfig });
-    useNavigationStore.setState({ profilesReturn: { view: 'sessions', projectId: null, paneId: 'a' } });
+    generation = 0;
+    useNavigationStore.setState({ activeView: 'profiles', profilesReturn: { view: 'sessions', projectId: null, paneId: 'a' } });
     useSessionStore.setState({ sessions: [pane('a')] });
+    usePanelStore.setState({ activationRequests: {} });
   });
 
   afterEach(() => {
     useConfigStore.setState({ config: initial.config });
-    useNavigationStore.setState({ profilesReturn: initial.profilesReturn });
+    useNavigationStore.setState({ profilesReturn: initial.profilesReturn, activeView: initial.activeView });
+    usePanelStore.setState({ activationRequests: initial.activationRequests });
     useSessionStore.setState({ sessions: initial.sessions });
   });
 
@@ -91,6 +97,39 @@ describe('openSubagentTab', () => {
     expect(usePanelStore.getState().panels.a?.some(panel => panel.id === 'p1')).toBe(true);
     expect(leaveProfilesFor).toHaveBeenCalledWith('a');
     expect(activatePanel).toHaveBeenCalledWith('a', 'p1');
+  });
+
+  it('queues the tab for the Pane view, so a remembered tab restored with the layout cannot win over it', async () => {
+    createPanel.mockResolvedValue(terminalTab('p1', 'a', 'Planner'));
+    await openSubagentTab(link('launch'));
+    expect(usePanelStore.getState().activationRequests.a).toEqual({ sessionId: 'a', panelId: 'p1' });
+  });
+
+  it('says the launch is unconfirmed, and to check the Pane before retrying, when the host never answered', async () => {
+    createPanel.mockRejectedValue(new Error('Delivery unknown: the remote action may have completed, but its result could not be confirmed.'));
+    await expect(openSubagentTab(link('launch'))).resolves.toBe('Pane couldn’t confirm whether it opened Planner in Pane a: the host never answered. Check Pane a for a Planner tab before you try again, so it doesn’t start twice.');
+    expect(leaveProfilesFor).not.toHaveBeenCalled();
+  });
+
+  it('leaves your navigation alone when you left Profiles, or opened it again, before the tab was made', async () => {
+    for (const move of [
+      () => useNavigationStore.setState({ activeView: 'sessions' }),
+      () => useNavigationStore.setState({ profilesReturn: { view: 'sessions', projectId: null, paneId: 'a' } }),
+    ]) {
+      createPanel.mockImplementation(async () => { move(); return terminalTab('p2', 'a', 'Planner'); });
+      await expect(openSubagentTab(link('launch'))).resolves.toBeNull();
+      expect(usePanelStore.getState().panels.a?.some(panel => panel.id === 'p2')).toBe(true);
+      expect(leaveProfilesFor).not.toHaveBeenCalled();
+      expect(usePanelStore.getState().activationRequests.a).toBeUndefined();
+      useNavigationStore.setState({ activeView: 'profiles' });
+    }
+  });
+
+  it('drops a reply from a host the window has switched away from', async () => {
+    createPanel.mockImplementation(async () => { generation += 1; return terminalTab('p3', 'a', 'Planner'); });
+    await expect(openSubagentTab(link('launch'))).resolves.toBeNull();
+    expect(usePanelStore.getState().panels.a?.some(panel => panel.id === 'p3') ?? false).toBe(false);
+    expect(leaveProfilesFor).not.toHaveBeenCalled();
   });
 
   it('says why and starts nothing when no Pane is there to hold the tab', async () => {

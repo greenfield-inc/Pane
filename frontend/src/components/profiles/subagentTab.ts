@@ -6,6 +6,7 @@ import { isProfilesEnabled, useConfigStore } from '../../stores/configStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { usePanelStore } from '../../stores/panelStore';
 import { useSessionStore } from '../../stores/sessionStore';
+import { remoteFailureKind } from '../../utils/remoteFailure';
 import type { Session } from '../../types/session';
 import { leaveProfilesFor } from './profilesNavigation';
 import { subagentLabel } from './profilePreview';
@@ -51,12 +52,14 @@ export interface SubagentTabEffects {
   createPanel: (request: CreatePanelRequest) => Promise<ToolPanel>;
   showPane: (paneId: string) => Promise<void>;
   activatePanel: (paneId: string, panelId: string) => Promise<void>;
+  hostGeneration: () => number;
 }
 
 const PANE_EFFECTS: SubagentTabEffects = {
   createPanel: request => panelApi.createPanel(request),
   showPane: leaveProfilesFor,
   activatePanel,
+  hostGeneration: () => panelApi.hostGeneration(),
 };
 
 /**
@@ -71,16 +74,28 @@ export async function openSubagentTab(node: ProfileSubagentNode, effects: Subage
   const sessions = useSessionStore.getState();
   const pane = tabPane(useNavigationStore.getState().profilesReturn?.paneId, sessions.sessions, sessions.activeMainRepoSession);
   if (!pane) return `Pane didn’t open ${label}: no Pane is open to put its tab in. Open a Pane, then come back to Profiles and try again.`;
-  let panelId: string;
+  // A late reply must not undo navigation made while it was pending (F-3): the visit and host it was asked from.
+  const visit = useNavigationStore.getState().profilesReturn;
+  const generation = effects.hostGeneration();
+  let panel: ToolPanel;
   try {
-    const panel = await effects.createPanel({ sessionId: pane.id, type: 'terminal', title: label, initialState: { customState: { initialCommand: command } } });
-    usePanelStore.getState().addPanel(panel);
-    panelId = panel.id;
+    panel = await effects.createPanel({ sessionId: pane.id, type: 'terminal', title: label, initialState: { customState: { initialCommand: command } } });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
+    if (remoteFailureKind(reason) === 'unknown') {
+      return `Pane couldn’t confirm whether it opened ${label} in ${pane.name}: the host never answered. Check ${pane.name} for a ${label} tab before you try again, so it doesn’t start twice.`;
+    }
     return `Pane didn’t open ${label} in ${pane.name}: ${reason.replace(/\.$/, '')}. Nothing was started; try again, or run ${command} in a terminal tab.`;
   }
+  // The window has moved to another host: this tab is that old host's, so it isn't added here.
+  if (effects.hostGeneration() !== generation) return null;
+  usePanelStore.getState().addPanel(panel);
+  const navigation = useNavigationStore.getState();
+  // You left Profiles, or opened it again from elsewhere, while the host made the tab: it stays where it is.
+  if (navigation.activeView !== 'profiles' || navigation.profilesReturn !== visit) return null;
+  // SessionView applies a queued tab once this visit's layout has loaded, so a remembered tab can't win over it (F-1).
+  usePanelStore.getState().requestActivation({ sessionId: pane.id, panelId: panel.id });
   await effects.showPane(pane.id);
-  await effects.activatePanel(pane.id, panelId).catch(() => undefined);
+  await effects.activatePanel(pane.id, panel.id).catch(() => undefined);
   return null;
 }
