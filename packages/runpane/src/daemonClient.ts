@@ -152,6 +152,43 @@ function doctorCommand(paneDir: string | undefined): string {
   return `\`runpane doctor --pane-dir ${/^[\w./:@\\-]+$/.test(paneDir) ? paneDir : `'${paneDir.replace(/'/g, `'\\''`)}'`}\``;
 }
 
+/**
+ * How soon a running Pane re-creates a deleted Unix socket: PANE_DAEMON_SOCKET_CHECK_INTERVAL_MS
+ * in main/src/daemon/server.ts. The Python CLI quotes the same number (`daemon_client.py`).
+ */
+const DAEMON_SOCKET_RECREATE_SECONDS = 5;
+
+/**
+ * No socket where Pane listens. Either Pane is not running, or something deleted its socket while
+ * it ran (a /tmp cleanup); a running Pane re-creates it within seconds, and an older one only on
+ * restart. The wording matches the Python CLI's.
+ */
+function missingUnixSocketError(socketPath: string, appDirectory: string, paneDir: string | undefined): PaneDaemonClientError {
+  return new PaneDaemonClientError(
+    `No Pane daemon socket at ${socketPath} (ENOENT). Pane is not running for ${appDirectory}, or its socket was deleted while it ran; a running Pane re-creates it within ${DAEMON_SOCKET_RECREATE_SECONDS} s. Nothing was changed.`,
+    'ENOENT',
+    true,
+    `Open Pane on this machine. If it is already open, wait ${DAEMON_SOCKET_RECREATE_SECONDS} s and try again; if it still fails, quit and reopen Pane. Then check the connection with ${doctorCommand(paneDir)}.`,
+  );
+}
+
+/** Why runpane could not reach Pane at all; nothing reached Pane. */
+function connectError(endpoint: PaneDaemonEndpoint, appDirectory: string, error: NodeJS.ErrnoException, paneDir: string | undefined): PaneDaemonClientError {
+  // Pane creates its data folder on first launch, so without one Pane has never run here.
+  const paneHasRun = fs.existsSync(appDirectory);
+  if (endpoint.transport === 'unix' && error.code === 'ENOENT' && paneHasRun) {
+    return missingUnixSocketError(endpoint.path, appDirectory, paneDir);
+  }
+  return new PaneDaemonClientError(
+    `Could not connect to Pane daemon at ${endpoint.path} (${error.code ?? error.message}). Pane is not running for ${appDirectory}, or it was started with a different PANE_DIR. Nothing was changed.`,
+    error.code ?? 'ERR_RUNPANE_DAEMON_CONNECT_FAILED',
+    true,
+    paneHasRun
+      ? `Open Pane on this machine, then check the connection with ${doctorCommand(paneDir)}.`
+      : `Pane has not run on this machine yet. Install Pane from https://runpane.com (free), open it, then restart this agent session so its Pane tools connect.`,
+  );
+}
+
 export function resolvePaneDirectory(paneDir?: string): string {
   return paneDir ?? process.env.PANE_DIR ?? process.env.FOOZOL_DIR ?? path.join(os.homedir(), '.pane');
 }
@@ -553,15 +590,7 @@ export async function invokeDaemon<T>(
           false,
           `Check whether the command took effect before running it again; then check the connection with ${doctorCommand(options.paneDir)}.`,
         )
-        : new PaneDaemonClientError(
-          `Could not connect to Pane daemon at ${endpoint.path} (${error.code ?? error.message}). Pane is not running for ${appDirectory}, or it was started with a different PANE_DIR. Nothing was changed.`,
-          code,
-          true,
-          // Pane creates its data folder on first launch, so without one Pane has never run here.
-          fs.existsSync(appDirectory)
-            ? `Open Pane on this machine, then check the connection with ${doctorCommand(options.paneDir)}.`
-            : `Pane has not run on this machine yet. Install Pane from https://runpane.com (free), open it, then restart this agent session so its Pane tools connect.`,
-        ) });
+        : connectError(endpoint, appDirectory, error, options.paneDir) });
     });
 
     socket.once('close', () => {

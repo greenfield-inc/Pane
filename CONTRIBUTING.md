@@ -70,6 +70,13 @@ app:
   listener, leaves Tailscale Serve alone, and on quit leaves the other Pane's
   daemon socket in place. It logs `Another Pane already serves <dir>` at startup. Quit it and
   give it its own `PANE_DIR`.
+- **The daemon socket** of each Pane lives in a `/tmp/pane-daemon-<uid>-<hash>`
+  folder named for its data directory, outside `PANE_DIR`. To clean up a test
+  instance, quit it (that removes its socket) and delete its own `PANE_DIR`;
+  `runpane doctor --pane-dir <dir> --json` prints its socket as
+  `daemon.endpoint.path`. Never `rm` a `/tmp/pane-daemon-*` glob: it also takes
+  the installed Pane's socket, and the local `runpane` CLI and `pane` MCP
+  server fail with ENOENT until Pane re-creates it (within 5 s).
 - **Analytics** are on by default in a fresh data directory. To keep a QA
   instance quiet, write `analytics.enabled: false` to its `config.json` before
   the first launch, or launch it with `RUNPANE_TELEMETRY_DISABLED=1`; either

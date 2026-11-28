@@ -18,12 +18,34 @@ DAEMON_SOCKET_FILENAME = "daemon.sock"
 DEFAULT_TIMEOUT_MS = 130_000
 
 
-def connect_next(pane_dir: Optional[str]) -> str:
-    """Point `runpane doctor` at the Pane this call used."""
+# How soon a running Pane re-creates a deleted Unix socket: PANE_DAEMON_SOCKET_CHECK_INTERVAL_MS
+# in main/src/daemon/server.ts. The Node CLI quotes the same number (`daemonClient.ts`).
+DAEMON_SOCKET_RECREATE_SECONDS = 5
+
+
+def doctor_command(pane_dir: Optional[str]) -> str:
+    """`runpane doctor` for the Pane this call used, so it checks the same instance."""
     doctor = "runpane doctor"
     if pane_dir:
         doctor += " --pane-dir " + (pane_dir if re.fullmatch(r"[\w./:@\\-]+", pane_dir) else "'" + pane_dir.replace("'", "'\\''") + "'")
-    return f"Open Pane on this machine, then check the connection with `{doctor}`."
+    return f"`{doctor}`"
+
+
+def connect_next(pane_dir: Optional[str]) -> str:
+    """Point `runpane doctor` at the Pane this call used."""
+    return f"Open Pane on this machine, then check the connection with {doctor_command(pane_dir)}."
+
+
+def missing_unix_socket_error(socket_path: str, app_directory: str, pane_dir: Optional[str]) -> "PaneDaemonClientError":
+    """No socket where Pane listens: Pane is not running, or something deleted its socket while it ran
+    (a /tmp cleanup). A running Pane re-creates it within seconds, an older one only on restart.
+    The wording matches the Node CLI's."""
+    return PaneDaemonClientError(
+        f"No Pane daemon socket at {socket_path} (ENOENT). Pane is not running for {app_directory}, or its socket was deleted while it ran; a running Pane re-creates it within {DAEMON_SOCKET_RECREATE_SECONDS} s. Nothing was changed.",
+        "ENOENT",
+        f"Open Pane on this machine. If it is already open, wait {DAEMON_SOCKET_RECREATE_SECONDS} s and try again; if it still fails, quit and reopen Pane. Then check the connection with {doctor_command(pane_dir)}.",
+        connection_failure=True,
+    )
 
 
 class PaneDaemonClientError(RuntimeError):
@@ -82,7 +104,8 @@ def invoke_daemon(
     event_include: Optional[List[str]] = None,
 ) -> Any:
     """`timeout_ms=math.inf` waits as long as the call takes, for requests that wait on a person."""
-    endpoint = get_pane_daemon_endpoint(resolve_pane_directory(pane_dir))
+    app_directory = resolve_pane_directory(pane_dir)
+    endpoint = get_pane_daemon_endpoint(app_directory)
     request = {
         "type": "request",
         "id": 1,
@@ -102,10 +125,17 @@ def invoke_daemon(
 
     if endpoint["transport"] == "pipe":
         return invoke_windows_pipe(endpoint["path"], encoded, timeout_ms or DEFAULT_TIMEOUT_MS, channel, connect_next(pane_dir))
-    return invoke_unix_socket(endpoint["path"], encoded, timeout_ms or DEFAULT_TIMEOUT_MS, connect_next(pane_dir))
+    return invoke_unix_socket(endpoint["path"], encoded, timeout_ms or DEFAULT_TIMEOUT_MS, connect_next(pane_dir), app_directory, pane_dir)
 
 
-def invoke_unix_socket(socket_path: str, encoded_request: bytes, timeout_ms: float, next_step: str) -> Any:
+def invoke_unix_socket(
+    socket_path: str,
+    encoded_request: bytes,
+    timeout_ms: float,
+    next_step: str,
+    app_directory: Optional[str] = None,
+    pane_dir: Optional[str] = None,
+) -> Any:
     decoder = PaneDaemonFrameDecoder()
     deadline = time.monotonic() + timeout_ms / 1000
     try:
@@ -116,6 +146,9 @@ def invoke_unix_socket(socket_path: str, encoded_request: bytes, timeout_ms: flo
             except socket.timeout:
                 raise
             except OSError as error:
+                # Pane creates its data folder on first launch; with one, the missing socket is the thing to explain.
+                if isinstance(error, FileNotFoundError) and app_directory is not None and os.path.exists(app_directory):
+                    raise missing_unix_socket_error(socket_path, app_directory, pane_dir) from error
                 raise PaneDaemonClientError(
                     f"Could not connect to Pane daemon at {socket_path}: {error}. Pane is not running, or it was started with a different PANE_DIR. Nothing was changed.",
                     "ERR_RUNPANE_DAEMON_CONNECT_FAILED",

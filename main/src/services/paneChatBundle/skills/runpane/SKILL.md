@@ -304,6 +304,13 @@ stopping a process or archiving a Pane. Put QA roots, test
 instances and downloads in the Pane's scratch folder (`$PANE_SCRATCH_DIR`) so
 they go when the Pane is archived.
 
+A test instance's local socket is not in its `PANE_DIR`: it is
+`daemon.endpoint.path` in `runpane doctor --pane-dir <its PANE_DIR> --json`,
+and quitting the instance removes it. Never delete by a glob such as
+`/tmp/pane-daemon-<uid>-*`: one of those folders is the person's installed
+Pane, and removing it cuts their `runpane` CLI and `pane` MCP tools off until
+Pane re-creates it (within 5 s) or, on an older Pane, until it restarts.
+
 ### Watching a PR from any Pane
 
 ```bash
