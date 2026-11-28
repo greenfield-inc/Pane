@@ -22,14 +22,17 @@ interface UpdateDialogProps {
   };
 }
 
-type UpdateState = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'error';
+export type UpdateState = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'error';
 
-interface DownloadProgress {
+export interface DownloadProgress {
   bytesPerSecond: number;
   percent: number;
   transferred: number;
   total: number;
 }
+
+const isUpdateBusyState = (updateState: UpdateState) =>
+  updateState === 'checking' || updateState === 'available' || updateState === 'downloading' || updateState === 'installing';
 
 export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps) {
   const [updateState, setUpdateState] = useState<UpdateState>('idle');
@@ -298,6 +301,68 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
     }
   };
 
+  if (!isOpen) return null;
+
+  const isUpdateBusy = isUpdateBusyState(updateState);
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="lg"
+      showCloseButton={false}
+      closeOnEscape={!isUpdateBusy}
+      closeOnOverlayClick={!isUpdateBusy}
+    >
+      <UpdateDialogContent
+        onClose={onClose}
+        versionInfo={versionInfo}
+        updateState={updateState}
+        downloadProgress={downloadProgress}
+        error={error}
+        message={message}
+        isPackaged={isPackaged}
+        canUseSeamlessUpdater={canUseSeamlessUpdater}
+        isResolvingUpdateMode={isResolvingUpdateMode}
+        onStartUpdate={handleStartUpdate}
+        onCopyUpdateCommand={handleCopyUpdateCommand}
+        onOpenTerminalWithCommand={handleOpenTerminalWithCommand}
+        onInstallDownloadedUpdate={installDownloadedUpdate}
+      />
+    </Modal>
+  );
+}
+
+export interface UpdateDialogContentProps extends Omit<UpdateDialogProps, 'isOpen'> {
+  updateState: UpdateState;
+  downloadProgress: DownloadProgress | null;
+  error: string | null;
+  message: string | null;
+  isPackaged: boolean;
+  canUseSeamlessUpdater: boolean;
+  isResolvingUpdateMode: boolean;
+  onStartUpdate: () => void | Promise<void>;
+  onCopyUpdateCommand: () => void | Promise<void>;
+  onOpenTerminalWithCommand: () => void | Promise<void>;
+  onInstallDownloadedUpdate: () => void | Promise<void>;
+}
+
+/** The dialog's header, body and footer for one update state, so each state can be rendered on its own. */
+export function UpdateDialogContent({
+  onClose,
+  versionInfo,
+  updateState,
+  downloadProgress,
+  error,
+  message,
+  isPackaged,
+  canUseSeamlessUpdater,
+  isResolvingUpdateMode,
+  onStartUpdate: handleStartUpdate,
+  onCopyUpdateCommand: handleCopyUpdateCommand,
+  onOpenTerminalWithCommand: handleOpenTerminalWithCommand,
+  onInstallDownloadedUpdate: installDownloadedUpdate,
+}: UpdateDialogContentProps) {
   const openDmgDownload = () => {
     if (versionInfo?.downloadUrl) {
       window.electronAPI.openExternal(versionInfo.downloadUrl);
@@ -315,7 +380,7 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
   const formatSpeed = (bytesPerSecond: number) => {
     return formatBytes(bytesPerSecond) + '/s';
   };
-  const isUpdateBusy = updateState === 'checking' || updateState === 'available' || updateState === 'downloading' || updateState === 'installing';
+  const isUpdateBusy = isUpdateBusyState(updateState);
   const progressMilestone = downloadProgress ? Math.floor(downloadProgress.percent / 10) * 10 : 0;
   const statusAnnouncement = message ?? ({
     idle: '',
@@ -357,16 +422,6 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
           >
             Download DMG
           </Button>
-          {versionInfo?.releaseUrl && (
-            <Button
-              onClick={() => window.electronAPI.openExternal(versionInfo.releaseUrl!)}
-              variant="secondary"
-              size="sm"
-              icon={<ExternalLink className="w-4 h-4" />}
-            >
-              View on GitHub
-            </Button>
-          )}
         </div>
       </div>
 
@@ -386,17 +441,8 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
     </div>
   );
 
-  if (!isOpen) return null;
-
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      size="lg"
-      showCloseButton={false}
-      closeOnEscape={!isUpdateBusy}
-      closeOnOverlayClick={!isUpdateBusy}
-    >
+    <>
       <LiveRegion>{statusAnnouncement}</LiveRegion>
       <ModalHeader
         title="Software Update"
@@ -690,7 +736,7 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
             </div>
           )}
 
-          <div className="mt-4 flex items-center gap-3 rounded-lg border border-border-primary bg-surface-secondary px-4 py-3">
+          <div className="flex items-center gap-3 rounded-lg border border-border-primary bg-surface-secondary px-4 py-3">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-discord text-discord-foreground">
               <DiscordIcon className="w-4 h-4" />
             </div>
@@ -723,6 +769,6 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
           </Button>
         </div>
       </ModalFooter>
-    </Modal>
+    </>
   );
 }
