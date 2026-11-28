@@ -84,6 +84,8 @@ export const useRemoteEngage = create<RemoteEngageState>(() => ({ held: {} }));
 const REST_ENGAGE_MS = 1000;
 /** How long, once the window is on that machine, the mirror's view waits for the chat there to paint. */
 export const LIVE_VIEW_WAIT_MS = 3000;
+/** How long after an engage lands a host reset that clears its chat takes the text back into the hold. */
+export const REHOLD_AFTER_LAND_MS = 5000;
 
 export function engageKey(target: EngageTarget): string {
   return remoteSessionKey(target.machineId, target.sessionId);
@@ -104,6 +106,8 @@ let listening = false;
 let linkUp = true;
 /** Chat tabs whose live mount takes what was typed into their Session and not delivered yet. */
 const undelivered = new Map<string, EngageTarget>();
+/** The last engage that landed: its Session, the chat that took the text, and when. */
+let landed: (EngageTarget & { panelId: string; at: number }) | undefined;
 
 /**
  * While an engage that was typed runs, a printable key that finds focus on nothing (the page body:
@@ -208,6 +212,35 @@ function listen(): void {
     if (engaging.switched) land();
     else shownMeanwhile.add(panelId);
   });
+  useWindowLink.subscribe((state, previous) => {
+    if (state.hostResets !== previous.hostResets) hostReset();
+  });
+}
+
+/**
+ * The window's host state is about to be reset again just after an engage landed (main sends
+ * hostChanged again when a restore did not complete). The reset clears the chat the text went
+ * into, and keys typed while it remounts would land on the page (build 12). While the person is
+ * typing in that chat, its text goes back into the hold, whose box takes the keys that follow, and
+ * the chat drawn after the reset takes it all, once.
+ */
+function hostReset(): void {
+  const last = landed;
+  landed = undefined;
+  if (!last || useRemoteEngage.getState().engaging || Date.now() - last.at > REHOLD_AFTER_LAND_MS) return;
+  const box = document.querySelector<HTMLTextAreaElement>(`textarea[data-chat-composer="${last.panelId}"]`);
+  if (!box || document.activeElement !== box) return;
+  const target = { machineId: last.machineId, sessionId: last.sessionId };
+  shownMeanwhile.clear();
+  personMovedFocus = false;
+  boxRestores = 0;
+  useRemoteEngage.setState(state => ({
+    held: { ...state.held, [engageKey(target)]: { text: box.value, send: false } },
+    engaging: { ...target, cause: 'type', panelId: last.panelId, switched: true },
+    failure: undefined,
+  }));
+  switchMark('engage:rehold', { machineId: target.machineId, sessionId: target.sessionId, panelId: last.panelId });
+  armLiveWait();
 }
 
 function machineState(machineId: string) {
@@ -350,6 +383,7 @@ export function engageRemoteSession(target: EngageTarget, cause: EngageCause, op
   const ticket = ++engageTicket;
   clearTimeout(liveWait);
   listen();
+  landed = undefined;
   keysToKept = false;
   shownMeanwhile.clear();
   const panelId = mirroredChatPanel(target);
@@ -487,6 +521,8 @@ function land(): void {
   if (!engaging) return;
   // Ended first, so focus moving into the chat there is not taken back to the held box.
   useRemoteEngage.setState({ engaging: undefined, settling: true });
+  const panelId = engaging.panelId ?? mirroredChatPanel(engaging);
+  landed = panelId ? { machineId: engaging.machineId, sessionId: engaging.sessionId, panelId, at: Date.now() } : undefined;
   clearTimeout(settleCap);
   settleCap = setTimeout(endEngageSettling, SETTLE_CAP_MS);
   deliverHeld(engaging, { focused: true, sends: true });

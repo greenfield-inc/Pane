@@ -57,7 +57,8 @@ async function setup(switchMachine: (machineId: string) => Promise<MachineSelect
   const taken: LaunchDraft[] = [];
   const stopTaking = handover.acceptChatDraft('panel-b', draft => taken.push(draft));
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
-  return { engage, handover, landOn, taken, stopTaking, state: () => engage.useRemoteEngage.getState(), shownError: () => useErrorStore.getState().currentError };
+  const link = await import('../stores/windowLink');
+  return { engage, handover, link, landOn, taken, stopTaking, state: () => engage.useRemoteEngage.getState(), shownError: () => useErrorStore.getState().currentError };
 }
 
 const target = { machineId: 'build', sessionId: 'b' };
@@ -225,6 +226,66 @@ describe('typing, Enter or a click engages, and what was typed arrives once (T-1
     switched.resolve({ ok: true });
     await vi.waitFor(() => expect(state().engaging).toBeUndefined());
     expect(taken).toEqual([expect.objectContaining({ text: 'hello', send: false })]);
+  });
+
+  it('a host reset just after it landed (main sends hostChanged again when a restore did not complete; build 12): the held box takes back the text and the keys that follow, and the chat drawn after takes them all, once', async () => {
+    const switched = deferred<MachineSelectOutcome>();
+    const { engage, handover, link, taken, stopTaking, state } = await setup(() => switched.promise);
+    engage.holdRemoteText(target, 'engage-');
+    engage.engageRemoteSession(target, 'type');
+    switched.resolve({ ok: true });
+    await vi.waitFor(() => expect(state().engaging?.switched).toBe(true));
+    handover.chatTabShown('panel-b');
+    expect(taken).toEqual([expect.objectContaining({ text: 'engage-', focused: true })]);
+
+    // The person types on in the chat there; then the window's host state is reset again, which
+    // clears that chat (its Session remounts).
+    const body = {};
+    const box = { value: 'engage-typed-17958' };
+    const page = { body, activeElement: box as object, querySelector: (selector: string) => (selector.includes('data-chat-composer') ? box : null), querySelectorAll: () => [] };
+    vi.stubGlobal('document', page);
+    link.noteWindowHostReset();
+    stopTaking();
+    expect(state().engaging).toMatchObject({ ...target, cause: 'type', switched: true, panelId: 'panel-b' });
+    expect(state().held[engage.engageKey(target)]?.text).toBe('engage-typed-17958');
+
+    // The chat is gone, so the next keys land on the page: they go into the held text, in order.
+    page.activeElement = body;
+    const preventDefault = vi.fn();
+    for (const key of '32836528') for (const listener of keyListeners) listener({ key, metaKey: false, ctrlKey: false, altKey: false, isComposing: false, preventDefault });
+    expect(state().held[engage.engageKey(target)]?.text).toBe('engage-typed-1795832836528');
+
+    // The chat drawn after the reset takes the whole text, once.
+    const after: LaunchDraft[] = [];
+    handover.acceptChatDraft('panel-b', draft => after.push(draft));
+    handover.chatTabShown('panel-b');
+    handover.chatTabShown('panel-b');
+    expect(after).toEqual([expect.objectContaining({ text: 'engage-typed-1795832836528', focused: true, send: false })]);
+    expect(state().engaging).toBeUndefined();
+  });
+
+  it('a host reset re-holds nothing when the person is not typing in the chat it landed in, or long after it landed', async () => {
+    const { engage, handover, link, state } = await setup(async () => ({ ok: true }));
+    engage.holdRemoteText(target, 'hi');
+    engage.engageRemoteSession(target, 'type');
+    await vi.waitFor(() => expect(state().engaging?.switched).toBe(true));
+    handover.chatTabShown('panel-b');
+    const body = {};
+    const box = { value: 'hi there' };
+    const page = { body, activeElement: body as object, querySelector: (selector: string) => (selector.includes('data-chat-composer') ? box : null), querySelectorAll: () => [] };
+    vi.stubGlobal('document', page);
+    // Focus moved on (a click elsewhere): the reset is not about the text there.
+    link.noteWindowHostReset();
+    expect(state().engaging).toBeUndefined();
+
+    engage.holdRemoteText(target, 'again');
+    engage.engageRemoteSession(target, 'type');
+    await vi.waitFor(() => expect(state().engaging?.switched).toBe(true));
+    handover.chatTabShown('panel-b');
+    page.activeElement = box;
+    await vi.advanceTimersByTimeAsync(engage.REHOLD_AFTER_LAND_MS + 1);
+    link.noteWindowHostReset();
+    expect(state().engaging).toBeUndefined();
   });
 
   it('Enter while the switch runs sends the held text there once, after the switch', async () => {

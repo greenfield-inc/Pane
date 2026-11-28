@@ -19,6 +19,7 @@ import { devLog } from '../utils/console';
 import { claimCreatedPane, markAppReady } from '../utils/journeyTimings';
 import type { Session, SessionOutput, GitStatus } from '../types/session';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
+import { noteWindowHostReset } from '../stores/windowLink';
 
 interface SessionEventData {
   sessionId: string;
@@ -50,6 +51,9 @@ let runtimeGeneration = 0;
 async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => void, hostChanged: boolean, ownsRuntime: () => boolean): Promise<void> {
   if (!ownsRuntime()) return;
   if (hostChanged) {
+    // Said first, while the outgoing views are still on screen: an engage that just landed in one
+    // takes back what is being typed there before the reset clears it (build 12).
+    noteWindowHostReset();
     // Invalidate outgoing Session requests and tile memory before any host read.
     useOrchestrationSessionStore.getState().invalidateHost();
     // A press on one of this host's Sessions waits for its list (T-128, T-132): read it now, beside
