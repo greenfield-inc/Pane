@@ -58,6 +58,9 @@ export function snapshotRefused(output: string | undefined): boolean {
 
 const checksumsSchema = boundary.record(boundary.string);
 
+/** Files a file browser drops into folders, which Agent Farm neither copies into a snapshot nor checks. */
+const OS_METADATA = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini']);
+
 /**
  * Checks a snapshot folder against its own checksums.json, as Agent Farm does before it reads one:
  * every file but checksums.json, by its path relative to the folder, with its SHA-256. Returns why
@@ -68,11 +71,13 @@ export async function snapshotProblem(folder: string): Promise<string | undefine
   try { expected = decodeBoundary(JSON.parse(await fs.readFile(path.join(folder, 'checksums.json'), 'utf8')), checksumsSchema); }
   catch (error) { return `its checksums.json can't be read (${reasonOf(error)})`; }
   const found = new Map<string, string>();
+  // As Agent Farm 0.3.1 checks one (#1762 F-7): `/` paths, and a file browser's metadata files ignored.
   const visit = async (directory: string): Promise<void> => {
     for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      if (OS_METADATA.has(entry.name)) continue;
       const full = path.join(directory, entry.name);
       if (entry.isDirectory()) await visit(full);
-      else found.set(path.relative(folder, full), createHash('sha256').update(await fs.readFile(full)).digest('hex'));
+      else found.set(path.relative(folder, full).split(path.sep).join('/'), createHash('sha256').update(await fs.readFile(full)).digest('hex'));
     }
   };
   try { await visit(folder); }
@@ -89,14 +94,15 @@ export async function snapshotProblem(folder: string): Promise<string | undefine
 }
 
 /** The snapshots in a Session folder that fail their checksums, each with why; empty when all match or there are none. */
-export async function unreadableSnapshots(sessionFolder: string): Promise<Array<{ path: string; problem: string }>> {
+export async function unreadableSnapshots(sessionFolder: string, only?: ReadonlySet<string>): Promise<Array<{ path: string; problem: string }>> {
   const root = snapshotLocation(sessionFolder, SNAPSHOTS_FOLDER);
   let entries;
   try { entries = await fs.readdir(root, { withFileTypes: true }); }
   catch { return []; }
   const failed: Array<{ path: string; problem: string }> = [];
   // Agent Farm builds in `.building-*` and renames; one left by a killed launch is not a snapshot.
-  for (const entry of entries.filter(item => item.isDirectory() && !item.name.startsWith('.'))) {
+  // `only`: the digests something still resolves from; an old one nothing names can't block (#1762 F-7).
+  for (const entry of entries.filter(item => item.isDirectory() && !item.name.startsWith('.') && (!only || only.has(item.name)))) {
     const problem = await snapshotProblem(path.join(root, entry.name));
     if (problem) failed.push({ path: `${SNAPSHOTS_FOLDER}/${entry.name}`, problem });
   }

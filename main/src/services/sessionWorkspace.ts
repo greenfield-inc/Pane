@@ -13,6 +13,7 @@ import { withTodosText } from '../../../shared/todosText';
 import { todosOn } from './todos/todosFeature';
 import { quoteShellWord } from './agents/shellWord';
 import { PaneError } from '../../../shared/paneError';
+import { ensurePrivateFolder } from './privateFolder';
 
 const START = '<!-- pane-session-context:start -->';
 const END = '<!-- pane-session-context:end -->';
@@ -66,8 +67,7 @@ export function prepareSessionWorkspace(
   record?: OrchestrationSessionRecord,
 ): string {
   const cwd = sessionWorkspacePath(sessionId);
-  fs.mkdirSync(cwd, { recursive: true, mode: 0o700 });
-  if (fs.lstatSync(cwd).isSymbolicLink()) throw new Error(`Session workspace must not be a symbolic link: ${cwd}`);
+  ensurePrivateFolder(cwd);
   // Earlier builds wrote this switch for the removed progress view.
   const legacyProgressStatus = path.join(cwd, LEGACY_PROGRESS_STATUS);
   if (fs.existsSync(legacyProgressStatus) && fs.lstatSync(legacyProgressStatus).isFile()) fs.unlinkSync(legacyProgressStatus);

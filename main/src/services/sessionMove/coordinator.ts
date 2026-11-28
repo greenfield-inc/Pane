@@ -6,7 +6,7 @@ import path from 'path';
 import { promisify } from 'util';
 import { app } from 'electron';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
-import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import {
   SESSION_MOVE_FEATURE,
   SESSION_MOVE_MANIFEST_VERSION,
@@ -22,7 +22,6 @@ import type { OrchestrationSessionRecord } from '../../../../shared/types/orches
 import type { TerminalPausedMark, ToolPanel } from '../../../../shared/types/panels';
 import { configuredAgent, isConfiguredAgent } from '../../../../shared/agents';
 import { isFileStoreAgent } from '../../../../packages/runpane/src/nativeSession';
-import { fileDigest } from '../../../../packages/runpane/src/checkedCopy';
 import type { PaneCommandRegistry } from '../../daemon/commandRegistry';
 import type { AppServices } from '../../ipc/types';
 import { getAppDirectory } from '../../utils/appDirectory';
@@ -38,7 +37,7 @@ import { databaseService } from '../database';
 import { locateConversation } from './conversations';
 import { createBundle, createSnapshot, ignoredPaths, putBackRef } from './gitSnapshot';
 import { agentFarmProfiles, cliVersion, type TargetPreflight, type TargetStatus } from './importer';
-import { agentFarmProfileOf, heldBackChecks, sessionApprovals, tabSnapshotFolder, type SessionApprovals } from './rules';
+import { heldBackChecks, sessionApprovals, tabAgentFarmLaunch, type SessionApprovals } from './rules';
 import { snapshotHoldsProfile } from '../agentFarm/sessionSnapshot';
 import type { MovedApproval } from '../notify/notifyService';
 import { keepIgnoredFiles } from './ignoredFiles';
@@ -47,7 +46,7 @@ import { movedApprovals, readTabFields, sessionMoveCheckSchema, sessionMoveFixSc
 import { resolvePeer, type MovePeer } from './peer';
 import { settleAfterFreeze, type FreezeOutcome, type FreezeWait } from './afterFreeze';
 import { listSessionFolder } from './sessionFolder';
-import { sendFile, writeResultSchema, type ChunkSender, type WriteRequest } from './transfer';
+import { packageFile, sendFile, writeResultSchema, type ChunkSender, type WriteRequest } from './transfer';
 
 const run = promisify(execFile);
 const POLL_MS = 1_000;
@@ -250,13 +249,13 @@ export class MoveCoordinator {
         const custom = toJsonObject(panel.state.customState ?? {});
         delete custom.scrollbackBuffer; delete custom.serializedBuffer; delete custom.alternateScreenBuffer;
         const moved = tabState.get(panel.id);
-        const { agentId: agent, conversationId, launch } = readTabFields(custom);
+        const { agentId: agent, conversationId } = readTabFields(custom);
         if (agent && isConfiguredAgent(agent) && !(agent in agentVersions)) agentVersions[agent] = await cliVersion(configuredAgent(agent).executables[0]);
-        const profile = agentFarmProfileOf(launch);
-        if (profile) {
-          profileNames.add(profile);
-          const pinned = decodeOptionalBoundary(custom.agentFarmSnapshot, boundary.string);
-          profileSnapshots.set(profile, [...profileSnapshots.get(profile) ?? [], tabSnapshotFolder(launch, { agentFarmSnapshot: pinned }, sessionFolder, record.agentFarmSnapshot)]);
+        // A terminal's command or a profile chat's structured launch (#1762 F-8).
+        const farm = tabAgentFarmLaunch(custom, sessionFolder, record.agentFarmSnapshot);
+        if (farm) {
+          profileNames.add(farm.profile);
+          profileSnapshots.set(farm.profile, [...profileSnapshots.get(farm.profile) ?? [], farm.folder]);
         }
         const tab: MoveTab = {
           id: panel.id, type: panel.type, title: panel.title,
@@ -298,14 +297,21 @@ export class MoveCoordinator {
     const here = profileNames.size ? await agentFarmProfiles() : {};
     const profiles = Object.fromEntries([...profileNames].map(name => [name, here[name] ?? null]));
     const snapshotProfiles: string[] = [];
+    // Tabs sharing one snapshot check it once (#1762 F-8).
+    const holds = new Map<string, Promise<boolean>>();
+    const holdsProfile = (folder: string, name: string) => {
+      const key = `${folder}\0${name}`;
+      if (!holds.has(key)) holds.set(key, snapshotHoldsProfile(folder, name));
+      return holds.get(key) ?? Promise.resolve(false);
+    };
     for (const [name, folders] of profileSnapshots) {
       let held = true;
-      for (const folder of folders) held = held && !!folder && await snapshotHoldsProfile(folder, name);
+      for (const folder of folders) held = held && !!folder && await holdsProfile(folder, name);
       if (held) snapshotProfiles.push(name);
     }
     const approvals = (pack?.approvals ?? []).map(approval => toJsonObject(approval));
     const files: PackageFile[] = [];
-    if (pack) for (const [packagePath, source] of sources) files.push({ path: packagePath, ...(await fileDigest(source)) });
+    if (pack) for (const [packagePath, source] of sources) files.push(await packageFile(packagePath, source));
     const manifest: MoveManifest = {
       version: SESSION_MOVE_MANIFEST_VERSION, moveId,
       source: {

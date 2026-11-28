@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -773,6 +773,17 @@ describe('createPaneSessionSnapshot', () => {
     expect(snapshot).toEqual({ path: '.agent-farm/snapshots/d1', digest: 'd1', plugins: { greenfield: '0.1.2' } });
     expect(calls[0].args.slice(1)).toEqual(['snapshot', 'create', '--directory', sessionFolder, '--json', '--config-root', agentFarmConfigRoot(paneDir)]);
     expect(existsSync(sessionFolder)).toBe(true);
+  });
+
+  it.skipIf(process.platform === 'win32')('makes a new Session folder private, as the Session setup does, and refuses a link (#1762 F-5)', async () => {
+    const paneDir = tempDir();
+    const sessionFolder = path.join(paneDir, 'sessions', 's1');
+    const created = JSON.stringify({ path: path.join(sessionFolder, '.agent-farm', 'snapshots', 'd1'), digest: 'd1', plugins: {} });
+    await createPaneSessionSnapshot(paneDir, sessionFolder, async () => created, fakeBundle());
+    expect(statSync(sessionFolder).mode & 0o777).toBe(0o700);
+    const linked = path.join(paneDir, 'sessions', 's2');
+    symlinkSync(tempDir(), linked);
+    await expect(createPaneSessionSnapshot(paneDir, linked, async () => created, fakeBundle())).rejects.toThrow(/must not be a symbolic link/);
   });
 
   it('says what failed and what to do when the CLI fails or the build has none', async () => {

@@ -14,6 +14,7 @@ import { linkedAgentRefs, panePluginFiles, panePluginInstalled, parseProfileList
 import { PANE_PROFILE_PLUGIN } from '../../../../shared/agentProfiles';
 import type { AgentFarmProfileList } from '../../../../shared/types/agentFarmProfiles';
 import { parseSnapshotCreated, type SessionSnapshot } from './sessionSnapshot';
+import { ensurePrivateFolder } from '../privateFolder';
 
 const execFileAsync = promisify(execFile);
 
@@ -752,7 +753,8 @@ export async function reinstallBundledPlugin(paneDir: string, name: string, bund
 export async function createPaneSessionSnapshot(paneDir: string, sessionFolder: string, run: AgentFarmRunner = runAgentFarm, bundle?: BundledAgentFarm | null): Promise<SessionSnapshot> {
   const agentFarm = paneAgentFarmProcess(paneDir, ['snapshot', 'create', '--directory', sessionFolder, '--json'], { profiles: true, bundle });
   if (!agentFarm) throw new PaneError('AGENT_FARM_SNAPSHOT_FAILED', `This Pane build does not include ${AGENT_FARM_PACKAGE}, so it can't save the Session's snapshot.`, 'Reinstall Pane from runpane.com.');
-  await fs.mkdir(sessionFolder, { recursive: true });
+  // Private, as the Session's own setup makes it, even when the snapshot comes first (#1762 F-5).
+  ensurePrivateFolder(sessionFolder);
   let stdout: string;
   try { stdout = await run(agentFarm); }
   catch (error) {

@@ -14,6 +14,8 @@ export interface PackageFile {
   path: string;
   bytes: number;
   sha256: string;
+  /** Executable on the source (#1762 F-2): the target sets its execute bits. An older Pane ignores it. */
+  executable?: true;
 }
 
 /** Which agent store a conversation file belongs in on the target. */
@@ -131,7 +133,7 @@ export const panelBuffersSchema = boundary.object({
   alternate: boundary.nullable(boundary.string),
 });
 
-const packageFileSchema = boundary.object({ path: boundary.nonEmptyString, bytes: boundary.number, sha256: boundary.string });
+const packageFileSchema = boundary.object({ path: boundary.nonEmptyString, bytes: boundary.number, sha256: boundary.string, executable: boundary.optional(boundary.literal(true)) });
 const tabSchema = boundary.object({
   id: boundary.nonEmptyString,
   type: boundary.nonEmptyString,

@@ -801,7 +801,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       const next: OrchestrationSessionRecord = { ...current, revision: current.revision + 1, updatedAt: new Date().toISOString(), activity: [...current.activity] };
       if (snapshot) next.agentFarmSnapshot = snapshot.path;
       if (mode === 'snapshot') {
-        next.activity.push(this.activity('updated', 'Reloaded the Session\'s Agent Farm snapshot · its lead keeps running as it is, and tabs opened from now on use the new one. Close and reopen the lead tab to move the lead too.', source));
+        next.activity.push(this.activity('updated', 'Reloaded the Session\'s Agent Farm snapshot · its lead keeps running as it is, and tabs opened from now on use the new one. The lead keeps the snapshot it started with: to run a lead on the new one, start a new Session.', source));
         this.trimActivity(next);
         this.store.write(replaceSession(data, next));
         if (snapshot) this.snapshotChanged.delete(next.id);

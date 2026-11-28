@@ -437,6 +437,49 @@ test('files preview first: Markdown under a metadata header, YAML as key/value; 
   await expect(page.getByTestId('profiles-restore')).toHaveCount(0);
 });
 
+test('undo in one file never brings back another file\'s text after switching between drafts (#1762 F-3)', async ({ page }) => {
+  await openProfilesTab(page);
+  await page.getByTestId('profile-row-greenfield-orchestrator').click();
+  await page.getByTestId('profiles-tree-orchestrator/sub:designer').click();
+  await page.getByTestId('profiles-file-agents/designer.md').click();
+  await page.getByTestId('profiles-edit').click();
+  await setEditorText(page, '# Designer draft\n');
+  await page.getByTestId('profiles-tree-orchestrator/settings').click();
+  await page.getByTestId('profiles-file-profiles/orchestrator.yaml').click();
+  await page.getByTestId('profiles-edit').click();
+  await setEditorText(page, 'yaml: draft\n');
+  // Both have drafts, so each opens in Edit.
+  await page.getByTestId('profiles-file-agents/designer.md').click();
+  await expect.poll(() => editorText(page)).toBe('# Designer draft\n');
+  await page.getByTestId('profiles-file-profiles/orchestrator.yaml').click();
+  await expect.poll(() => editorText(page)).toBe('yaml: draft\n');
+  await page.getByTestId('profiles-editor').locator('.view-lines').click();
+  await page.keyboard.press(`${await editorMod(page)}+z`);
+  expect(await editorText(page)).not.toContain('Designer draft');
+});
+
+test('with the editor unable to load (offline), Edit is a plain text box that still saves and cancels (#1762 F-4)', async ({ page }) => {
+  await page.route('**/cdn.jsdelivr.net/**', route => route.abort());
+  await openProfilesTab(page);
+  await page.getByTestId('profile-row-greenfield-orchestrator').click();
+  await page.getByTestId('profiles-tree-orchestrator/settings').click();
+  await page.getByTestId('profiles-file-profiles/orchestrator.yaml').click();
+  await page.getByTestId('profiles-edit').click();
+  const plain = page.getByTestId('profiles-plain-editor');
+  await expect(plain).toBeFocused({ timeout: 15_000 });
+  await plain.press('End');
+  await plain.pressSequentially('\nmarker: OFFLINE');
+  await expect(page.getByTestId('profiles-editor-status')).toHaveText('Unsaved changes');
+  await plain.press(`${await editorMod(page)}+s`);
+  await expect(page.getByTestId('profiles-notice')).toContainText('Saved greenfield/profiles/orchestrator.yaml.');
+  await expect(page.getByTestId('profiles-editor')).toHaveCount(0);
+  await expect(page.getByTestId('profiles-yaml-preview')).toContainText('OFFLINE');
+  await page.getByTestId('profiles-edit').click();
+  await page.getByTestId('profiles-plain-editor').fill('changed: yes\n');
+  await page.getByTestId('profiles-plain-editor').press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Discard your edits?' })).toBeVisible();
+});
+
 test('Edit details saves the title and description through Agent Farm, leaving greenfield\'s files and Edited alone', async ({ page }) => {
   await openProfilesTab(page);
   await page.getByTestId('profile-row-greenfield-seo').click();

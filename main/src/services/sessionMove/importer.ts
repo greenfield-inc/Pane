@@ -33,7 +33,7 @@ import type { MovedApproval } from '../notify/notifyService';
 import { MoveReceiver, type WriteRequest, type WriteResult } from './transfer';
 import { isRegeneratedSessionFile, isTextFile, isVerbatimSessionFile } from './sessionFolder';
 import { unreadableSnapshots } from '../agentFarm/sessionSnapshot';
-import { agentFarmProfileOf, movedLine, profileChecks } from './rules';
+import { agentFarmProfileOf, movedLine, profileChecks, tabAgentFarmLaunch } from './rules';
 import { MoveLedger, type CommitPlan, type JournalRecord, type LedgerEntry, type LedgerTab, type UndoStep } from './ledger';
 
 const run = promisify(execFile);
@@ -186,6 +186,21 @@ async function snapshotBlobs(worktree: string, snapshot: string, sourceRoot: str
     if (match) blobs.set(match[2], match[1]);
   }
   return blobs;
+}
+
+/**
+ * The snapshot digests the moving Session and its tabs resolve from (#1762 F-7), read from the
+ * source's paths: the Session's own, and each Agent Farm tab's (its `--snapshot`, its chat launch's,
+ * or the one it was pinned).
+ */
+function referencedSnapshots(manifest: MoveManifest): Set<string> {
+  const root = manifest.sessionFolder.root;
+  const recordSnapshot = decodeOptionalBoundary(manifest.session.agentFarmSnapshot, boundary.string);
+  const folders = [
+    recordSnapshot ? path.join(root, ...recordSnapshot.split('/')) : undefined,
+    ...manifest.panes.flatMap(pane => pane.tabs.map(tab => tabAgentFarmLaunch(tab.state, root, recordSnapshot)?.folder)),
+  ];
+  return new Set(folders.flatMap(folder => folder ? [path.basename(folder)] : []));
 }
 
 /** `<executable> --version`, or null when it isn't installed here. */
@@ -698,6 +713,7 @@ export class MoveImporter {
     const backup = `${targetFolder}.pane-move-${moveId}`;
     this.journal(job, `the Session folder ${targetFolder}`, { kind: 'restoreFolder', target: targetFolder, backup: hadFolder ? backup : null });
     if (hadFolder) await fs.promises.rename(targetFolder, backup);
+    const executable = new Set(manifest.files.filter(file => file.executable).map(file => file.path));
     for (const relative of manifest.sessionFolder.files) {
       if (isRegeneratedSessionFile(relative)) continue;
       const source = this.receiver.filePath(moveId, `session/${relative}`);
@@ -706,9 +722,15 @@ export class MoveImporter {
       const text = isVerbatimSessionFile(relative) ? null : await readTextFile(source, relative);
       if (text === null) await fs.promises.copyFile(source, target);
       else await fs.promises.writeFile(target, rewriteText(map, text));
+      // #1762 F-2: a script that ran there runs here; only execute bits, where it can be read.
+      if (executable.has(`session/${relative}`)) {
+        const mode = (await fs.promises.stat(target)).mode & 0o777;
+        await fs.promises.chmod(target, mode | ((mode & 0o444) >> 2));
+      }
     }
-    // T-110 (D-3): each Agent Farm snapshot must read here as it did there, or its agents would refuse to start.
-    const brokenSnapshots = await unreadableSnapshots(targetFolder);
+    // T-110 (D-3): each Agent Farm snapshot the Session or a tab still resolves from must read here
+    // as it did there, or its agents would refuse to start; an old one nothing names can't block (#1762 F-7).
+    const brokenSnapshots = await unreadableSnapshots(targetFolder, referencedSnapshots(manifest));
     if (brokenSnapshots.length) {
       throw new PaneError('ERR_MOVE_SNAPSHOT_UNREADABLE', `The Session's Agent Farm snapshot ${brokenSnapshots[0].path} didn't arrive intact on ${thisMachineName()}: ${brokenSnapshots[0].problem}.`, `Nothing was changed on ${manifest.source.machine}. Reload the Session's profile there, then move it again.`);
     }

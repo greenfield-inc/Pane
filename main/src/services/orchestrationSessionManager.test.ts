@@ -701,6 +701,9 @@ describe('OrchestrationSessionManager', () => {
         expect(reloaded.agentProfileChanged).toBeUndefined();
         expect(port.relaunch).not.toHaveBeenCalled();
         expect(reloaded.activity.at(-1)?.message).toContain('tabs opened from now on');
+        // #1762 F-6: the lead tab is permanent, so the activity never says to close it.
+        expect(reloaded.activity.at(-1)?.message).not.toMatch(/close/i);
+        expect(reloaded.activity.at(-1)?.message).toContain('start a new Session');
         expect(fixture.store.read().sessions.find(session => session.id === created.session.id)?.agentFarmSnapshot).toBe(reloaded.agentFarmSnapshot);
       }));
 

@@ -18,3 +18,17 @@ export function settingsResume(
   if ((config.defaultSessionCommand ?? '').trim() === command) return config.defaultSessionResume ?? null;
   return null;
 }
+
+/**
+ * The Session defaults a launch command you changed in Create New becomes (#1762 F-1). The command
+ * and its template are saved together, the template being the one this Session started with, so
+ * a remembered command never keeps another command's template, which can name that command.
+ */
+export function rememberedLaunchDefaults(
+  config: Pick<AppConfig, 'defaultSessionCommand' | 'defaultSessionResume'> | null,
+  launchCommand: string,
+  resume: CustomCommandResume | null,
+): Pick<AppConfig, 'defaultSessionCommand' | 'defaultSessionResume'> | null {
+  if ((config?.defaultSessionCommand ?? '') === launchCommand) return null;
+  return { defaultSessionCommand: launchCommand, defaultSessionResume: resume };
+}

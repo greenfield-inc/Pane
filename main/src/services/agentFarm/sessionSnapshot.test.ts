@@ -22,7 +22,7 @@ function writeSnapshot(sessionFolder: string, digest: string, files: Record<stri
     const file = path.join(folder, ...relative.split('/'));
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, content);
-    checksums.set(path.join(...relative.split('/')), sha256(content));
+    checksums.set(relative, sha256(content));
   }
   fs.writeFileSync(path.join(folder, 'checksums.json'), JSON.stringify(Object.fromEntries(checksums), null, 2));
   return folder;
@@ -77,13 +77,30 @@ describe('snapshotProblem and unreadableSnapshots', () => {
     expect(await unreadableSnapshots(session)).toEqual([
       { path: '.agent-farm/snapshots/added', problem: 'extra.md was added' },
       { path: '.agent-farm/snapshots/bare', problem: expect.stringContaining('checksums.json can\'t be read') },
-      { path: '.agent-farm/snapshots/changed', problem: `${path.join('plugins', 'team', 'plugin.yaml')} changed` },
-      { path: '.agent-farm/snapshots/missing', problem: `${path.join('plugins', 'team', 'plugin.yaml')} is missing` },
+      { path: '.agent-farm/snapshots/changed', problem: 'plugins/team/plugin.yaml changed' },
+      { path: '.agent-farm/snapshots/missing', problem: 'plugins/team/plugin.yaml is missing' },
     ]);
   });
 
   it('finds nothing in a Session folder without snapshots', async () => {
     expect(await unreadableSnapshots(tempFolder())).toEqual([]);
+  });
+
+  it('ignores the metadata files a file browser leaves, as Agent Farm does (#1762 F-7)', async () => {
+    const session = tempFolder();
+    const folder = writeSnapshot(session, 'abc', { 'plugins/team/plugin.yaml': 'name: team\n' });
+    fs.writeFileSync(path.join(folder, '.DS_Store'), 'x');
+    fs.writeFileSync(path.join(folder, 'plugins', 'team', 'Thumbs.db'), 'x');
+    expect(await snapshotProblem(folder)).toBeUndefined();
+  });
+
+  it('checks only the snapshots it is asked for, so an old damaged one nothing names can\'t block (#1762 F-7)', async () => {
+    const session = tempFolder();
+    writeSnapshot(session, 'current', { 'plugins/team/plugin.yaml': 'name: team\n' });
+    const old = writeSnapshot(session, 'old', { 'plugins/team/plugin.yaml': 'name: team\n' });
+    fs.writeFileSync(path.join(old, 'plugins', 'team', 'plugin.yaml'), 'damaged\n');
+    expect(await unreadableSnapshots(session, new Set(['current']))).toEqual([]);
+    expect(await unreadableSnapshots(session, new Set(['current', 'old']))).toEqual([expect.objectContaining({ path: '.agent-farm/snapshots/old' })]);
   });
 });
 

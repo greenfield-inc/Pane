@@ -124,6 +124,8 @@ export function ProfileFilePane({ plugin, profile, file, notify, onShow, onOpenT
   else if (editing && path) {
     body = (
       <ProfileSourceEditor
+        // One editor per file (#1762 F-3): a reused one would undo into another file's text.
+        key={key}
         path={path}
         label={`Edit ${plugin.name}/${path}`}
         value={value}

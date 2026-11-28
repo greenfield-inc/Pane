@@ -37,7 +37,7 @@ import { openAfterSwitch, openCreatedSession } from '../../utils/openAfterSwitch
 import { sessionChoiceInput, sessionChoices, type SessionChoice } from '../../utils/sessionChoices';
 import { profileDisplayName } from '../../utils/profileAvatar';
 import { defaultLaunch } from '../CreateOrchestrationSessionDialog';
-import { settingsResume } from './sessionResume';
+import { rememberedLaunchDefaults, settingsResume } from './sessionResume';
 import { CreatePaneForm, type CreatePaneFooterState } from '../CreateSessionDialog';
 import type { NewDialogProps } from '../NewDialog';
 import { SessionLaunchFields } from '../SessionLaunchFields';
@@ -375,7 +375,9 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
       // As the old dialog did: an agent picked on its own, and launch settings you changed, become the defaults.
       const defaults: Partial<AppConfig> = {};
       if (!to.profileRef && input.agent && config?.defaultOrchestratorAgent !== input.agent) defaults.defaultOrchestratorAgent = input.agent;
-      if (launchEdited.current && (config?.defaultSessionCommand ?? '') !== settings.launchCommand) defaults.defaultSessionCommand = settings.launchCommand;
+      // The command and the template it started with are saved together (#1762 F-1).
+      const launch = launchEdited.current ? rememberedLaunchDefaults(config, settings.launchCommand, input.customResume ?? null) : null;
+      if (launch) Object.assign(defaults, launch);
       if (Object.keys(defaults).length > 0) void updateConfig(defaults).catch(() => undefined);
       if (sendImages) {
         const chat = window.electronAPI.chatTab;

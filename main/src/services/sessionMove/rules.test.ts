@@ -1,7 +1,7 @@
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
-import { agentFarmProfileOf, movedLine, heldBackChecks, profileChecks, sessionApprovals, tabSnapshotFolder } from './rules';
+import { agentFarmProfileOf, movedLine, heldBackChecks, profileChecks, sessionApprovals, tabAgentFarmLaunch, tabSnapshotFolder } from './rules';
 import { buildPathMap } from './pathMap';
 
 describe('agentFarmProfileOf', () => {
@@ -132,5 +132,24 @@ describe('tabSnapshotFolder', () => {
     // Review F-6: a folder with an apostrophe, quoted the POSIX way, reads back whole.
     const odd = path.join(folder, '.agent-farm', 'snapshots', "o'd");
     expect(tabSnapshotFolder(`agent-farm run greenfield/planner --snapshot '${odd.replace(/'/g, "'\\''")}'`, {}, folder, undefined)).toBe(odd);
+  });
+});
+
+describe('tabAgentFarmLaunch: a move preflight sees a profile chat as it does a terminal (#1762 F-8)', () => {
+  const folder = path.resolve('/pane/sessions/s1');
+  const snap = (digest: string) => path.join(folder, '.agent-farm', 'snapshots', digest);
+  it('reads a profile chat\'s structured launch and its own snapshot, which wins as --snapshot does', () => {
+    expect(tabAgentFarmLaunch({ launch: { kind: 'profile', profile: 'greenfield/planner', snapshot: snap('d1') }, agentFarmSnapshot: snap('d2') }, folder, '.agent-farm/snapshots/d3'))
+      .toEqual({ profile: 'greenfield/planner', folder: snap('d1') });
+    expect(tabAgentFarmLaunch({ launch: { kind: 'profile', profile: 'greenfield/planner' }, agentFarmSnapshot: snap('d2') }, folder, undefined)).toEqual({ profile: 'greenfield/planner', folder: snap('d2') });
+  });
+  it('gives a chat pinned outside the Session folder no snapshot, so the target checks its installed plugins', () => {
+    expect(tabAgentFarmLaunch({ launch: { kind: 'profile', profile: 'greenfield/planner', snapshot: path.resolve('/repo/.agent-farm/snapshots/d9') } }, folder, '.agent-farm/snapshots/d3'))
+      .toEqual({ profile: 'greenfield/planner', folder: undefined });
+  });
+  it('reads a terminal\'s command, and nothing for a plain agent', () => {
+    expect(tabAgentFarmLaunch({ launchCommand: 'agent-farm run greenfield/planner' }, folder, '.agent-farm/snapshots/d3')).toEqual({ profile: 'greenfield/planner', folder: snap('d3') });
+    expect(tabAgentFarmLaunch({ launch: { kind: 'agent' } }, folder, '.agent-farm/snapshots/d3')).toBeNull();
+    expect(tabAgentFarmLaunch({ launchCommand: 'claude' }, folder, undefined)).toBeNull();
   });
 });
