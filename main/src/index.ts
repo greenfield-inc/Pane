@@ -158,6 +158,7 @@ import { remotePaneClientController } from './daemon/client/remotePaneClient';
 import { startHeadlessPaneProcess } from './daemon/startHeadless';
 import { runRemoteSetupCli } from './daemon/setupRemoteHostCli';
 import { PowerSaveManager } from './services/powerSaveManager';
+import { DockBadgeManager } from './services/dockBadgeManager';
 import { warmShellPath } from './utils/shellPath';
 import { routeWebviewPopups } from './services/webviewPopups';
 import { popupTabFor, refuseSignIn } from './services/browser/browserHost';
@@ -351,6 +352,7 @@ function showPaneLinkError(detail: string): void {
   void (mainWindow && !mainWindow.isDestroyed() ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options));
 }
 let powerSaveManager: PowerSaveManager | null = null;
+let dockBadgeManager: DockBadgeManager | null = null;
 
 function sendMenuAction(action: AppMenuAction): void {
   if (!rendererReady || !mainWindow || mainWindow.isDestroyed()) {
@@ -1278,6 +1280,8 @@ async function initializeServices() {
   backgroundActivity?.on('change', (away: boolean) => usageManager.setPaused(away));
   usageManager.setPaused(backgroundActivity?.isAway() ?? false);
   powerSaveManager.sync();
+  // The Dock badge counts the same blocked agents the sidebar shows.
+  dockBadgeManager = new DockBadgeManager(configManager, sessionManager, terminalPanelManager, { logger });
   const navigationMemory = new UIStateManager(databaseService);
   startRestartToUpdate({
     getMainWindow: () => mainWindow,
@@ -1806,6 +1810,8 @@ if (launchRemoteSetup) {
   analyticsManager?.stopHeartbeat();
   powerSaveManager?.dispose();
   powerSaveManager = null;
+  dockBadgeManager?.dispose();
+  dockBadgeManager = null;
 
   // Safety net: force exit if graceful shutdown takes too long
   // Placed after the dialog so user interaction time isn't counted

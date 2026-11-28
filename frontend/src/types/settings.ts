@@ -96,6 +96,7 @@ export type SettingsSettingId =
   | 'notification-permission'
   | 'notification-sound'
   | 'desktop-notifications'
+  | 'dock-badge'
   | 'remote-pane'
   | 'remote-add-code'
   | 'remote-machines'

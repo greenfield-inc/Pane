@@ -145,6 +145,8 @@ export interface AppConfig {
     playSound: boolean;
     enabled: boolean;
   };
+  /** Show the number of agents waiting on you on the Dock or taskbar icon. Absent: on. */
+  dockBadge?: boolean;
   // Pane Notify settings; absent fields take DEFAULT_NOTIFY_SETTINGS
   notify?: Partial<NotifySettings>;
   /** Epoch ms `notify.enabled` last changed, on the machine where the person changed it; shared with it. Absent: 0. */
@@ -310,6 +312,7 @@ export interface UpdateConfigRequest {
     playSound: boolean;
     enabled: boolean;
   };
+  dockBadge?: boolean;
   // Pane Notify settings; absent fields take DEFAULT_NOTIFY_SETTINGS
   notify?: Partial<NotifySettings>;
   devMode?: boolean;
