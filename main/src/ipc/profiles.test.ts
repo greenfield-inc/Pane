@@ -1,11 +1,15 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'fs';
+import { execFile } from 'child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { EventEmitter } from 'events';
+import { promisify } from 'util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IpcMain, IpcMainInvokeEvent } from 'electron';
+import { agentFarmConfigRoot, bundledAgentFarm, bundledAgentFarmProcess } from '../services/agentFarm/bundledAgentFarm';
 import { readProfilesSwitchFrom } from '../services/agentFarm/profilesFeature';
 import { writeRecoveryNote } from '../services/agentFarm/agentFarmRecovery';
+import { readProfileSync } from '../services/agentFarm/profileSyncFile';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { PROFILE_SYNC_CHANNELS, PROFILE_SYNC_OFF_CODE } from '../../../shared/types/profileSync';
 import { profileSync, registerProfileHandlers } from './profiles';
@@ -134,5 +138,44 @@ describe('the Profiles channels', () => {
     configManager.emit('config-updated');
     expect(request).toHaveBeenCalledTimes(1);
     service.stop();
+  });
+
+  it('records and syncs a plugin installed outside Pane while it runs, without a save in the tab (T-63 build 11)', async () => {
+    const paneDir = mkdtempSync(path.join(tmpdir(), 'pane-profiles-ipc-'));
+    temporary.push(paneDir);
+    readProfilesSwitchFrom(() => ({ sessionProfilesEnabled: true }));
+    register(paneDir);
+    const sync = profileSync()!;
+    sync.start(null);
+    try {
+      // The first sync, on start, has run and found nothing to record.
+      await vi.waitFor(() => expect(sync.coordinator.status().lastSyncAt).toBeDefined(), { timeout: 5_000 });
+      // `agent-farm plugin install <path> --config-root <PANE_DIR>/agent-farm`, run in a terminal.
+      const source = path.join(mkdtempSync(path.join(tmpdir(), 'pane-profiles-ipc-src-')), 'outside');
+      temporary.push(path.dirname(source));
+      for (const [relative, content] of Object.entries({ 'plugin.yaml': 'name: outside\nversion: 0.1.0\ncli_major: 0\n', 'profiles/writer.yaml': 'agent: writer\n', 'agents/writer.md': '---\nharness: claude\nmodel: claude-opus-5-5\ndescription: Drafts posts\n---\n\n# Writer\n\nMarker: APPLE\n' })) {
+        mkdirSync(path.dirname(path.join(source, relative)), { recursive: true });
+        writeFileSync(path.join(source, relative), content);
+      }
+      const run = bundledAgentFarmProcess(bundledAgentFarm()!, ['plugin', 'install', source], agentFarmConfigRoot(paneDir));
+      await promisify(execFile)(run.executable, run.args, { env: run.env });
+      // Its record is what your other computers read: without one it never reaches them.
+      await vi.waitFor(async () => expect((await readProfileSync(agentFarmConfigRoot(paneDir))).plugins.outside).toMatchObject({ state: 'saved', machine: 'unknown' }), { timeout: 10_000, interval: 100 });
+    } finally {
+      sync.stop();
+    }
+  }, 20_000);
+
+  it('watches for changes outside Pane only while Profiles is on', () => {
+    const paneDir = mkdtempSync(path.join(tmpdir(), 'pane-profiles-ipc-'));
+    temporary.push(paneDir);
+    readProfilesSwitchFrom(() => ({ sessionProfilesEnabled: false }));
+    register(paneDir);
+    const sync = profileSync()!;
+    const watchOutside = vi.spyOn(sync.host, 'watchOutside');
+    sync.start(null);
+    sync.stop();
+    expect(watchOutside).not.toHaveBeenCalled();
+    expect(existsSync(path.join(paneDir, 'agent-farm'))).toBe(false);
   });
 });

@@ -118,11 +118,19 @@ export function registerProfileHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
     onStatus: status => getPaneEventSink().send('profiles:sync-status', status),
   });
   let unsubscribe: (() => void) | null = null;
+  // A plugin installed or edited outside Pane (`agent-farm plugin install` in a terminal) syncs while
+  // Pane runs, only while the switch is on (T-63 build 11).
+  let stopWatching: (() => void) | null = null;
+  const watchOutside = (on: boolean) => {
+    if (on && !stopWatching) stopWatching = host.watchOutside(() => coordinator.request());
+    if (!on) { stopWatching?.(); stopWatching = null; }
+  };
   let wasOn = profilesOn();
   // Turning the switch on starts syncing at once, without a restart.
   const onConfigUpdated = () => {
     const on = profilesOn();
     if (on && !wasOn) coordinator.request();
+    if (on !== wasOn) watchOutside(on);
     wasOn = on;
   };
   profileSyncService = {
@@ -146,12 +154,15 @@ export function registerProfileHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
           coordinator.request();
         }
       }) ?? null;
+      wasOn = profilesOn();
+      watchOutside(wasOn);
       coordinator.request();
     },
     stop() {
       services.configManager?.off('config-updated', onConfigUpdated);
       unsubscribe?.();
       unsubscribe = null;
+      watchOutside(false);
       coordinator.stop();
     },
     async bringCurrent(plugin, machineId) {

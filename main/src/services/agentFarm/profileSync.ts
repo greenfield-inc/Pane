@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import { createHash, randomUUID } from 'crypto';
+import { mkdirSync, statSync, watch, type FSWatcher } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
@@ -62,6 +63,12 @@ const SECTIONS = ['profiles', 'agents', 'skills', 'instructions', 'references'];
 const PANE_FILE = /^covers\/[a-z][a-z0-9_-]*\.(html|md)$/;
 /** Written by a bundled reinstall while it runs (bundledAgentFarm.ts); a failed one is cleared on rollback. */
 const INSTALLING_FILE = 'pane-installing.json';
+/** The folders of `<PANE_DIR>/agent-farm` a change outside Pane shows in: receipts, plugins and display overrides. */
+const WATCHED = new Set(['.plugins', 'plugins', 'profile-overrides']);
+/** How often a change waiting on Agent Farm's install lock looks again (review F-1, #1785). */
+const INSTALL_LOCK_RECHECK_MS = 500;
+/** An install lock older than this was left by a killed install, so it no longer holds a sync back. */
+const INSTALL_LOCK_ABANDONED_MS = 10 * 60_000;
 const receiptSchema = boundary.object({ name: boundary.string, layout: boundary.optional(boundary.number) });
 
 /** An error that means the path isn't there, as opposed to a read that failed. */
@@ -478,6 +485,53 @@ export class ProfileSyncHost {
       if (this.on()) await this.refreshUnlocked(true, new Set([plugin]));
       return result;
     });
+  }
+
+  /**
+   * Calls `onChange` when a plugin, its Agent Farm receipt or a display override changes here, so a
+   * change made outside Pane (`agent-farm plugin install` in a terminal, an agent editing a plugin's
+   * files) is recorded and synced while Pane runs, not only at its next start (T-63 build 11). Pane's
+   * own changes call it too; the coordinator's debounce makes a burst one sync. A change made while
+   * Agent Farm holds its install lock is held back until the lock goes. Returns a stop.
+   */
+  watchOutside(onChange: () => void): () => void {
+    let watcher: FSWatcher;
+    let waiting: NodeJS.Timeout | null = null;
+    const lock = path.join(this.configRoot, '.plugins', 'install.lock');
+    // While `agent-farm plugin install` or `uninstall` holds its lock, the plugin's files and receipt
+    // are mid-change: syncing then could send a mix of old and new files, so the change waits for the
+    // lock to go (review F-1, #1785). A lock left by a killed install is ignored once it is old.
+    const locked = () => {
+      const held = statSync(lock, { throwIfNoEntry: false });
+      return Boolean(held && Date.now() - held.mtimeMs < INSTALL_LOCK_ABANDONED_MS);
+    };
+    const changed = () => {
+      if (waiting) return;
+      if (!locked()) { onChange(); return; }
+      waiting = setTimeout(() => { waiting = null; changed(); }, INSTALL_LOCK_RECHECK_MS);
+      waiting.unref();
+    };
+    const stop = () => {
+      if (waiting) clearTimeout(waiting);
+      waiting = null;
+      watcher.close();
+    };
+    try {
+      mkdirSync(this.configRoot, { recursive: true });
+      watcher = watch(this.configRoot, { recursive: true, persistent: false }, (_event, file) => {
+        // drafts/ (staging, transfers) and sync.json are Pane's own working files, not a plugin.
+        const top = file ? String(file).split(/[\\/]/)[0] : undefined;
+        if (top === undefined || WATCHED.has(top)) changed();
+      });
+    } catch (error) {
+      console.warn(`[ProfileSync] Pane can't watch ${this.configRoot} (${reasonOf(error)}), so profiles changed outside Pane sync at its next start or save.`);
+      return () => undefined;
+    }
+    watcher.on('error', error => {
+      console.warn(`[ProfileSync] Pane stopped watching ${this.configRoot} (${reasonOf(error)}), so profiles changed outside Pane sync at its next start or save.`);
+      stop();
+    });
+    return stop;
   }
 
   /** What this computer last knew of its other computers (desktop only). */

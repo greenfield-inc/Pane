@@ -512,6 +512,11 @@ describe('ProfileEditor: the profile page', () => {
     expect(lists()).toBe(2);
     await counted.setDetails('team', 'lead', { title: 'Renamed', description: 'Runs the work' });
     expect(lists()).toBe(3);
+    // A plugin installed outside Pane (`agent-farm plugin install` in a terminal) shows at the next
+    // read, which the open tab makes every few seconds (T-63 build 11).
+    await installFixture(paneDir, 'outside');
+    expect((await counted.list()).plugins.map(plugin => plugin.name)).toContain('outside');
+    expect(lists()).toBe(4);
   }, 60_000);
 });
 

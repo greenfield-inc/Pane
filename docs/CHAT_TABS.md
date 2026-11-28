@@ -729,7 +729,8 @@ sent, installed or remembered. Turning the switch on starts syncing without a
 restart.
 
 Every change to a plugin here (a save, a new profile or file, Restore, a photo,
-or a plugin removed with `agent-farm plugin uninstall`) is recorded in
+a plugin installed or removed with `agent-farm plugin install` or `uninstall`,
+or a plugin's files edited outside Pane) is recorded in
 `<PANE_DIR>/agent-farm/sync.json`: the plugin's sync hash (its files, ignoring a
 pack's `checksums`, plus its photos), the save time and this computer's install
 id, or a deletion. The desktop (`services/agentFarm/profileSyncCoordinator.ts`)
@@ -737,7 +738,10 @@ reads every saved computer's records over the machine connection
 (`profile-sync:state`), brings this computer up to the newest save of each
 plugin, and sends it to every computer that is behind. The newest save wins;
 equal times go to the lower install id; nothing is merged. It runs on start,
-after a save here, when a computer comes back online or reports
+after a save here, when a plugin, receipt or display override in
+`<PANE_DIR>/agent-farm` changes outside Pane (a file watcher, while the switch
+is on; a change waits while Agent Farm holds `.plugins/install.lock`, unless the
+lock is over 10 minutes old), when a computer comes back online or reports
 `profiles:changed`, and for one plugin before a Session starts, switches to or
 reloads it (here, or on the machine a remote Session is created on). That
 Session sync reads and is sent only its own profile's receipt and record, and it
