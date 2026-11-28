@@ -14,6 +14,7 @@ import {
   installBundledAgentFarm,
   paneAgentFarmHarness,
   paneAgentFarmProcess,
+  reinstallBundledPlugin,
   writeAgentFarmTelemetry,
   type AgentFarmProcess,
   type BundledAgentFarm,
@@ -278,6 +279,56 @@ describe('bundledAgentFarmProcess with an unreadable config.json', () => {
     writeFileSync(path.join(paneDir, 'config.json'), JSON.stringify({ agentFarmTelemetry: true }));
     expect(env(true)).toBeUndefined();
     expect(env(false)).toBeUndefined();
+  });
+});
+
+describe('reinstallBundledPlugin (Restore, review F-1)', () => {
+  it('puts your edited plugin and its receipt back when the install fails part-way', async () => {
+    const paneDir = tempDir();
+    const configRoot = agentFarmConfigRoot(paneDir);
+    const bundle = fakeBundle();
+    await installBundledAgentFarm({ paneDir, bundle, run: recordingRunner([]), log: () => undefined });
+    mkdirSync(path.join(configRoot, '.plugins'), { recursive: true });
+    writeFileSync(path.join(configRoot, '.plugins', 'greenfield.json'), '{"version":"1.2.3","checksums":{}}\n');
+    writeFileSync(path.join(configRoot, 'plugins', 'greenfield', 'mine.md'), '# mine\n');
+    // A timeout after Agent Farm copied part of the plugin.
+    const partial = async (agentFarm: AgentFarmProcess) => {
+      mkdirSync(path.join(configRoot, 'plugins', 'greenfield'), { recursive: true });
+      writeFileSync(path.join(configRoot, 'plugins', 'greenfield', 'plugin.yaml'), 'name: gre');
+      throw Object.assign(new Error('Command failed'), { stderr: `error: timed out ${agentFarm.args.length}\n` });
+    };
+    await expect(reinstallBundledPlugin(paneDir, 'greenfield', bundle, partial)).rejects.toThrow('Command failed');
+    expect(readFileSync(path.join(configRoot, 'plugins', 'greenfield', 'mine.md'), 'utf8')).toBe('# mine\n');
+    expect(existsSync(path.join(configRoot, 'plugins', 'greenfield', 'plugin.yaml'))).toBe(false);
+    expect(readFileSync(path.join(configRoot, '.plugins', 'greenfield.json'), 'utf8')).toContain('1.2.3');
+    expect(existsSync(path.join(configRoot, 'pane-installing.json'))).toBe(false);
+    expect(existsSync(path.join(configRoot, 'pane-restore', 'greenfield'))).toBe(false);
+  });
+
+  it('replaces the edited copy and clears what it set aside when the install succeeds', async () => {
+    const paneDir = tempDir();
+    const configRoot = agentFarmConfigRoot(paneDir);
+    const bundle = fakeBundle();
+    await installBundledAgentFarm({ paneDir, bundle, run: recordingRunner([]), log: () => undefined });
+    writeFileSync(path.join(configRoot, 'plugins', 'greenfield', 'mine.md'), '# mine\n');
+    await reinstallBundledPlugin(paneDir, 'greenfield', bundle, recordingRunner([]));
+    expect(existsSync(path.join(configRoot, 'plugins', 'greenfield', 'mine.md'))).toBe(false);
+    expect(existsSync(path.join(configRoot, 'plugins', 'greenfield'))).toBe(true);
+    expect(existsSync(path.join(configRoot, 'pane-restore', 'greenfield'))).toBe(false);
+  });
+
+  it('makes the next start reinstall a plugin whose install never finished, even when its folder exists and the bundle is unchanged', async () => {
+    const paneDir = tempDir();
+    const configRoot = agentFarmConfigRoot(paneDir);
+    const bundle = fakeBundle();
+    await installBundledAgentFarm({ paneDir, bundle, run: recordingRunner([]), log: () => undefined });
+    // What a crash mid-Restore leaves: the marker, and the folder a partial install recreated.
+    writeFileSync(path.join(configRoot, 'pane-installing.json'), '["greenfield"]\n');
+    const calls: AgentFarmProcess[] = [];
+    const status = await installBundledAgentFarm({ paneDir, bundle, run: recordingRunner(calls), log: () => undefined });
+    expect(status.state).toBe('ready');
+    expect(calls[0]?.args.slice(1, 3)).toEqual(['plugin', 'install']);
+    expect(existsSync(path.join(configRoot, 'pane-installing.json'))).toBe(false);
   });
 });
 
