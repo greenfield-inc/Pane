@@ -341,32 +341,30 @@ describe('installBundledAgentFarm with the pinned package', () => {
     const configRoot = agentFarmConfigRoot(paneDir);
     await installBundledAgentFarm({ paneDir, log: () => undefined });
     const bundle = bundledAgentFarm()!;
-    writeFileSync(path.join(configRoot, 'plugins', 'dcouple', 'agents', 'astra-audits.md'), '---\nname: astra-audits\n---\nMine now.\n', { flag: 'a' });
+    writeFileSync(path.join(configRoot, 'plugins', 'greenfield', 'agents', 'advisor.md'), '\nMine now.\n', { flag: 'a' });
     const status = await installBundledAgentFarm({ paneDir, bundle: { ...bundle, version: '9.9.8' }, log: () => undefined });
     expect(status.error).toBeUndefined();
-    expect(status).toMatchObject({ state: 'ready', edited: ['dcouple'] });
+    expect(status).toMatchObject({ state: 'ready', edited: ['greenfield'] });
   }, 180_000);
 });
 
 describe('installBundledAgentFarm after a partial install (review F-1)', () => {
-  /** Runs Agent Farm for real, but fails the named plugin's install as a timeout or crash would. */
-  const failing = (plugin?: string) => async (agentFarm: AgentFarmProcess) => {
-    if (plugin && agentFarm.args.includes(plugin)) throw Object.assign(new Error('Command failed'), { stderr: 'error: timed out\n' });
+  /** Runs Agent Farm for real, but fails a matching command as a timeout or crash would. */
+  const failing = (arg?: string) => async (agentFarm: AgentFarmProcess) => {
+    if (arg && agentFarm.args.includes(arg)) throw Object.assign(new Error('Command failed'), { stderr: 'error: timed out\n' });
     return (await promisify(execFile)(agentFarm.executable, agentFarm.args, { env: agentFarm.env })).stdout;
   };
 
-  it('keeps an edit to a plugin that finished installing when a later plugin failed, and installs the failed one on retry', async () => {
+  it('installs a plugin whose install failed on the retry, without taking Pane\'s half-copy for an edit', async () => {
     const paneDir = tempDir();
     const configRoot = agentFarmConfigRoot(paneDir);
-    const failed = await installBundledAgentFarm({ paneDir, run: failing('dcouple'), log: () => undefined });
+    // greenfield is the only bundled plugin, so failing `plugin install` fails it.
+    const failed = await installBundledAgentFarm({ paneDir, run: failing('install'), log: () => undefined });
     expect(failed.state).toBe('failed');
-    const advisor = path.join(configRoot, 'plugins', 'greenfield', 'agents', 'advisor.md');
-    writeFileSync(advisor, '\nMine.\n', { flag: 'a' });
     const retried = await installBundledAgentFarm({ paneDir, run: failing(), log: () => undefined });
     expect(retried.error).toBeUndefined();
-    expect(retried).toMatchObject({ state: 'ready', edited: ['greenfield'] });
-    expect(readFileSync(advisor, 'utf8')).toContain('Mine.');
-    expect(readFileSync(path.join(configRoot, '.plugins', 'dcouple.json'), 'utf8')).toContain('"name": "dcouple"');
+    expect(retried).toMatchObject({ state: 'ready', edited: [] });
+    expect(readFileSync(path.join(configRoot, '.plugins', 'greenfield.json'), 'utf8')).toContain('"name": "greenfield"');
   }, 180_000);
 });
 
