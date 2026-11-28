@@ -18,7 +18,8 @@ import { ChatProblem } from './ChatProblem';
 import { ChatQuestionCard } from './ChatQuestionCard';
 import { ChatPermissionCard } from './ChatPermissionCard';
 import { ChatTurnView, WorkerNoteLine, type ChatTurnActions } from './ChatTurns';
-import { ChatBlocksContext, type ChatRendering } from './chatRendering';
+import { ChatBlocksContext, type ChatPhoto, type ChatRendering } from './chatRendering';
+import { replyAuthors } from './replyAuthors';
 import { ChatComposerMenu } from './ChatComposerMenu';
 import { ChatReferencesContext, type ChatReferences } from './chatReferences';
 import { ComposerHighlight } from './ComposerHighlight';
@@ -195,6 +196,8 @@ export interface ChatTabPanelProps {
    * of `workers`; Autopilot passes the workers of every Session it walks.
    */
   working?: readonly WorkingAgent[];
+  /** The agent's photo beside its replies, or with its name at the top of a narrow chat (T-63 round 5). */
+  photo?: ChatPhoto;
 }
 
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
@@ -222,7 +225,7 @@ function TurnsSkeleton() {
   </>;
 }
 
-export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, session, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, onReloadProfile, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
+export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, session, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, onReloadProfile, clearable = true, pr, working: workingOverride, photo }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
   const catalog = useChatAgents(client);
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
@@ -256,6 +259,15 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   };
   const working = view?.status === 'working' || view?.status === 'blocked';
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
+  // The tab's profile names the newest replies only when the window shows the live end of the conversation
+  // the view describes, and it is the profile this run of the agent started with: a Switch publishes its
+  // launch before the agent restarts, and the restart's view before its replayed transcript (QA #1789).
+  const [runProfile, setRunProfile] = useState({ generation: view?.generation, current: photo?.current });
+  // Taken at a new run, or once the profile is first known (Profiles' config can load after the chat).
+  if (runProfile.generation !== view?.generation || (!runProfile.current && photo?.current)) setRunProfile({ generation: view?.generation, current: photo?.current });
+  const liveEnd = !snapshot.hasNewer && view?.status !== 'starting' && snapshot.transcript?.generation === view?.generation;
+  const trusted = liveEnd ? runProfile.current : undefined;
+  const authors = useMemo(() => photo ? replyAuthors(turns, trusted) : undefined, [photo, trusted, turns]);
   const waiting = useMemo(() => waitingToolIds(view?.permissions, view?.questions), [view?.permissions, view?.questions]);
   const notes = useMemo(() => workerNotes(turns, workers ?? []), [turns, workers]);
   const agentsWorking = useMemo(() => workingOverride ?? workingAgents(workers), [workingOverride, workers]);
@@ -575,7 +587,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const menuOpen = !!composerMenu.menu;
 
   return <AssistantRuntimeProvider runtime={runtime}><CopyProgressContext.Provider value={copies}>
-    <ThreadPrimitive.Root ref={findRootRef} className="agent-chat chat-tab relative flex h-full min-h-0 flex-col" data-status={view?.status ?? 'starting'} data-link-pane={rendering.paneId} {...dragProps}>
+    <ThreadPrimitive.Root ref={findRootRef} className="agent-chat chat-tab relative flex h-full min-h-0 flex-col" data-photo={photo ? "" : undefined} data-status={view?.status ?? 'starting'} data-link-pane={rendering.paneId} {...dragProps}>
       <FindBar panelId={panelId} />
       {dragging && <div className="chat-drop" aria-hidden>
         <div className="chat-drop-card">
@@ -601,6 +613,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         <button type="button" className="chat-icon" aria-label="Dismiss" title="Dismiss" onClick={() => setAttachProblems([])}><X className="h-3.5 w-3.5" /></button>
       </div>}
       {turns.length > 0 && <div className="chat-header-bar">
+        {/* A narrow chat has no room beside its replies: the photo and name sit here instead (chatTab.css). */}
+        {photo?.current && <div className="chat-header-who" data-testid="chat-header-who">{photo.avatar(photo.current, 22)}{photo.heading}</div>}
         {clearable && <button type="button" className="needs-full-access chat-copy chat-copy-all" disabled={disabled} title="Start a fresh conversation in this tab (/clear)" onClick={requestClear}>
           <Eraser className="h-3.5 w-3.5" aria-hidden /><span>Clear</span>
         </button>}
@@ -616,7 +630,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           {!snapshot.transcript && !view?.problem && (view?.status === 'starting' || !view) && <p role="status" className="chat-notice">Starting {agentName}…</p>}
           <SkeletonSwap loading={!snapshot.transcript && !view?.problem && !!view && view.status !== 'starting' && !notRunning} skeleton={<TurnsSkeleton />}>
             <ChatBlocksContext.Provider value={rendering}><ChatReferencesContext.Provider value={references}>
-              {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} />)}
+              {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} photo={photo} author={authors?.get(turn.id)} />)}
             </ChatReferencesContext.Provider></ChatBlocksContext.Provider>
           </SkeletonSwap>
           {notes.map(note => <WorkerNoteLine key={note.worker.paneId} note={note} onOpen={actions.onOpenWorker} />)}

@@ -19,6 +19,7 @@ import { referencedFile } from './chatReferences';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import ChatTabPanel from './ChatTabPanel';
 import type { ChatRendering } from './chatRendering';
+import { useChatPhoto } from './useChatPhoto';
 
 /** A path the agent reported, relative to the tab's worktree when it is inside it. */
 function worktreeRelative(file: string, cwd: string | undefined): string {
@@ -71,6 +72,8 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
   }), [cwd, root, panel.id, panel.sessionId, deviceTabs]);
   // Links in the chat open beside it, in this Pane (Settings > Links).
   const rendering = useMemo<ChatRendering>(() => ({ paneId: panel.sessionId }), [panel.sessionId]);
+  // The agent's photo beside its replies, or at the top of a narrow chat (T-63 round 5; Profiles on only).
+  const photo = useChatPhoto(state);
   return <ChatTabPanel
     rendering={rendering}
     saveFile={saveFile}
@@ -84,5 +87,6 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
     dock={state?.orchestrationSessionId ? <SessionApprovalCards sessionId={state.orchestrationSessionId} chatPanelId={panel.id} /> : undefined}
     onReloadProfile={sessionId ? async () => { await useOrchestrationSessionStore.getState().reloadProfile(sessionId); } : undefined}
     pr={pr}
+    photo={photo}
   />;
 }

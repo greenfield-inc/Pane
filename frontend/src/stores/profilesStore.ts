@@ -27,6 +27,9 @@ interface ProfilesState {
   photos: ProfilePhotos;
   photosLoaded: boolean;
   place: ProfilesPlace;
+  /** New profile's dialog is open: from the list page's button or the sidebar's New profile row (round 5). */
+  creating: boolean;
+  setCreating: (creating: boolean) => void;
   /** Saved file contents read so far, by `plugin/path`. */
   saved: Record<string, string>;
   /** Unsaved edits, by `plugin/path`; kept while you look at other files or leave the tab. */
@@ -182,6 +185,8 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
     photos: EMPTY_PHOTOS,
     photosLoaded: false,
     place: { level: 'list' },
+    creating: false,
+    setCreating: creating => set({ creating }),
     saved: {},
     drafts: {},
     onDisk: {},

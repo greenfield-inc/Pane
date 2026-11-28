@@ -60,7 +60,7 @@ const schema: BoundarySchema<ChatPanelState> = boundary.object({
   })),
   dividers: boundary.optional(boundary.array(boundary.object({
     sessionId: boundary.optional(boundary.string), after: boundary.optional(boundary.string), leading: boundary.optional(boundary.literal(true)),
-    text: boundary.string, at: boundary.string,
+    text: boundary.string, at: boundary.string, profile: boundary.optional(boundary.string), previous: boundary.optional(boundary.string),
   }))),
   loadFallback: boundary.optional(boundary.object({ file: boundary.string })),
 });

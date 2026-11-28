@@ -1,4 +1,5 @@
 import { CONFIGURED_AGENT_IDS, agentConfig, agentLabel, configuredAgent, type ConfiguredAgentId } from './agents';
+import type { ChatDividerProfiles } from './types/chatTab';
 
 /**
  * Pane's own Agent Farm plugin (T-63), as main writes it and the renderer shows it: one plain
@@ -22,6 +23,22 @@ export function plainProfileAgent(ref: string): ConfiguredAgentId | undefined {
   if (plugin !== PANE_PROFILE_PLUGIN || !rest) return undefined;
   const agent = rest.split(':')[0];
   return plainProfileAgents().find(id => id === agent);
+}
+
+/**
+ * The profile a chat tab runs (T-63 round 5): its profile launch's ref, else the agent's plain
+ * profile (`pane/<agent>`), else undefined for an agent Agent Farm doesn't run.
+ */
+export function launchProfileRef(agent: string, launch: { kind: 'agent' } | { kind: 'profile'; profile: string }): string | undefined {
+  return launch.kind === 'profile' ? launch.profile : plainProfileRef(agent);
+}
+
+/** A divider's profiles, leaving out what isn't known (T-63 round 5). */
+export function dividerProfiles(profile: string | undefined, previous: string | undefined): ChatDividerProfiles {
+  const known: ChatDividerProfiles = {};
+  if (profile) known.profile = profile;
+  if (previous) known.previous = previous;
+  return known;
 }
 
 /**

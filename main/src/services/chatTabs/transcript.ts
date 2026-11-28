@@ -148,7 +148,7 @@ export class ChatTranscript {
   }
 
   /** Draws a profile divider at the end of the conversation now (T-63). */
-  divider(divider: Pick<ChatDivider, 'text' | 'at'>): ChatTabEvent | undefined {
+  divider(divider: Pick<ChatDivider, 'text' | 'at' | 'profile' | 'previous'>): ChatTabEvent | undefined {
     this.chunk = undefined;
     this.echo = undefined;
     this.anchor = undefined;
@@ -345,8 +345,10 @@ export class ChatTranscript {
     for (const divider of dividers) this.commitDivider(divider);
   }
 
-  private commitDivider(divider: Pick<ChatDivider, 'text' | 'at'>): ChatTabEvent | undefined {
+  private commitDivider(divider: Pick<ChatDivider, 'text' | 'at' | 'profile' | 'previous'>): ChatTabEvent | undefined {
     const content: ChatDividerContent = { type: 'pane_divider', text: divider.text, at: divider.at };
+    if (divider.profile) content.profile = divider.profile;
+    if (divider.previous) content.previous = divider.previous;
     return this.commit({ type: 'replace', message: { id: `divider:${divider.at}:${++this.sequence}`, role: 'assistant', parts: [{ type: 'content', content: { ...content } }] } });
   }
 

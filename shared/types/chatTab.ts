@@ -130,10 +130,19 @@ export interface ChatDivider {
   leading?: true;
   text: string;
   at: string;
+  /** The profile the tab runs from here on, and the one it ran before (`pane/<agent>` for the agent on its own); see `ChatDividerProfiles`. */
+  profile?: string;
+  previous?: string;
 }
 
+/**
+ * Who wrote the replies on each side of a divider (T-63 round 5): `profile` after it, `previous`
+ * before it, as profile refs. A divider saved without them leaves those replies without a photo.
+ */
+export type ChatDividerProfiles = Pick<ChatDivider, 'profile' | 'previous'>;
+
 /** The content of the transcript row a divider is drawn from. */
-export interface ChatDividerContent { type: 'pane_divider'; text: string; at: string }
+export interface ChatDividerContent extends ChatDividerProfiles { type: 'pane_divider'; text: string; at: string }
 
 /** A turn's time row, saved after the id of the last message the turn created. */
 export interface ChatTurnTime { after: string; stopReason: string; startedAt: string; endedAt: string }

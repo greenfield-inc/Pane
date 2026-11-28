@@ -76,10 +76,10 @@ export interface ChatTurn {
   endedAt?: string;
   stopReason?: string;
   /** A line across the chat where the Session's profile changed (T-63); such a turn has nothing else. */
-  divider?: { text: string; at: string };
+  divider?: { text: string; at: string; profile?: string; previous?: string };
 }
 
-const dividerContent = boundary.object({ type: boundary.literal('pane_divider'), text: boundary.string, at: boundary.string });
+const dividerContent = boundary.object({ type: boundary.literal('pane_divider'), text: boundary.string, at: boundary.string, profile: boundary.optional(boundary.string), previous: boundary.optional(boundary.string) });
 const marker = boundary.object({ type: boundary.literal('pane_turn'), stopReason: boundary.string, startedAt: boundary.string, endedAt: boundary.string });
 const plan = boundary.object({ type: boundary.literal('plan'), entries: boundary.array(boundary.object({ content: boundary.string, status: boundary.string, priority: boundary.optional(boundary.string) })) });
 const diffContent = boundary.object({ type: boundary.literal('diff'), path: boundary.string, oldText: boundary.optional(boundary.nullable(boundary.string)), newText: boundary.string });
@@ -243,6 +243,8 @@ export function chatTurns(messages: readonly AgentChatMessage[], options: { runn
         // A turn of its own, already over: whatever follows opens the next turn.
         const line = open(`divider:${id}`, message, index);
         line.divider = { text: divider.text, at: divider.at };
+        if (divider.profile) line.divider.profile = divider.profile;
+        if (divider.previous) line.divider.previous = divider.previous;
         line.endedAt = divider.at;
         continue;
       }

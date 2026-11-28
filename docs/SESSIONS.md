@@ -127,7 +127,9 @@ With Profiles on, a Session's right-click menu (or Shift+F10 on its row, then â†
 profile â€º**, which lists Claude, Codex and this computer's profiles with a filter,
 and **Reload profile**, which takes the profile's saved files again. Both wait for
 the agent to finish its current reply, then restart its chat tab on the new launch
-(`ChatTabManager.relaunch`) and draw a divider in the chat where it happened.
+(`ChatTabManager.relaunch`) and draw a divider in the chat where it happened,
+with the new profile's photo; replies on either side keep the photo of the profile
+that wrote them (see [CHAT_TABS.md](CHAT_TABS.md)).
 
 - Between Claude profiles the switch happens at once and the conversation goes on
   (ACP `session/load` re-reads the Session folder's instructions, the profile's

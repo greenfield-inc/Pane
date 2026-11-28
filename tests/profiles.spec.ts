@@ -195,6 +195,13 @@ async function openProfilesTab(page: Page, options: Omit<ProfilesOptions, 'on'> 
   await expect(page.getByTestId('profiles-view')).toBeVisible();
 }
 
+/** Back to the list page: Esc, from anywhere but a text field (round 5 dropped the ‹ Profiles pill). */
+async function backToList(page: Page): Promise<void> {
+  await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined));
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('profiles-list')).toBeVisible();
+}
+
 /** The source editor's input, once it has loaded. */
 async function editorInput(page: Page) {
   const input = page.getByTestId('profiles-editor').locator('textarea.inputarea');
@@ -295,8 +302,7 @@ test('a profile opens on its cover page: its own HTML in a sandbox, or one Pane 
   });
   expect(body.ran).toBeNull();
   expect(body.text).toContain('Runs one workstream');
-  await page.getByTestId('profiles-back').click();
-  await page.getByTestId('profile-row-greenfield-business').click();
+  await page.getByTestId('profiles-sidebar-greenfield/business').click();
   const cover = page.getByTestId('profiles-generated-cover');
   await expect(cover.getByRole('heading', { name: 'Business', exact: true })).toBeVisible();
   await expect(cover).toContainText('Answers BloomText support tickets and escalates refunds to you.');
@@ -494,7 +500,7 @@ test('Edit details saves the title and description through Agent Farm, leaving g
   // Still Pane's own copy: no ", edited", and nothing to restore.
   await expect(page.getByTestId('profiles-subtitle')).toHaveText('greenfield/seo · Drafts posts in my voice, then cuts a third. · ships with Pane');
   await expect(page.getByTestId('profiles-restore')).toHaveCount(0);
-  await page.getByTestId('profiles-back').click();
+  await backToList(page);
   await expect(page.getByTestId('profile-row-greenfield-seo')).toContainText('Blog writer');
   await expect(page.getByTestId('profiles-edited-greenfield')).toHaveCount(0);
   // The agent's identity file keeps the plugin's own description.
@@ -526,8 +532,8 @@ test('New subagent, skill and reference add a file to the tree and open it; New 
     await expect(page.getByTestId('profiles-path')).toHaveText(path);
     await expect(page.getByTestId(`profiles-file-${path}`).first()).toBeVisible();
   }
-  await page.getByTestId('profiles-back').click();
-  await page.getByTestId('profiles-new').click();
+  // New profile, from the sidebar's row.
+  await page.getByTestId('profiles-sidebar-new').click();
   await page.getByTestId('profiles-new-dialog').getByLabel('Name').fill('researcher');
   await page.getByTestId('profiles-new-create').click();
   await expect(page.getByTestId('profiles-title')).toHaveText('Researcher');
@@ -550,8 +556,7 @@ test('a sample photo shows in the profile and its Session row; removing it bring
   await expect(row.getByTestId('profile-avatar').first()).toHaveAttribute('data-avatar', 'initials');
   await page.keyboard.press('Escape');
   // The Orchestrator has greenfield's own photo: yours replaces it, and removing yours brings it back.
-  await page.getByTestId('profiles-back').click();
-  await page.getByTestId('profile-row-greenfield-orchestrator').click();
+  await page.getByTestId('profiles-sidebar-greenfield/orchestrator').click();
   await expect(avatar.locator('img')).toHaveAttribute('src', ORCHESTRATOR_PHOTO);
   await page.getByTestId('profile-photo').click();
   await expect(page.getByRole('menuitem', { name: 'Remove my photo' })).toBeDisabled();
@@ -698,10 +703,53 @@ for (const theme of ['light', 'dark']) {
   });
 }
 
+test('while Profiles is open the sidebar lists every profile, pinned first; one click shows a cover, the tree sits on the right (round 5)', async ({ page }) => {
+  await openProfilesTab(page, { pins: ['greenfield/business'] });
+  const section = page.getByTestId('profiles-sidebar');
+  await expect(page.getByTestId('profiles-nav')).toHaveAttribute('aria-pressed', 'true');
+  const rows = section.locator('[data-sidebar-key^="profile:"]');
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(0)).toHaveAttribute('data-testid', 'profiles-sidebar-greenfield/business');
+  await expect(rows.nth(0)).toContainText('Businesspinned');
+  await expect(rows.nth(1)).toHaveAttribute('data-testid', 'profiles-sidebar-greenfield/orchestrator');
+  await expect(rows.nth(1)).not.toContainText('pinned');
+  await expect(section.getByTestId('profiles-sidebar-new')).toBeVisible();
+  // Sessions move down under the section.
+  const sectionBox = await section.boundingBox();
+  const sessionsBox = await page.getByTestId('sessions-section-header').boundingBox();
+  expect(sessionsBox!.y).toBeGreaterThan(sectionBox!.y + sectionBox!.height - 1);
+  // One click from the list, and from one profile to another: no ‹ Profiles step.
+  await rows.nth(1).click();
+  await expect(page.getByTestId('profiles-title')).toHaveText('Orchestrator');
+  await expect(rows.nth(1)).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByTestId('profiles-back')).toHaveCount(0);
+  // The tree is a right sidebar beside the file.
+  const tree = await page.getByTestId('profiles-tree').boundingBox();
+  const file = await page.getByTestId('profiles-editor-pane').boundingBox();
+  expect(tree!.x).toBeGreaterThan(file!.x);
+  expect(tree!.width).toBeCloseTo(260, 0);
+  await page.getByTestId('profiles-tree-orchestrator/instructions').click();
+  await page.getByTestId('profiles-file-instructions/standing-rules.md').click();
+  await expect(page.getByTestId('profiles-path')).toHaveText('instructions/standing-rules.md');
+  await rows.nth(0).click();
+  await expect(page.getByTestId('profiles-title')).toHaveText('Business');
+  await expect(rows.nth(1)).not.toHaveAttribute('aria-current', 'page');
+  // ↓ moves through the section in the sidebar's keyboard order.
+  await rows.nth(0).focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(rows.nth(1)).toBeFocused();
+  // Esc still goes back to the list; the section stays while Profiles is open, and goes when you leave.
+  await backToList(page);
+  await expect(section).toBeVisible();
+  await page.getByTestId('profiles-nav').click();
+  await expect(page.getByTestId('profiles-sidebar')).toHaveCount(0);
+});
+
 test('with Profiles off, there is no Profiles row or page, and nothing reads profiles', async ({ page }) => {
   await installProfiles(page, { on: false });
   await expect(page.getByTestId('sessions-section-header')).toBeVisible();
   await expect(page.getByTestId('profiles-nav')).toHaveCount(0);
+  await expect(page.getByTestId('profiles-sidebar')).toHaveCount(0);
   await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
   await expect(page.getByTestId('compact-profiles')).toHaveCount(0);
   // SAFETY: installElectronApiMock adds this control before the app loads.
@@ -748,8 +796,7 @@ for (const theme of ['light', 'dark']) {
     await page.getByTestId('profiles-edit').click();
     await shot(page, `page-edit-${theme}`);
     await page.getByTestId('profiles-cancel').click();
-    await page.getByTestId('profiles-back').click();
-    await page.getByTestId('profile-row-greenfield-business').click();
+    await page.getByTestId('profiles-sidebar-greenfield/business').click();
     await expect(page.getByTestId('profiles-generated-cover')).toBeVisible();
     await shot(page, `page-cover-generated-${theme}`);
     await page.getByTestId('profiles-edit-details').click();
@@ -968,8 +1015,7 @@ test('Markdown, a cover file and a generated cover share one centred 56rem colum
   expect(markdown.offCentre).toBeLessThan(2);
 
   // The cover Pane makes for a profile without a cover file.
-  await page.getByTestId('profiles-back').click();
-  await page.getByTestId('profile-row-greenfield-business').click();
+  await page.getByTestId('profiles-sidebar-greenfield/business').click();
   const generated = await column(page.getByTestId('profiles-cover-column'), filePane);
   expect(generated.width).toBeCloseTo(56 * 16, 0);
   expect(generated.offCentre).toBeLessThan(2);
@@ -1070,7 +1116,7 @@ for (const theme of ['light', 'dark']) {
     await tree.getByTestId('profiles-file-instructions/standing-rules.md').click();
     await expect(page.getByTestId('profiles-markdown-preview').getByRole('heading', { name: 'Standing rules' })).toBeVisible();
     await shot(page, `r5-markdown-${theme}`);
-    await page.getByTestId('profiles-back').click();
+    await backToList(page);
     await page.getByTestId('profile-row-greenfield-business').click();
     await expect(page.getByTestId('profiles-generated-cover')).toBeVisible();
     await shot(page, `r5-generated-cover-${theme}`);

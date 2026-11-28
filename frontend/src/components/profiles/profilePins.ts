@@ -39,6 +39,18 @@ export function isPinned(pins: readonly string[], ref: string): boolean {
   return pins.includes(qualified(ref));
 }
 
+/**
+ * Every plugin's profiles as the list and the sidebar show them (round 5): the pinned ones in pin
+ * order, then the rest in Agent Farm's order.
+ */
+export function splitPinned<Plugin extends { profiles: readonly { ref: string }[] }>(plugins: readonly Plugin[], pins: readonly string[]) {
+  const all = plugins.flatMap(plugin => plugin.profiles.map((profile: Plugin['profiles'][number]) => ({ plugin, profile })));
+  return {
+    pinned: pinnedFirst(all.filter(item => isPinned(pins, item.profile.ref)), pins, item => item.profile.ref),
+    rest: all.filter(item => !isPinned(pins, item.profile.ref)),
+  };
+}
+
 /** Pins or unpins a profile for this user. */
 export function togglePinnedProfile(ref: string): void {
   const store = useConfigStore.getState();

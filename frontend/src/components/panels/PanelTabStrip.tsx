@@ -29,6 +29,7 @@ import { isChatTabsEnabled, useConfigStore } from '../../stores/configStore';
 import { SwitchToChatDialog } from './SwitchToChat';
 import { switchToChatMenuItems } from './switchToChatMenu';
 import { useChatAgents } from '../../stores/chatAgentsStore';
+import { ChatTabIcon } from '../chatTab/chatPhoto';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -483,7 +484,9 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                 {(panel.type === 'terminal' || panel.type === 'chat') && (
                   <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} paused={isPaused} />
                 )}
-                {presentation?.icon ?? getPanelIcon(panel.type, panel, compact ? 'w-3.5 h-3.5 flex-shrink-0' : 'w-4 h-4 flex-shrink-0')}
+                {presentation?.icon ?? (panel.type === 'chat'
+                  ? <ChatTabIcon panel={panel} size={compact ? 14 : 16} fallback={getPanelIcon(panel.type, panel, compact ? 'w-3.5 h-3.5 flex-shrink-0' : 'w-4 h-4 flex-shrink-0')} />
+                  : getPanelIcon(panel.type, panel, compact ? 'w-3.5 h-3.5 flex-shrink-0' : 'w-4 h-4 flex-shrink-0'))}
                 {/* Bold marks the primary group's strip: the group the top
                     bar's tool tabs and the un-split gesture belong to.
                     The title is the only shrinkable element in the tab, so
