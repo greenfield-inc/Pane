@@ -10,6 +10,8 @@ import { syncPaneHomeSkill } from './paneHomeSkill';
 import { keepSessionTidySection, todosSection } from './sessionTidyRules';
 import { TODOS_TEXT_END, TODOS_TEXT_START, withTodosText } from '../../../shared/todosText';
 import { todosOn } from './todos/todosFeature';
+import { withProfilesText } from '../../../shared/profilesText';
+import { profilesOn } from './agentFarm/profilesFeature';
 import { APPROVALS_RULES } from './approvalsRules';
 import { paneAndTabRules } from '../../../packages/runpane/src/paneIntro';
 
@@ -343,6 +345,7 @@ export class SkillCacheManager {
   private installation: Promise<void> | null = null;
   /** The To-dos switch the bundle was last installed for (T-39): a flip installs it again. */
   private installedWithTodos: boolean | null = null;
+  private installedWithProfiles: boolean | null = null;
 
   constructor() {
     this.skillsRoot = path.join(getAppDirectory(), 'skills');
@@ -403,9 +406,11 @@ export class SkillCacheManager {
   /** Installs the bundle once per run; concurrent callers share the same work. */
   private installOnce(): Promise<void> {
     const todos = todosOn();
-    if (this.installedWithTodos !== todos) this.installation = null;
+    const profiles = profilesOn();
+    if (this.installedWithTodos !== todos || this.installedWithProfiles !== profiles) this.installation = null;
     this.installedWithTodos = todos;
-    this.installation ??= this.install(todos).catch(error => {
+    this.installedWithProfiles = profiles;
+    this.installation ??= this.install(todos, profiles).catch(error => {
       this.installation = null;
       throw error;
     });
@@ -419,11 +424,12 @@ export class SkillCacheManager {
    * Skipped when the bundle is unchanged since the last install and its folders
    * are still there: rewriting every file three times held up each launch.
    */
-  private async install(todos: boolean): Promise<void> {
+  private async install(todos: boolean, profiles: boolean): Promise<void> {
     const manifestPath = path.join(this.paneChatRoot, 'installed.json');
     const previous = await readInstalledManifest(manifestPath);
-    // T-39: the copies drop their To-dos parts while To-dos is off, so the switch is part of what was installed.
-    const bundleHash = `${await hashDirectory(PANE_CHAT_BUNDLE_ROOT)}${todos ? '' : ':todos-off'}`;
+    // T-39: the copies drop their To-dos parts while To-dos is off, and (T-63) keep only the text
+    // for the Profiles switch's side, so both switches are part of what was installed.
+    const bundleHash = `${await hashDirectory(PANE_CHAT_BUNDLE_ROOT)}${todos ? '' : ':todos-off'}${profiles ? ':profiles-on' : ''}`;
     const subagents = await readSubagentDefinitions(path.join(PANE_CHAT_BUNDLE_ROOT, 'agents'));
     this.codexSubagentArgs = this.codexSubagentArgsFor(subagents);
     if (previous.bundleHash === bundleHash && await this.isInstalled(previous)) return;
@@ -449,7 +455,7 @@ export class SkillCacheManager {
     }
     for (const skill of bundledSkills) {
       for (const root of [this.paneChatSkillsRoot, this.claudeProjectSkillsRoot, this.codexProjectSkillsRoot]) {
-        await copyBundledPath(path.join(PANE_CHAT_BUNDLE_ROOT, 'skills', skill), path.join(root, skill), todos);
+        await copyBundledPath(path.join(PANE_CHAT_BUNDLE_ROOT, 'skills', skill), path.join(root, skill), todos, profiles);
       }
     }
     const agents = await this.installSubagents(subagents, previous.agents);
@@ -1449,17 +1455,18 @@ export async function hashDirectory(root: string): Promise<string> {
 }
 
 // Plain reads and writes, which also work inside Electron's asar archive.
-// A Markdown file loses its To-dos parts while To-dos is off (T-39); everything else is copied byte for byte.
-async function copyBundledPath(source: string, target: string, todos: boolean): Promise<void> {
+// A Markdown file loses its To-dos parts while To-dos is off (T-39) and keeps only the text for the
+// Profiles switch's side (T-63); everything else is copied byte for byte.
+async function copyBundledPath(source: string, target: string, todos: boolean, profiles: boolean): Promise<void> {
   const stat = await fs.stat(source);
   if (!stat.isDirectory()) {
     await fs.mkdir(path.dirname(target), { recursive: true });
     const content = await fs.readFile(source);
-    await fs.writeFile(target, source.endsWith('.md') ? withTodosText(content.toString('utf8'), todos) : content);
+    await fs.writeFile(target, source.endsWith('.md') ? withProfilesText(withTodosText(content.toString('utf8'), todos), profiles) : content);
     return;
   }
   for (const entry of await fs.readdir(source)) {
-    await copyBundledPath(path.join(source, entry), path.join(target, entry), todos);
+    await copyBundledPath(path.join(source, entry), path.join(target, entry), todos, profiles);
   }
 }
 

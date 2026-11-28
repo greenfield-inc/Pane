@@ -82,6 +82,7 @@ runpane panels create --pane <feature pane id> --title <role> \
 ```
 
 - **Built-in agents:** leave out `--tool-command`; `--agent` picks Pane's template.
+<!-- pane:profiles -->
 - **Wrappers:** `--tool-command` runs any launcher unchanged. Pass `--agent`
   with the agent the wrapper runs, so Pane treats the tab as that agent from
   the start: readiness, delivery checks, BLOCKED and EXIT events, resume. Put
@@ -100,6 +101,18 @@ runpane panels create --pane <feature pane id> --title <role> \
   `:claude` or `:codex` for the other). Without a links list, a profile runs
   as `agent-farm run <profile>`, for example
   `agent-farm run greenfield/orchestrator`.
+<!-- /pane:profiles -->
+<!-- pane:no-profiles -->
+- **Wrappers:** `--tool-command` runs any launcher unchanged, for example
+  `"agent-farm run <profile>:<variant> --arg parent=<absolute status file> --arg source=<absolute source>"`.
+  Pass `--agent` with the agent the wrapper runs, so Pane treats the tab as
+  that agent from the start: readiness, delivery checks, BLOCKED and EXIT
+  events, resume. Put every choice on the command line. A wrapper that asks
+  before it starts the agent (Agent Farm's variant picker when the command
+  names no variant, its workspace-trust question) holds the tab. Pane reports
+  that as BLOCKED, and reports BUSY and READY, even before it has identified
+  the agent behind the wrapper.
+<!-- /pane:no-profiles -->
 - **The brief:** `--as-file-pointer` copies the file into the worker's own
   worktree, at `.pane/prompts/<timestamp>.md` (Pane adds `/.pane/prompts/` to
   the repository's `.git/info/exclude`, so it is never committed), and types
@@ -141,10 +154,11 @@ runpane panels create --pane <feature pane id> --title <role> \
 Workers stay terminal tabs by default. Where the host has chat tabs on, a worker
 can run as a chat tab instead (any agent the host's agent catalog lists, over ACP, no terminal):
 `runpane panels create --pane <id> --chat --agent <id>`, or
-`--agent-farm <name> --arg key=value …` for an Agent Farm profile or linked
+<!-- pane:profiles -->`--agent-farm <name> --arg key=value …` for an Agent Farm profile or linked
 agent (add `--parent <your token>`, the token your Launch links print, for a
 linked agent), with `--initial-input` (no `--as-file-pointer`) as its first
-prompt. `submit`,
+prompt.<!-- /pane:profiles --><!-- pane:no-profiles -->`--agent-farm <profile>:<variant> --arg key=value …` for an Agent Farm profile,
+with `--initial-input` (no `--as-file-pointer`) as its first prompt.<!-- /pane:no-profiles --> `submit`,
 `wait`, `screen`, `output`, `last-message`, `report` and `resume` work the same;
 `panels input` and `submit-composer` fail with `CHAT_TAB_NO_TERMINAL`. A chat
 tab's approvals and questions reach the person in Approvals and on the phone, so a
