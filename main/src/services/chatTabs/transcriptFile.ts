@@ -42,6 +42,11 @@ function dividerLine(content: JsonValue): string {
  * must be a real directory, and the file lands through a fresh temporary file renamed over the path.
  */
 export function writeTranscriptFile(folder: string, name: string, content: string): string {
+  // The Session folder itself must be a real folder too, not a link an agent swapped in (review F-7).
+  const parent = fs.lstatSync(folder, { throwIfNoEntry: false });
+  if (!parent?.isDirectory()) {
+    throw new PaneError('CHAT_TRANSCRIPT_NOT_SAVED', `${folder} is ${parent ? 'not a folder (it may be a link)' : 'missing'}, so Pane did not save the conversation there.`, 'Check the Session\'s folder, then try again.');
+  }
   const directory = path.join(folder, TRANSCRIPTS_FOLDER);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   if (!fs.lstatSync(directory).isDirectory()) {

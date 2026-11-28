@@ -132,11 +132,21 @@ the agent to finish its current reply, then restart its chat tab on the new laun
   asks first. A new conversation then starts in the Session's tab for that agent
   and is given the old one, saved as `transcripts/<conversation>.md` in the
   Session folder. Agents say which kind they are with the contract's
-  `chat.profileSwitchKeepsConversation`. A switch to the other agent is refused
-  while the agent is still replying, since the transcript must include the reply.
+  `chat.profileSwitchKeepsConversation`. A switch that starts a new conversation is
+  refused while the agent is still replying, since the transcript must include the
+  reply, and when the whole conversation can't be saved (a tab not loaded since Pane
+  started: open it first). An empty conversation hands over nothing, and the
+  divider says so; the new tab never reads its own earlier conversation instead.
+- The menu sends what the person saw: the Session's agent and profile, and whether
+  the switch keeps the conversation. The host refuses a switch when either changed
+  since (`SESSION_PROFILE_CHANGED`), so a stale menu asks again. Undo sends the
+  agent the Session ran before, so a profile variant comes back too. Both commands
+  answer only Pane on the Session's own computer (`SESSION_PROFILE_LOCAL_ONLY`).
 - If the agent can't load the conversation after a Reload or Switch, Pane starts
-  a new one given the saved transcript, and the divider says so. It never drops
-  the history silently.
+  a new one given the transcript, and the divider says so. It never drops the
+  history silently. The transcript for that case is kept in Pane's own chat-tabs
+  folder and goes into the Session folder only when it is handed over; otherwise
+  it is deleted once the agent has started.
 - When a profile's plugin changes after a Session took it, the row shows an amber
   dot and Reload profile is marked; listing Sessions re-checks the plugins at most
   every 10 seconds. A Session whose agent runs in a terminal, or one from before
@@ -144,6 +154,10 @@ the agent to finish its current reply, then restart its chat tab on the new laun
 
 With Profiles off, the menu has neither item, `orchestration-sessions:switch-profile`
 and `:reload-profile` refuse (`SESSION_PROFILE_UNSUPPORTED`), Pane reads no plugin for the changed mark, and rows show no amber dot.
+A Session tab whose profile Pane chose (its creation or a Switch, saved with
+`sessionProfile`) starts its agent on its own, as main does; a launch command's own
+Agent Farm profile still runs. A Reload or Switch still waiting for a reply is
+dropped, and a waiting confirmation or Undo toast closes.
 
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle
 on top and that kind's form below. When the desktop has saved other machines,

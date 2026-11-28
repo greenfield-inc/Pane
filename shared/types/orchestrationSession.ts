@@ -421,3 +421,15 @@ export interface OrchestrationSessionProfileSwitch {
   /** `kept`: the same conversation goes on; `new-conversation`: a new one, given the transcript; `current`: nothing changed. */
   effect: 'current' | 'kept' | 'new-conversation';
 }
+
+/**
+ * A Switch profile request (T-63). `expect` is what the person saw and agreed to: the Session's agent
+ * and profile when they chose, and what the switch does to its conversation (a new conversation is
+ * confirmed first). The host refuses the switch when either no longer holds, so a stale menu asks again.
+ */
+export interface OrchestrationSessionProfileSwitchRequest {
+  ref: string;
+  /** The agent `ref` runs, for a profile variant the host can't tell on its own (Undo passes the previous agent). */
+  agent?: PaneChatAgent;
+  expect: { agent: PaneChatAgent; ref?: string; effect: 'kept' | 'new-conversation' };
+}

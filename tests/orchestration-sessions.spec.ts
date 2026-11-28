@@ -4291,9 +4291,10 @@ for (const theme of ['light', 'night-owl']) {
     await expect(row.getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Profile Greenfield planner');
     await shot('j7-switch-undo-toast');
     await toast.getByRole('button', { name: 'Undo' }).click();
+    // Undo names the agent the Session ran before, so a profile variant comes back too (review F-9).
     await expect.poll(() => profileCalls(page)).toEqual([
-      { action: 'switch', sessionId: 'plan', ref: 'greenfield/planner' },
-      { action: 'switch', sessionId: 'plan', ref: 'greenfield/orchestrator' },
+      { action: 'switch', sessionId: 'plan', ref: 'greenfield/planner', agent: 'claude' },
+      { action: 'switch', sessionId: 'plan', ref: 'greenfield/orchestrator', agent: 'claude' },
     ]);
     await expect(row.getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Profile Greenfield orchestrator');
 
@@ -4317,7 +4318,7 @@ for (const theme of ['light', 'night-owl']) {
     await page.keyboard.type('review');
     await page.keyboard.press('Enter');
     await sheet.getByRole('button', { name: 'Switch' }).click();
-    await expect.poll(async () => (await profileCalls(page)).at(-1)).toEqual({ action: 'switch', sessionId: 'plan', ref: 'greenfield/reviewer' });
+    await expect.poll(async () => (await profileCalls(page)).at(-1)).toEqual({ action: 'switch', sessionId: 'plan', ref: 'greenfield/reviewer', agent: 'codex' });
     // No Undo for a new conversation.
     await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(0);
 
@@ -4333,6 +4334,48 @@ for (const theme of ['light', 'night-owl']) {
     await expect.poll(async () => (await profileCalls(page)).at(-1)).toEqual({ action: 'reload', sessionId: 'blog' });
   });
 }
+
+// Review F-10: another window turns Profiles off while a confirmation or an Undo waits.
+test('a waiting Switch confirmation and Undo go away when Profiles turns off (T-63 PR 4)', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  const profile = (ref: string, harness: string, hidden = false) => ({ ref, plugin: ref.split('/')[0], version: '1.0.0', harness, hidden });
+  await installSessionsFixture(page, [
+    { ...sessionFixture('plan', 'Session profiles plan', '', '', '2026-09-16T12:00:00.000Z'), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h' } },
+  ], [], {
+    initialConfig: { chatTabsEnabled: true, sessionProfilesEnabled: true },
+    agentFarmProfiles: { profiles: [profile('pane/claude', 'claude', true), profile('greenfield/orchestrator', 'claude'), profile('greenfield/planner', 'claude'), profile('greenfield/reviewer', 'codex')] },
+  });
+  await gotoApp(page);
+  await dismissStartupDialogs(page);
+  const row = page.getByTestId('orchestration-session-plan');
+  const turnProfiles = (on: boolean) => page.evaluate(async (value) => {
+    // SAFETY: installSessionsFixture builds on the base mock, which has these controls.
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { emitHostClientsChanged: (clients: never[]) => void } };
+    await window.electronAPI.config.update({ sessionProfilesEnabled: value });
+    // Main announces the new config to every window.
+    mockWindow.__paneTestElectronMock.emitHostClientsChanged([]);
+  }, on);
+  const pick = async (filter: string) => {
+    await row.click({ button: 'right' });
+    await page.getByTestId('session-switch-profile').click();
+    await page.keyboard.type(filter);
+    await page.keyboard.press('Enter');
+  };
+
+  await pick('review');
+  const sheet = page.getByRole('dialog', { name: 'Start a new Codex conversation?' });
+  await expect(sheet).toBeVisible();
+  await turnProfiles(false);
+  await expect(sheet).toHaveCount(0);
+
+  await turnProfiles(true);
+  await pick('plan');
+  const toast = page.getByRole('status').filter({ hasText: 'now runs Greenfield planner' });
+  await expect(toast.getByRole('button', { name: 'Undo' })).toBeVisible();
+  await turnProfiles(false);
+  await expect(toast).toHaveCount(0);
+  expect((await profileCalls(page)).length).toBe(1);
+});
 
 for (const theme of ['light', 'night-owl']) {
   test(`Switch profile and Reload profile stay out of the Session menu with Profiles off, as on main (T-63 PR 4, ${theme})`, async ({ page }, testInfo) => {

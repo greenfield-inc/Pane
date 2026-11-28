@@ -684,10 +684,14 @@ Profiles on then needs no restart.
 Switch and Reload profile (see [SESSIONS.md](SESSIONS.md#switch-and-reload-profile-profiles-on))
 restart the tab with `ChatTabManager.relaunch`: the request is saved as the tab's
 `relaunch` and applied when no reply is in progress, before the next queued message.
-A kept conversation is loaded again with the new launch; `loadFallback` names the
-transcript a failed load falls back to. Each change adds a `dividers` entry, a
+The new launch and a new conversation's handoff (the transcript prompt, first in
+the queue) are saved before the old agent stops, and the tab starts nothing until
+it has; a `stop` still ending the agent is waited for too. A kept conversation is
+loaded again with the new launch; `loadFallback` names the private transcript (in
+the tab's chat-tabs folder) a failed load falls back to. Each change adds a `dividers` entry, a
 `pane_divider` row that the history replay puts back after the message it followed,
-as it does turn times. With Profiles off, nothing calls it.
+as it does turn times. With Profiles off, nothing calls it, and a request still
+waiting is dropped.
 
 ## Older clients
 

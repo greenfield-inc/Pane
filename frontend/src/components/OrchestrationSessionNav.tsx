@@ -17,7 +17,8 @@ import {
   useOrchestrationSessionStore,
   type OrchestrationSessionAvailability,
 } from '../stores/orchestrationSessionStore';
-import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionProfileSwitchRequest, OrchestrationSessionRecord, OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
+import { isConfiguredAgent } from '../../../shared/agents';
 import type { OrchestrationSessionArchivedPanes, OrchestrationSessionUpdateInput } from '../../../shared/types/orchestrationSession';
 import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '../../../shared/types/orchestrationSession';
 import { requestOpenNewSession } from '../utils/openNewSession';
@@ -173,7 +174,13 @@ export function OrchestrationSessionNav({
   const [movingSessionId, setMovingSessionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmSwitch, setConfirmSwitch] = useState<{ session: OrchestrationSessionRecord; choice: ProfileSwitchChoice } | null>(null);
-  const [switchToast, setSwitchToast] = useState<{ key: number; sessionId: string; message: string; avatar: { ref?: string; agent: string }; undo?: string } | null>(null);
+  const [switchToast, setSwitchToast] = useState<{ key: number; sessionId: string; message: string; avatar: { ref?: string; agent: string }; undo?: OrchestrationSessionProfileSwitchRequest } | null>(null);
+  // Profiles turned off (here or in another window): a waiting confirmation or Undo goes with it (review F-10).
+  useEffect(() => {
+    if (profiles) return;
+    setConfirmSwitch(null);
+    setSwitchToast(null);
+  }, [profiles]);
   const draggedSessionId = useDraggedSessionId();
   // The list a Session drag started in; the drag reorders only that list. A ref, not state:
   // the window's drop listener ends the in-flight drag (and re-renders) before the row's own
@@ -450,14 +457,22 @@ export function OrchestrationSessionNav({
 
   /** Switch profile (T-63): at once with Undo, unless the conversation can't go on, which asks first. */
   const runSwitch = useCallback(async (session: OrchestrationSessionRecord, choice: ProfileSwitchChoice, undoable: boolean) => {
+    // Already running it: nothing to switch.
+    if (choice.effect === 'current') return;
     setActionError(null);
     try {
-      const result = await useOrchestrationSessionStore.getState().switchProfile(session.id, choice.ref);
+      // The host switches only if the Session and the switch's effect are still what the person saw (review F-1).
+      const result = await useOrchestrationSessionStore.getState().switchProfile(session.id, {
+        ref: choice.ref, agent: isConfiguredAgent(choice.agent) ? choice.agent : undefined,
+        expect: { agent: session.agent, ref: session.agentProfile?.ref, effect: choice.effect },
+      });
       if (!undoable || result.effect !== 'kept') { setSwitchToast(null); return; }
+      const undoRef = result.previous.ref ?? plainProfileRef(result.previous.agent);
       setSwitchToast({
         key: Date.now(), sessionId: session.id, message: profileSwitchText(session, choice).done,
         avatar: { ref: choice.avatarRef, agent: choice.agent },
-        undo: result.previous.ref ?? plainProfileRef(result.previous.agent),
+        // Back to the agent the host ran before, so a profile variant it can't tell on its own comes back too (review F-9).
+        undo: undoRef ? { ref: undoRef, agent: result.previous.agent, expect: { agent: result.session.agent, ref: result.session.agentProfile?.ref, effect: 'kept' } } : undefined,
       });
     } catch (cause) {
       setActionError(`${session.name} did not switch to ${choice.label}. ${ipcErrorMessage(cause, 'The host did not answer.')}`);
@@ -484,7 +499,7 @@ export function OrchestrationSessionNav({
     catch (cause) { setActionError(`${session.name}'s profile was not reloaded. ${ipcErrorMessage(cause, 'The host did not answer.')}`); }
   }, []);
 
-  const profileSwitchElements = (<>
+  const profileSwitchElements = profiles && (<>
     <ProfileSwitchConfirm
       pending={confirmSwitch}
       onCancel={() => setConfirmSwitch(null)}

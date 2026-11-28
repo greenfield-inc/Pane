@@ -150,4 +150,12 @@ describe.skipIf(process.platform === 'win32')("a Session's chat that starts with
     await sessionLauncher(false, cleared).resolve(panel, { agent: 'claude', launch: { kind: 'agent' }, cwd: bin, status: 'starting' });
     expect(cleared).toEqual([]);
   });
+
+  // Review F-5: a named profile Pane chose for the Session (its creation or a Switch) goes off with Profiles too.
+  it('starts the agent on its own for a named profile Pane chose, and keeps a launch command\'s own profile', () => {
+    expect(withoutPaneProfile(state({ kind: 'profile', profile: 'greenfield/orchestrator', fromSession: true }), () => false).launch).toEqual({ kind: 'agent' });
+    expect(withoutPaneProfile(state({ kind: 'profile', profile: 'greenfield/orchestrator', fromSession: true, fullAccess: true }), () => false).launch).toEqual({ kind: 'agent', fullAccess: true });
+    expect(withoutPaneProfile(state({ kind: 'profile', profile: 'greenfield/orchestrator', fromSession: true }), () => true).launch).toEqual({ kind: 'profile', profile: 'greenfield/orchestrator', fromSession: true });
+    expect(withoutPaneProfile(state({ kind: 'profile', profile: 'team/legacy', args: { review: 'on' } }), () => false).launch).toEqual({ kind: 'profile', profile: 'team/legacy', args: { review: 'on' } });
+  });
 });

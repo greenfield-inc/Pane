@@ -5,6 +5,7 @@ import type {
   OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
   OrchestrationSessionProfileSwitch,
+  OrchestrationSessionProfileSwitchRequest,
   OrchestrationSessionRecord,
   OrchestrationSessionSummary,
   OrchestrationSessionSelector,
@@ -56,7 +57,7 @@ interface OrchestrationSessionState {
   create: (input: OrchestrationSessionCreateInput) => Promise<OrchestrationSessionView<Session>>;
   update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput) => Promise<OrchestrationSessionRecord>;
   /** Switch profile (T-63); the record comes back at once, the agent restarts after its reply. */
-  switchProfile: (sessionId: string, ref: string) => Promise<OrchestrationSessionProfileSwitch>;
+  switchProfile: (sessionId: string, request: OrchestrationSessionProfileSwitchRequest) => Promise<OrchestrationSessionProfileSwitch>;
   /** Reload profile (T-63). */
   reloadProfile: (sessionId: string) => Promise<OrchestrationSessionRecord>;
   /**
@@ -350,8 +351,8 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
     return view;
   },
 
-  switchProfile: async (sessionId, ref) => {
-    const result = ensureSuccess(await API.orchestrationSessions.switchProfile({ sessionId }, ref), 'Pane could not switch the Session\'s profile.');
+  switchProfile: async (sessionId, request) => {
+    const result = ensureSuccess(await API.orchestrationSessions.switchProfile({ sessionId }, request), 'Pane could not switch the Session\'s profile.');
     set(state => ({ sessions: state.sessions.map(session => session.id === result.session.id ? result.session : session) }));
     return result;
   },

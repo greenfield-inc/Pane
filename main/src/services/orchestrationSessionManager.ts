@@ -19,7 +19,7 @@ import { plainProfileAgent, plainProfileRef, profileDisplayName, profileSwitchEf
 import { profilesEnabled } from './agentFarm/profilesFeature';
 import type { AgentFarmProfileList, SessionAgentProfile } from '../../../shared/types/agentFarmProfiles';
 import type { SessionAdoption } from './chatTabs/switchToChat';
-import type { ChatDivider, ChatPanelState, ChatTabLaunch, ChatTabRelaunch } from '../../../shared/types/chatTab';
+import type { ChatConversationExport, ChatDivider, ChatPanelState, ChatTabLaunch, ChatTabRelaunch } from '../../../shared/types/chatTab';
 import type { NotifySession } from '../../../shared/types/notify';
 
 /** What a Session needs from the host's chat tabs. */
@@ -29,8 +29,11 @@ export interface SessionChatTabs {
   agentState(panelId: string): AgentState;
   /** Reload or Switch profile: restart on a new launch once the agent's reply ends (T-63). */
   relaunch(panelId: string, request: ChatTabRelaunch): void;
-  /** Saves the conversation in the Session folder for a new conversation to read. */
-  saveTranscript(panelId: string): string | undefined;
+  /**
+   * Saves the whole conversation in the Session folder for a new conversation to read: `transcript` is
+   * the file, absent when the conversation has nothing in it. Throws when it can't be saved whole.
+   */
+  exportConversation(panelId: string): ChatConversationExport;
   stop(panelId: string, reason: { message: string; next: string }): Promise<void>;
   /** The agent is in a reply. */
   replying(panelId: string): boolean;
@@ -75,6 +78,7 @@ import {
   type OrchestrationSessionSummary,
   type OrchestrationSessionOverview,
   type OrchestrationSessionProfileSwitch,
+  type OrchestrationSessionProfileSwitchRequest,
   type OrchestrationSessionRecord,
   type OrchestrationSessionSelector,
   type OrchestrationSessionStatus,
@@ -663,11 +667,16 @@ export class OrchestrationSessionManager extends EventEmitter {
    * goes on (session/load); otherwise (Claude and Codex, or Codex profiles, whose homes Agent Farm keeps
    * per profile) a new conversation starts in the Session's tab for that agent and is given the old
    * transcript. The Session's folder, Panes, to-dos and approvals stay. Undo is a switch back.
+   *
+   * `request.expect` is what the person agreed to; the switch is refused when the Session or the
+   * switch's effect changed since (review F-1), and when the outgoing conversation can't be saved
+   * whole for a new one (review F-3).
    */
-  async switchProfile(selector: OrchestrationSessionSelector, ref: string, source: 'user' | 'agent' = 'user'): Promise<OrchestrationSessionProfileSwitch> {
+  async switchProfile(selector: OrchestrationSessionSelector, request: OrchestrationSessionProfileSwitchRequest, source: 'user' | 'agent' = 'user'): Promise<OrchestrationSessionProfileSwitch> {
     const outcome = 'The Session was not switched.';
+    const ref = request.ref;
     this.refuseProfilesOff(outcome);
-    const target = await this.profileTarget(ref, undefined, outcome);
+    const target = await this.profileTarget(ref, request.agent, outcome);
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       const data = this.store.read();
@@ -676,6 +685,10 @@ export class OrchestrationSessionManager extends EventEmitter {
       const previous = { agent: current.agent, ref: current.agentProfile?.ref };
       const effect = profileSwitchEffect(previous, { agent: target.agent, ref });
       if (effect === 'current') return { session: this.withComputed(clone(current)), previous, effect };
+      // What the person saw when they chose must still hold: a new conversation is never started unasked.
+      if (request.expect.agent !== previous.agent || (request.expect.ref ?? undefined) !== previous.ref || request.expect.effect !== effect) {
+        throw new PaneError('SESSION_PROFILE_CHANGED', `${current.name} changed since you chose ${profileDisplayName(ref)}${effect === 'new-conversation' ? ', and the switch would now start a new conversation' : ''}. ${outcome}`, 'Open the Session\'s menu and choose the profile again.');
+      }
       this.assertAgentSupported(target.agent, current.runtime);
       const agentChanging = target.agent !== current.agent;
       const toPanel = agentChanging ? panelManager.getPanel(current.panelIds[target.agent]) : fromPanel;
@@ -683,8 +696,8 @@ export class OrchestrationSessionManager extends EventEmitter {
         throw new PaneError('SESSION_PROFILE_TERMINAL', `${current.name}'s ${configuredAgent(target.agent).title} tab is a terminal, which can't run a profile. ${outcome}`, `Start a new Session with ${profileDisplayName(ref)}.`);
       }
       const name = profileDisplayName(ref);
-      // The other agent gets the transcript as it stands, so the reply in progress must end first.
-      if (agentChanging && this.chatTabs().replying(fromPanel.id)) {
+      // A new conversation is given the transcript as it stands, so the reply in progress must end first.
+      if (effect === 'new-conversation' && this.chatTabs().replying(fromPanel.id)) {
         throw new PaneError('SESSION_PROFILE_BUSY', `${current.name}'s ${configuredAgent(current.agent).title} is still replying. ${outcome}`, `Switch to ${name} again when the reply ends, or press Stop first.`);
       }
       const next: OrchestrationSessionRecord = {
@@ -692,22 +705,28 @@ export class OrchestrationSessionManager extends EventEmitter {
         revision: current.revision + 1, updatedAt: new Date().toISOString(), activity: [...current.activity],
       };
       if (agentChanging) { next.launchCommand = ''; next.customResume = undefined; next.resume = undefined; }
+      // A launch command that runs its own Agent Farm profile gives way to the switched one, args and all (review F-2).
+      const own = this.chatLaunch(current);
+      if (own && 'launch' in own && own.launch.kind === 'profile' && own.launch.fromSession !== true) next.launchCommand = '';
       const chat = this.chatLaunch(next);
       if (!chat || !('launch' in chat)) {
         throw new PaneError('SESSION_PROFILE_UNSUPPORTED', `Profiles run in chat tabs, and ${current.name} can't run one now${chat && 'terminalReason' in chat ? `: ${chat.terminalReason}` : '.'} ${outcome}`, 'Turn on Chat tabs in Settings > AI & Agents, then try again.');
       }
-      const divider = effect === 'kept' ? `Switched to ${name} · conversation kept` : `Switched to ${name} · new ${configuredAgent(target.agent).title} conversation, given the transcript`;
-      next.activity.push(this.activity('updated', `${divider}.`, source));
-      this.trimActivity(next);
       const reason = agentChanging
         ? `${configuredAgent(target.agent).title} can't continue a ${configuredAgent(current.agent).title} conversation, so Pane started a new one when this Session switched to ${name}.`
         : `${configuredAgent(target.agent).title} keeps each profile's conversations apart, so Pane started a new one when this Session switched to ${name}.`;
-      // The other agent's conversation is saved before the record names the new agent.
+      // The outgoing conversation is saved before anything changes; a failure, or history not at hand, refuses the switch (review F-3).
       let transcript: string | undefined;
-      if (agentChanging) {
-        try { transcript = this.chatTabs().saveTranscript(fromPanel.id); }
-        catch (error) { console.warn(`[Sessions] ${current.name}'s conversation was not saved for ${name}: ${reasonOf(error)}`); }
+      if (effect === 'new-conversation') {
+        try { transcript = this.chatTabs().exportConversation(fromPanel.id).transcript; }
+        catch (error) {
+          throw new PaneError('SESSION_PROFILE_TRANSCRIPT', `${current.name}'s conversation could not be saved for ${name} (${reasonOf(error).replace(/\.$/, '')}). ${outcome}`, error instanceof PaneError && error.next ? error.next : 'Try the switch again.');
+        }
       }
+      const divider = effect === 'kept' ? `Switched to ${name} · conversation kept`
+        : `Switched to ${name} · new ${configuredAgent(target.agent).title} conversation${transcript ? ', given the transcript' : ''}`;
+      next.activity.push(this.activity('updated', `${divider}.`, source));
+      this.trimActivity(next);
       this.store.write(replaceSession(data, next));
       const relaunch: ChatTabRelaunch = { launch: chat.launch, divider };
       if (effect === 'new-conversation') relaunch.newConversation = transcript ? { transcript, reason } : { reason };
@@ -1612,9 +1631,12 @@ export class OrchestrationSessionManager extends EventEmitter {
     // T-63: a Session with a profile runs it through Agent Farm; the agent on its own is pane/<agent>,
     // which keeps the full access its launch command gave it. A launch command's own profile stays as it is.
     // With Profiles off (Settings › Advanced), a saved profile is ignored and the agent starts as on main.
-    if (!record.agentProfile || !this.profilesOn() || !('launch' in result) || result.launch.kind !== 'agent') return result;
+    // A launch command's profile other than the Session's (a Switch, review F-2) gives way to the Session's.
+    if (!record.agentProfile || !this.profilesOn() || !('launch' in result)) return result;
+    if (result.launch.kind === 'profile' && result.launch.profile === record.agentProfile.ref) return result;
+    // Marked as Pane's choice, so the tab starts its agent on its own again once Profiles is off (review F-5).
     const launch: ChatTabLaunch = { kind: 'profile', profile: record.agentProfile.ref, fromSession: true };
-    if (result.launch.fullAccess === true || result.launch.mode) launch.fullAccess = true;
+    if (result.launch.fullAccess === true || (result.launch.kind === 'agent' && result.launch.mode)) launch.fullAccess = true;
     return { launch };
   }
 

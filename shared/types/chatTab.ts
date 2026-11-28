@@ -89,10 +89,14 @@ export interface ChatPanelState {
   dividers?: ChatDivider[];
   /**
    * Set by a Reload or Switch that keeps the conversation, until the next start ends: when the agent can't
-   * load the conversation then, a new one starts and is given `transcript` (the fail-safe, T-63).
+   * load the conversation then, a new one starts and is given the transcript saved privately in `file`,
+   * in Pane's own chat-tabs folder (the fail-safe, T-63). The file is deleted once the start ends.
    */
-  loadFallback?: { transcript: string };
+  loadFallback?: { file: string };
 }
+
+/** A conversation saved for a new one to read (T-63): `transcript` is the file, absent when nothing was said. */
+export interface ChatConversationExport { transcript?: string }
 
 /** A launch change that waits for the agent to finish its reply: Reload or Switch profile (T-63). */
 export interface ChatTabRelaunch {
@@ -100,8 +104,9 @@ export interface ChatTabRelaunch {
   /** The divider drawn where it happened. */
   divider: string;
   /**
-   * Start a new conversation, given a transcript to read first: `transcript` (another tab's, already
-   * written), or this tab's own. `reason` says why the conversation could not continue.
+   * Start a new conversation. `transcript`: the outgoing conversation, already saved, which the new one
+   * is given to read first. Absent only when the outgoing conversation had nothing in it: the tab never
+   * gives the new conversation its own earlier one in its place. `reason` says why it could not continue.
    */
   newConversation?: { transcript?: string; reason: string };
 }

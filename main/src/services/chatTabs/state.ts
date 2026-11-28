@@ -61,7 +61,7 @@ const schema: BoundarySchema<ChatPanelState> = boundary.object({
     sessionId: boundary.optional(boundary.string), after: boundary.optional(boundary.string), leading: boundary.optional(boundary.literal(true)),
     text: boundary.string, at: boundary.string,
   }))),
-  loadFallback: boundary.optional(boundary.object({ transcript: boundary.string })),
+  loadFallback: boundary.optional(boundary.object({ file: boundary.string })),
 });
 
 /** A chat panel's saved state, or undefined when the row does not hold one. */

@@ -2,7 +2,7 @@ import { customCommandResumeSchema } from '../../../shared/types/customCommandRe
 import { listWSLDistributions } from '../utils/wslUtils';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import type { IpcMain } from 'electron';
-import { readOnlyPaneCaller, teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
+import { isRemotePaneCommand, readOnlyPaneCaller, teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
 import type {
   OrchestrationAssociationInput,
@@ -28,6 +28,17 @@ import { configuredAgentSchema } from '../../../shared/agents';
 import { PROFILE_REF_PATTERN } from '../../../shared/types/agentFarmProfiles';
 
 const profileRefSchema = boundary.refine(boundary.nonEmptyString, value => PROFILE_REF_PATTERN.test(value), 'expected an Agent Farm profile such as greenfield/orchestrator');
+const profileSwitchSchema = boundary.object({
+  ref: profileRefSchema,
+  agent: boundary.optional(configuredAgentSchema),
+  expect: boundary.object({ agent: configuredAgentSchema, ref: boundary.optional(profileRefSchema), effect: boundary.enumeration('kept', 'new-conversation') }),
+});
+
+/** Switch and Reload profile are the desktop menu's alone for now (T-63): a remote caller is refused (review F-1). */
+function refuseRemoteProfileChange(outcome: string): void {
+  if (!isRemotePaneCommand()) return;
+  throw new PaneError('SESSION_PROFILE_LOCAL_ONLY', `A Session's profile changes only from Pane on the computer it runs on. ${outcome}`, 'Right-click the Session in Pane on that computer.');
+}
 
 const selectorSchema = boundary.object({
   sessionId: boundary.optional(boundary.nonEmptyString),
@@ -199,13 +210,19 @@ export function registerOrchestrationSessionHandlers(
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:set-agent');
 
   // T-63: Switch profile and Reload profile from the Session's right-click menu.
-  commandRegistry.register('orchestration-sessions:switch-profile', async (value: PaneCommandValue, ref?: PaneCommandValue) => {
-    return invokeSafely(() => requireManager().switchProfile(decodeSelector(value), decodeBoundary(ref, profileRefSchema)));
+  commandRegistry.register('orchestration-sessions:switch-profile', async (value: PaneCommandValue, request?: PaneCommandValue) => {
+    return invokeSafely(() => {
+      refuseRemoteProfileChange('The Session was not switched.');
+      return requireManager().switchProfile(decodeSelector(value), decodeBoundary(request, profileSwitchSchema));
+    });
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:switch-profile');
 
   commandRegistry.register('orchestration-sessions:reload-profile', async (value: PaneCommandValue) => {
-    return invokeSafely(() => requireManager().reloadProfile(decodeSelector(value)));
+    return invokeSafely(() => {
+      refuseRemoteProfileChange('Nothing was reloaded.');
+      return requireManager().reloadProfile(decodeSelector(value));
+    });
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:reload-profile');
 
