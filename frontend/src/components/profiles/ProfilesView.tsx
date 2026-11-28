@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { AlertTriangle, Bot, ChevronDown, ChevronRight, FileText, FolderOpen, ImageIcon, Pencil, Pin, Plus, RefreshCw, RotateCcw, Sparkles, X } from 'lucide-react';
 import { DEFAULT_AGENT_ID, agentLabel, configuredAgent } from '../../../../shared/agents';
 import { plainProfileAgents } from '../../../../shared/agentProfiles';
-import { MAX_PROFILE_PHOTO_BYTES, PROFILE_NAME_PATTERN, type ProfileNewFileKind, type ProfilePlugin, type ProfileRecovery, type ProfileSummary } from '../../../../shared/types/profileEditor';
+import { MAX_PROFILE_PHOTO_BYTES, PROFILE_NAME_PATTERN, type ProfileNewFileKind, type ProfilePlugin, type ProfileRecovery, type ProfileSubagentNode, type ProfileSummary } from '../../../../shared/types/profileEditor';
 import { isProfilesEnabled, useConfigStore } from '../../stores/configStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { profilePhotoSource, useProfilesStore } from '../../stores/profilesStore';
@@ -23,6 +23,7 @@ import { isPinned, pinnedFirst, togglePinnedProfile, usePinnedProfiles } from '.
 import { PHOTO_ACCEPT, PHOTO_SAMPLES, readSvgPhoto } from './profilePhotos';
 import { leaveProfiles } from './profilesNavigation';
 import { directSubagents } from './profilePreview';
+import { openSubagentTab } from './subagentTab';
 import { syncFooterText, syncNowText, syncStateText } from './profileSyncText';
 import { MachineMark } from '../machines/MachineMark';
 import { useAllMachinesStore } from '../../stores/allMachinesStore';
@@ -362,6 +363,11 @@ function ProfileDetail({ plugin, profile, file, notify }: { plugin: ProfilePlugi
     openFile(next);
   };
 
+  // Opens a launch or process agent in a tab of the Pane you came from (T-83 P4); a reason it didn't shows as a notice.
+  const openTab = (node: ProfileSubagentNode) => {
+    void openSubagentTab(node).then(reason => { if (reason) notify(reason); });
+  };
+
   const runRestore = async () => {
     try {
       await restore(plugin.name);
@@ -409,8 +415,8 @@ function ProfileDetail({ plugin, profile, file, notify }: { plugin: ProfilePlugi
         )}
       </div>
       <div className="flex min-h-0 flex-1">
-        <ProfileTree plugin={plugin.name} profile={profile} file={file} selectedId={selectedId} onSelect={show} />
-        <ProfileFilePane plugin={plugin} profile={profile} file={file} notify={notify} onShow={show} />
+        <ProfileTree plugin={plugin.name} profile={profile} file={file} selectedId={selectedId} onSelect={show} onOpenTab={openTab} />
+        <ProfileFilePane plugin={plugin} profile={profile} file={file} notify={notify} onShow={show} onOpenTab={openTab} />
       </div>
       {newKind && <NewFileDialog kind={newKind} plugin={plugin} profile={profile} onClose={() => setNewKind(null)} notify={notify} onCreated={path => show(null, path)} />}
       {details && <EditDetailsDialog plugin={plugin} profile={profile} onClose={() => setDetails(false)} notify={notify} />}

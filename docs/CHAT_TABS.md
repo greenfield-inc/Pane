@@ -650,7 +650,20 @@ references and settings) and, under Subagents, the agents it links to, drawn fro
 the listing's `tree`. Each linked agent says how it runs (inside its parent,
 its own process, or its own launch), whether it has Claude and Codex versions, and
 nests its own files and links; a link back to an agent already above it is
-marked as a cycle and not expanded again. Files preview first (Markdown with its
+marked as a cycle and not expanded again. An agent that runs as its own process
+or launch opens in a terminal tab from its row's tab button, ⌘↩ (Ctrl+Enter) on
+the row, or **Open in a tab** on its cover (in the cover's header when the cover
+is its own file): the tab runs the command the listing
+gives it, unchanged and with no `--parent` (a person needs no permission), in
+the Pane you came to Profiles from, and Pane then shows that Pane with the new
+tab in front. With no Pane to open it in, a notice says so and nothing starts.
+When a remote host never confirms the tab, the notice says it may have started
+and to check that Pane before trying again. If you leave Profiles, or open it
+again from elsewhere, before the host makes the tab, the tab is added but Pane
+doesn't move you to it. The tab resumes like any
+Agent Farm tab (`--resume <id>`). An orchestrator opens its own linked agents
+with `runpane panels create --tool-command "<its link's command>"`, which
+carries `--parent`. Files preview first (Markdown with its
 front-matter as a metadata header, YAML as key/value) and **Edit** opens the
 source. **Edit details** saves a profile's title and description, and its photo
 menu an SVG photo (at most 64 KB), with `agent-farm profiles set`. Agent Farm

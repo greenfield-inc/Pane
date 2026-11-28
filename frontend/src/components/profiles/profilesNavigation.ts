@@ -29,6 +29,15 @@ export function leaveProfiles(): void {
   }
 }
 
+/** Leaves Profiles for Pane `paneId`'s own view, as opening an agent in a tab of that Pane does (T-83 P4). */
+export async function leaveProfilesFor(paneId: string): Promise<void> {
+  const navigation = useNavigationStore.getState();
+  returnSessionId = undefined;
+  if (navigation.activeView === 'profiles') navigation.leaveProfiles();
+  useNavigationStore.getState().navigateToSessions();
+  if (useSessionStore.getState().activeSessionId !== paneId) await useSessionStore.getState().setActiveSession(paneId);
+}
+
 /** The sidebar entry: opens Profiles, or, while it is open, returns to where you were. */
 export function toggleProfiles(): void {
   if (useNavigationStore.getState().activeView !== 'profiles') openProfiles();
