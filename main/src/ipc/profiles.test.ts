@@ -1,10 +1,11 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { EventEmitter } from 'events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IpcMain, IpcMainInvokeEvent } from 'electron';
 import { readProfilesSwitchFrom } from '../services/agentFarm/profilesFeature';
+import { writeRecoveryNote } from '../services/agentFarm/agentFarmRecovery';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { PROFILE_SYNC_CHANNELS, PROFILE_SYNC_OFF_CODE } from '../../../shared/types/profileSync';
 import { profileSync, registerProfileHandlers } from './profiles';
@@ -50,6 +51,9 @@ const CALLS: Array<[string, unknown[]]> = [
   ['profiles:remove-photo', ['labtest/writer']],
   ['profiles:set-details', ['labtest', 'writer', { title: 'x', description: 'y' }]],
   ['profiles:parse-yaml', ['a: 1']],
+  // The saved-aside plugin notice (#1740 review F-3).
+  ['profiles:dismiss-recovery', ['greenfield-0.0.9-2026-11-27T00-00-00-000Z']],
+  ['profiles:open-recovery', ['greenfield-0.0.9-2026-11-27T00-00-00-000Z']],
   // Sync (PR 6).
   ['profiles:sync-status', []],
   ['profiles:sync-now', []],
@@ -77,6 +81,21 @@ describe('the Profiles channels', () => {
     expect(await handlers.get('profiles:parse-yaml')!(event, 'a: 1')).toEqual({ success: true, data: { data: { a: 1 } } });
     expect(await handlers.get('profiles:photos')!(event)).toEqual({ success: true, data: { profiles: {}, plugins: {} } });
     expect(await handlers.get('profiles:list')!(event)).toMatchObject({ success: true, data: { plugins: [] } });
+  });
+
+  it('list a saved-aside plugin until its notice is dismissed (#1740 review F-3)', async () => {
+    const paneDir = mkdtempSync(path.join(tmpdir(), 'pane-profiles-ipc-'));
+    temporary.push(paneDir);
+    readProfilesSwitchFrom(() => ({ sessionProfilesEnabled: true }));
+    const id = 'greenfield-0.0.9-2026-11-27T10-00-00-000Z';
+    const folder = path.join(paneDir, 'agent-farm', 'recovered', id);
+    mkdirSync(folder, { recursive: true });
+    await writeRecoveryNote(folder, { plugin: 'greenfield', version: '0.0.9', reason: 'unknown variant opus' });
+    const handlers = register(paneDir);
+    expect(await handlers.get('profiles:list')!(event)).toMatchObject({ success: true, data: { recovered: [{ id, plugin: 'greenfield', folder }] } });
+    expect(await handlers.get('profiles:dismiss-recovery')!(event, id)).toEqual({ success: true, data: undefined });
+    expect(await handlers.get('profiles:list')!(event)).toEqual({ success: true, data: expect.not.objectContaining({ recovered: expect.anything() }) });
+    expect(await handlers.get('profiles:open-recovery')!(event, '../plugins')).toMatchObject({ success: false, error: expect.stringContaining('Pane has no saved copy') });
   });
 
   it('sync answers other computers only while Profiles is on, and records nothing while it is off (PR 6)', async () => {

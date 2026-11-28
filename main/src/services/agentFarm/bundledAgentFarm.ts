@@ -1,13 +1,15 @@
 import { execFile } from 'child_process';
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
+import yaml from 'js-yaml';
 import { reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { hashDirectory } from '../skillCacheManager';
 import { syncedPluginEdits } from './profileSyncFile';
+import { writeRecoveryNote } from './agentFarmRecovery';
 import { panePluginFiles, panePluginInstalled, parseProfileList, writePanePluginSource } from './agentFarmProfiles';
 import { PANE_PROFILE_PLUGIN } from '../../../../shared/agentProfiles';
 import type { AgentFarmProfileList } from '../../../../shared/types/agentFarmProfiles';
@@ -171,6 +173,11 @@ export interface BundledAgentFarmStatus {
   plugins: Record<string, string>;
   /** Bundled plugins changed here since Pane installed them, which Pane updates no longer overwrite. */
   edited: string[];
+  /**
+   * Edited bundled plugins this Agent Farm rejected (review F-3): each was saved unchanged in
+   * `folder` and replaced with the copy this Pane ships, so the profile list keeps working.
+   */
+  recovered?: Array<{ plugin: string; folder: string; reason: string }>;
   /** Why the last install failed, and what to do. */
   error?: string;
 }
@@ -206,14 +213,39 @@ function installedVersion(stdout: string): string | undefined {
   catch { return undefined; }
 }
 
+/** Where the retired plugins' shipped copies came from: their packed source repository. */
+const STOCK_RETIRED_REPOSITORY = /^(https:\/\/github\.com\/|git@github\.com:)(greenfield-inc|dcouple)\/(skills|agent-farm)(\.git)?$/;
+
+/** Where Agent Farm's receipt says a plugin came from: the pack's repository, or the folder it was installed from. */
+type ReceiptSource = { repository?: string; path?: string };
+
+const receiptSourceSchema = boundary.object({
+  source: boundary.optional(boundary.object({ repository: boundary.optional(boundary.string), path: boundary.optional(boundary.string) })),
+});
+
 /**
- * Uninstalls each retired plugin that Agent Farm's receipt says is installed in Pane's config
- * root, with Agent Farm's own `plugin uninstall`: it deletes only files unchanged since the
- * install and leaves changed ones in place. Never throws; each outcome is logged.
+ * Whether a retired plugin's receipt is the copy an older Pane installed from its bundled Agent
+ * Farm (review F-1): installed from the package's own plugins folder, or from the pack it carried
+ * (whose plugin.yaml names the stock repository), and not a save that arrived through profile sync.
+ * Anything else, such as a profile made in the Profiles editor under the same name, is the person's.
+ */
+function stockRetiredInstall(name: string, source: ReceiptSource | undefined, synced: ReadonlySet<string>): boolean {
+  if (synced.has(name)) return false;
+  if (source?.repository !== undefined) return STOCK_RETIRED_REPOSITORY.test(source.repository);
+  const from = source?.path?.split('\\').join('/');
+  return from !== undefined && from.endsWith(`/node_modules/@greenfieldco/agent-farm/plugins/${name}`);
+}
+
+/**
+ * Uninstalls each retired plugin that Agent Farm's receipt says an older Pane installed in its
+ * config root, with Agent Farm's own `plugin uninstall`: it deletes only files unchanged since the
+ * install and leaves changed ones in place. A plugin of the same name the person made or synced is
+ * kept. Never throws; each outcome is logged.
  */
 async function uninstallRetiredPlugins(bundle: BundledAgentFarm, configRoot: string, run: AgentFarmRunner, log: (message: string) => void): Promise<void> {
   const present = RETIRED_AGENT_FARM_PLUGINS.filter((name) => existsSync(path.join(configRoot, '.plugins', `${name}.json`)));
   if (present.length === 0) return;
+  const synced = await syncedPluginEdits(configRoot);
   // A lock left by a killed install would refuse the uninstall; the config root is Pane's alone.
   await fs.rm(path.join(configRoot, '.plugins', 'install.lock'), { recursive: true, force: true }).catch(() => undefined);
   for (const name of present) {
@@ -222,13 +254,18 @@ async function uninstallRetiredPlugins(bundle: BundledAgentFarm, configRoot: str
     // install on every start too. Keep its bytes under a name Agent Farm doesn't read, and its files.
     const text = await fs.readFile(receipt, 'utf8').catch(() => undefined);
     let malformed = false;
-    try { if (text !== undefined) JSON.parse(text); } catch { malformed = true; }
+    let parsed: unknown;
+    try { if (text !== undefined) parsed = JSON.parse(text); } catch { malformed = true; }
     if (malformed) {
       const aside = `${receipt}.unreadable-${Date.now()}`;
       await fs.rename(receipt, aside).then(
         () => log(`[AgentFarm] The receipt for the retired Agent Farm plugin ${name} isn't valid JSON, so Agent Farm can't uninstall it; Pane moved it aside to ${aside} and left the plugin's files in ${path.join(configRoot, 'plugins', name)}. Delete both if you don't need them.`),
         (error: NodeJS.ErrnoException) => log(`[AgentFarm] The receipt for the retired Agent Farm plugin ${name} isn't valid JSON, and Pane couldn't move it aside (${error.message}). Agent Farm's installs in ${configRoot} fail until ${receipt} is moved or deleted.`),
       );
+      continue;
+    }
+    if (!stockRetiredInstall(name, decodeOptionalBoundary(parsed, receiptSourceSchema)?.source, synced)) {
+      log(`[AgentFarm] Kept the Agent Farm plugin ${name} in ${path.join(configRoot, 'plugins', name)}: Pane no longer ships a plugin by that name, but this copy was made or synced here, so it is yours.`);
       continue;
     }
     try {
@@ -404,6 +441,71 @@ export async function installedState(configRoot: string, name: string): Promise<
 }
 
 /**
+ * A plugin installed from a pack (greenfield) lists its files' checksums in plugin.yaml,
+ * which `plugin validate` checks but launches don't. Any edit changes a file, so the staged copy
+ * Pane validates leaves them out; the installed plugin.yaml keeps them.
+ */
+export async function withoutPackChecksums(manifestFile: string): Promise<void> {
+  const content = await fs.readFile(manifestFile, 'utf8').catch(() => undefined);
+  if (content === undefined) return;
+  let data: JsonObject | undefined;
+  try { data = decodeOptionalBoundary(yaml.load(content), boundary.jsonObject); }
+  catch { return; }
+  if (!data || !('checksums' in data)) return;
+  const { checksums: _packed, ...rest } = data;
+  await fs.writeFile(manifestFile, yaml.dump(rest, { lineWidth: -1 }));
+}
+
+/**
+ * Why this Agent Farm rejects a bundled plugin kept because it was edited, or undefined when it
+ * passes `plugin validate` (review F-3: an edited greenfield from Agent Farm 0.2 can name variants
+ * 0.3 refuses, and then `profiles list` fails for every plugin). It checks a copy without the pack's
+ * checksums, as the Profiles editor does. A copy Pane can't make counts as passing: the edit stays.
+ */
+async function rejectedBy(bundle: BundledAgentFarm, configRoot: string, name: string, run: AgentFarmRunner): Promise<string | undefined> {
+  const drafts = path.join(configRoot, 'drafts');
+  const staging = path.join(drafts, `.check-${name}-${randomBytes(4).toString('hex')}`, name);
+  try {
+    try {
+      await fs.cp(path.join(configRoot, 'plugins', name), staging, { recursive: true, verbatimSymlinks: true });
+      await withoutPackChecksums(path.join(staging, 'plugin.yaml'));
+    } catch {
+      return undefined;
+    }
+    try { await run(bundledAgentFarmProcess(bundle, ['plugin', 'validate', staging], configRoot)); }
+    catch (error) { return decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1) || reasonOf(error); }
+    return undefined;
+  } finally {
+    await fs.rm(path.dirname(staging), { recursive: true, force: true });
+    await fs.rmdir(drafts).catch(() => undefined);
+  }
+}
+
+/**
+ * Saves an edited bundled plugin, its files and Agent Farm's receipt, unchanged in
+ * `<config root>/recovered/<name>-<version>-<time>/`, where neither Agent Farm nor profile sync
+ * reads, with a note on what happened. Throws when the copy can't be made.
+ */
+async function saveRecoveryCopy(configRoot: string, name: string, bundleVersion: string, reason: string): Promise<string> {
+  const version = await installedVersionOf(configRoot, name);
+  const folder = path.join(configRoot, 'recovered', `${name}-${version}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+  await fs.mkdir(path.dirname(folder), { recursive: true });
+  await fs.mkdir(folder);
+  await fs.cp(path.join(configRoot, 'plugins', name), path.join(folder, 'plugin'), { recursive: true, verbatimSymlinks: true, errorOnExist: true });
+  await fs.copyFile(path.join(configRoot, '.plugins', `${name}.json`), path.join(folder, 'receipt.json'));
+  await fs.writeFile(path.join(folder, 'README.txt'), [
+    `This is your edited ${name} ${version}, saved unchanged by Pane on ${new Date().toISOString()}.`,
+    `Agent Farm ${bundleVersion}, which this Pane runs, rejects it: ${reason}.`,
+    `Pane installed the ${name} that ships with it instead, so your profiles keep working.`,
+    `To bring your changes back, copy what you need from plugin/ into ${name} in the Profiles editor; it checks each save.`,
+    '',
+  ].join('\n'));
+  // The Profiles tab's one-time notice reads this (agentFarmRecovery.ts).
+  await writeRecoveryNote(folder, { plugin: name, version, reason });
+  return folder;
+}
+
+/**
  * Removes what an install that never finished (killed by the timeout, a crash or a quit) left
  * behind: Agent Farm's install lock, which makes every later install refuse, and the bundled
  * plugins' half-copied files: the one Pane was installing then (pane-installing.json), and those
@@ -513,6 +615,7 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
   log(`[AgentFarm] Setting up bundled Agent Farm ${bundle.version} in ${configRoot} (${!previous ? 'first start' : previous.hash !== hash ? `bundle changed from ${previous.agentFarmVersion}` : 'a plugin changed or is missing here'}).`);
   const plugins: Record<string, string> = {};
   const edited: string[] = [];
+  const recovered: NonNullable<BundledAgentFarmStatus['recovered']> = [];
   try {
     await fs.mkdir(configRoot, { recursive: true });
     const install: string[] = [];
@@ -526,8 +629,21 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
       // A plugin Pane was installing when it stopped is Pane's half-copy, not an edit.
       const state = unfinished.includes(name) ? undefined : await installedState(configRoot, name);
       if (state === 'edited' || (state && synced.has(name))) {
-        edited.push(name);
-        plugins[name] = await installedVersionOf(configRoot, name);
+        const reason = await rejectedBy(bundle, configRoot, name, run);
+        let folder: string | undefined;
+        if (reason !== undefined) {
+          try { folder = await saveRecoveryCopy(configRoot, name, bundle.version, reason); }
+          catch (error) { log(`[AgentFarm] Agent Farm ${bundle.version} rejects your edited ${name} (${reason}), and Pane couldn't save a copy of it (${reasonOf(error)}), so it kept it as it is. Its profiles may not list until you fix or restore it.`); }
+        }
+        if (reason === undefined || folder === undefined) {
+          edited.push(name);
+          plugins[name] = await installedVersionOf(configRoot, name);
+          continue;
+        }
+        recovered.push({ plugin: name, folder, reason });
+        log(`[AgentFarm] Agent Farm ${bundle.version} rejects your edited ${name} (${reason}), which would leave New Session with no named profiles. Pane saved it unchanged in ${folder} and is installing the ${name} that ships with this Pane.`);
+        install.push(name);
+        clear.push(name);
         continue;
       }
       if (state && 'unreadable' in state) {
@@ -565,11 +681,13 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
   } catch (error) {
     const reason = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1) || reasonOf(error);
     status = { state: 'failed', configRoot, version: bundle.version, plugins, edited, error: `Pane couldn't set up its bundled Agent Farm in ${configRoot}: ${reason}. Its Agent Farm profiles may be out of date; restart Pane to try again.` };
+    if (recovered.length) status.recovered = recovered;
     log(`[AgentFarm] ${status.error}`);
     return status;
   }
   if (edited.length) log(`[AgentFarm] Bundled Agent Farm ${bundle.version}: kept ${edited.join(', ')} because it was changed here since Pane installed it; Pane updates no longer replace it.`);
   status = { state: 'ready', configRoot, version: bundle.version, plugins, edited };
+  if (recovered.length) status.recovered = recovered;
   log(`[AgentFarm] Bundled Agent Farm ${bundle.version} set up: ${Object.entries(plugins).map(([name, version]) => `${name} ${version}`).join(', ')}.`);
   return status;
 }

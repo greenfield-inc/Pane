@@ -31,6 +31,13 @@ export async function openLocalPage(fileUrl: string): Promise<void> {
   if (error) throw new Error(error);
 }
 
+/** Opens a folder Pane made (an absolute path) in the OS file manager. */
+export async function openLocalFolder(folder: string): Promise<void> {
+  if (process.platform === 'darwin') return openOnMac(folder);
+  const error = await shell.openPath(folder);
+  if (error) throw new Error(error);
+}
+
 /**
  * On macOS, shell.openExternal can fail silently due to permission/entitlement issues.
  * The native `open` command works reliably. `--` keeps the target from being read as a flag.

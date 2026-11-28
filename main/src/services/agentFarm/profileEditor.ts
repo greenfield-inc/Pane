@@ -31,9 +31,11 @@ import {
   runAgentFarm,
   type AgentFarmRunner,
   type BundledAgentFarm,
+  withoutPackChecksums,
 } from './bundledAgentFarm';
 import { parseProfileList } from './agentFarmProfiles';
 import { forgetSyncedEdit, syncedPluginEdits } from './profileSyncFile';
+import { dismissRecovery, pendingRecoveries, recoveryFolder } from './agentFarmRecovery';
 
 /** The folders of a plugin Agent Farm reads, besides plugin.yaml (Agent Farm's plugins.js). */
 const SECTIONS = ['profiles', 'agents', 'skills', 'instructions', 'references'];
@@ -551,7 +553,19 @@ export class ProfileEditor {
     }
     const overview: ProfilesOverview = { plugins, machine };
     if (failed.length) overview.error = `Pane couldn't read ${failed.join(', ')}. Fix or reinstall the plugin, then open Profiles again.`;
+    const recovered = await pendingRecoveries(this.configRoot);
+    if (recovered.length) overview.recovered = recovered;
     return overview;
+  }
+
+  /** Hides one recovery's notice for good (#1740 review F-3); its saved files stay. */
+  dismissRecovery(id: string): Promise<void> {
+    return dismissRecovery(this.configRoot, id);
+  }
+
+  /** The folder a recovery's edited copy is saved in, for Open folder. */
+  recoveryFolder(id: string): Promise<string> {
+    return recoveryFolder(this.configRoot, id);
   }
 
   /** One file of a plugin. */
@@ -805,22 +819,6 @@ export class ProfileEditor {
     }
     return result;
   }
-}
-
-/**
- * A plugin installed from a pack (greenfield) lists its files' checksums in plugin.yaml,
- * which `plugin validate` checks but launches don't. Any edit changes a file, so the staged copy
- * Pane validates leaves them out; the installed plugin.yaml keeps them.
- */
-async function withoutPackChecksums(manifestFile: string): Promise<void> {
-  const content = await fs.readFile(manifestFile, 'utf8').catch(() => undefined);
-  if (content === undefined) return;
-  let data: JsonObject | undefined;
-  try { data = decodeOptionalBoundary(yaml.load(content), boundary.jsonObject); }
-  catch { return; }
-  if (!data || !('checksums' in data)) return;
-  const { checksums: _packed, ...rest } = data;
-  await fs.writeFile(manifestFile, yaml.dump(rest, { lineWidth: -1 }));
 }
 
 /**

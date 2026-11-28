@@ -145,6 +145,20 @@ describe('ProfileEditor: new profile, subagent, skill and reference', () => {
     await expect(editor(paneDir).newProfile('Bad Name', 'claude')).rejects.toMatchObject({ code: 'PROFILE_NAME_INVALID' });
   }, 60_000);
 
+  // Review F-1: Pane no longer ships dcouple, so the name is free here, and a restart must not retire the new profile.
+  it('keeps a profile created under a retired plugin name across a restart', async () => {
+    const paneDir = tempDir();
+    await editor(paneDir).newProfile('dcouple', 'claude');
+    const configRoot = agentFarmConfigRoot(paneDir);
+    const identity = readFileSync(path.join(configRoot, 'plugins', 'dcouple', 'agents', 'dcouple.md'), 'utf8');
+    const status = await installBundledAgentFarm({ paneDir, bundle, log: () => undefined });
+    expect(status.state).toBe('ready');
+    expect(readFileSync(path.join(configRoot, 'plugins', 'dcouple', 'agents', 'dcouple.md'), 'utf8')).toBe(identity);
+    expect(existsSync(path.join(configRoot, '.plugins', 'dcouple.json'))).toBe(true);
+    const listed = await listPaneAgentFarmProfiles(paneDir);
+    expect(listed.profiles.map(entry => entry.ref)).toContain('dcouple/dcouple');
+  }, 180_000);
+
   it('adds a subagent, a skill and a reference to a profile, and lists them as used', async () => {
     const paneDir = tempDir();
     await installFixture(paneDir);

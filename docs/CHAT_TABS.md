@@ -591,7 +591,12 @@ records; an unchanged bundle installs nothing and the log says so. Plugins older
 installed there (dcouple and bigbrain) are removed at each start with Agent
 Farm's `plugin uninstall`, which deletes only files unchanged since the install
 and leaves (and logs) any the person edited; a failed removal is logged and
-tried again on the next start. A retired plugin's receipt that isn't valid JSON
+tried again on the next start. Pane removes one only when its receipt shows an
+older Pane installed it: from the bundled package's `plugins/<name>` folder, or
+from the pack whose source is the stock `greenfield-inc` repository. A plugin of
+the same name made in the Profiles editor, one that arrived through profile sync
+(`sync.json` records it as a save), or one whose receipt doesn't say where it
+came from is kept, and the log says so. A retired plugin's receipt that isn't valid JSON
 would make every Agent Farm install there fail, so Pane renames it to
 `<name>.json.unreadable-<time>` (keeping its bytes and the plugin's files) and
 logs where it went. When an unchanged bundle's manifest still lists a retired
@@ -599,7 +604,18 @@ plugin, Pane rewrites only the manifest and leaves greenfield's files alone. A
 bundled plugin whose files no longer match Agent Farm's install receipt
 (`.plugins/<name>.json`), because someone edited, added or removed a file, is
 kept as it is: Pane updates no longer replace it, the log names it, and the
-manifest lists it under `edited`. This holds with Profiles on or off, so
+manifest lists it under `edited`. When a new bundle arrives, Pane first checks
+such a kept plugin with the new Agent Farm's `plugin validate` (on a copy
+without the pack's checksums, as the Profiles editor does). One it rejects (an
+edited greenfield from Agent Farm 0.2 can name a variant 0.3 refuses, and then
+`profiles list` fails for every plugin, leaving New Session with no named
+profiles) is saved unchanged, its files and receipt, with a `README.txt` on what
+happened, in `<PANE_DIR>/agent-farm/recovered/<name>-<version>-<time>/`, and the
+copy this Pane ships is installed in its place; the log names the folder. With
+Profiles on, the Profiles tab says so once ("Your edits to <plugin> didn't work
+with this version of Agent Farm. They're saved in <folder>."), with Open folder
+and a dismiss button; dismissing it marks the folder's `recovery.json`, so it
+stays dismissed. If that copy can't be saved, the edit is kept as it is. This holds with Profiles on or off, so
 turning Profiles off never lets an update overwrite a plugin edited while it
 was on. An install that never finished (its lock, a
 plugin Pane was installing then, recorded in `pane-installing.json`, or one with
@@ -625,7 +641,7 @@ Farm's profile format has fields for them. The tab edits the plugins in
 place: a save is first checked with `agent-farm plugin validate` on a staged copy
 (without a pack's stale `checksums`, which launches don't read), so nothing changes
 unless Agent Farm accepts it, and Sessions using the plugin then show the changed
-dot. Saving greenfield or dcouple makes it **Edited** this way, and **Restore
+dot. Saving greenfield makes it **Edited** this way, and **Restore
 Pane's version** reinstalls the bundled copy and takes it off `edited`. A new
 profile is a plugin installed with `agent-farm plugin install`, since Agent Farm
 finds plugins by their receipts. `run` writes its launch bundle to
@@ -662,8 +678,10 @@ and Settings says to remove it there to let the switch decide. Agent Farm still 
 small state of its own (workspace trust, launch records, MCP logins) under
 `~/.local/state/agent-farm` and `~/.cache/agent-farm`. `scripts/verify-chat-adapters.js` (run by
 `scripts/after-pack.js`) fails a packaged build unless Agent Farm is inside
-`app.asar`, carries no native binaries, and answers `--version` under Electron
-as Node.
+`app.asar`, carries no native binaries, answers `--version` under Electron
+as Node, has its plugins packed byte for byte as installed (packing once stripped
+`scripts` from a plugin's `package.json`, which Agent Farm's checksum check
+refuses), and installs its bundled greenfield plugin into a scratch config root.
 
 ### Profile sync across your computers
 
@@ -702,9 +720,9 @@ written after the install. The plugin, its receipt and its photos there are set
 aside first (nothing there is removed until both have been) and put back if
 anything before the record is written fails; a
 deletion is recorded only when a plugin's receipt is certainly gone, never on a
-read that failed. greenfield and dcouple sync only once you change them: a photo
+read that failed. greenfield syncs only once you change it: a photo
 alone keeps each computer's own Pane version (`pane` records), an edit (a title or
-cover page counts, as those plugins ship neither) travels as your copy and stays
+cover page counts, as greenfield ships neither) travels as your copy and stays
 **Edited** there (Pane updates keep it while Profiles is on; off, Agent Farm's
 receipt alone decides, as before), and Restore restores Pane's version everywhere. The calls answer only your own machines, never a
 teammate on a shared tailnet. Two dev instances on one computer sync through
