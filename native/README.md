@@ -1,10 +1,29 @@
 # Pane for iOS and Android (Expo)
 
-The iPhone app is on the App Store: [Pane - Remote Coding Agents](https://apps.apple.com/app/id6808839038). The rest of this page is for developing it.
+The iPhone app is on the App Store: [Pane - Remote Coding Agents](https://apps.apple.com/app/id6808839038). On Android, [install the APK](#install-on-an-android-phone). The rest of this page is for developing the app.
 
 `native/` is the React Native companion app for Pane: Expo SDK 57, React Native 0.86 (New Architecture, Hermes), Expo Router, a dev client, TypeScript strict and the React Compiler. It sits beside the Capacitor shell in `mobile/`, which keeps working, and uses the same bundle ID (`com.dcouple.pane.mobile`).
 
 The app talks to a Pane host (daemon) over its HTTP API: `POST /invoke`, the `GET /events` SSE stream and `/health`. It uses the shared client in `shared/remoteClient`. The bearer token goes only in the `Authorization` header, never in a URL.
+
+## Install on an Android phone
+
+The `Native Android APK` workflow (`.github/workflows/native-apk.yml`) builds a release APK for 64-bit Arm (`arm64-v8a`) phones. It runs only when started by hand.
+
+**Published build.** After a maintainer runs the workflow with **publish** checked, download `https://github.com/greenfield-inc/Pane/releases/download/android-latest/pane-android.apk` on the phone, open it, and allow your browser to install apps when Android asks. Publishing needs a release key ([RUNBOOK](../RUNBOOK.md#android-apk)); until the first publish that address answers 404.
+
+**Test build.** Run the workflow with **publish** unchecked, on any branch (`gh workflow run native-apk.yml --ref <branch>`; a fork can run it too, once the workflow is on its default branch). Download the artifact and install it over USB, with USB debugging on:
+
+```bash
+gh run download <run-id> -n pane-android-apk
+adb install -r app-release.apk
+```
+
+A test build is signed with the Expo template's debug key, which is public. Android refuses to update an app with one signed by another key, so moving between a test build and the published build means uninstalling first, then pairing again.
+
+**Pair it.** On the computer, choose **Pair a device**. The app opens on the camera the first time; later, use **Settings › Add a machine**. Scan inside the app: the camera app opens it only for builds whose certificate the relay lists ([app links](../relay/deploy/RUNBOOK.md)).
+
+Either build then takes [over-the-air updates](#over-the-air-updates) for its runtime version, so a test build from a branch stops running the branch's JavaScript once `main` publishes a newer update.
 
 ## Run it
 

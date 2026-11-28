@@ -1,0 +1,186 @@
+name: Native Android APK
+
+# Builds an installable release APK of the Expo app (arm64-v8a), with its
+# JavaScript inside, unlike the dev client in native-android.yml. Every run
+# uploads the APK as an artifact, signed with the debug key from the Expo
+# template. A run with `publish` re-signs it with the release key and uploads it
+# to the rolling `android-latest` pre-release. See native/README.md.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Sign with the release key and publish to the android-latest pre-release (main only)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build APK (arm64-v8a)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+    # Fail before the long build, not after it.
+    - name: Check the publish request
+      if: inputs.publish && github.ref != 'refs/heads/main'
+      run: |
+        echo "::error::Publishing runs from main only. Run this workflow on main, or leave publish unchecked."
+        exit 1
+
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Setup Java
+      uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      with:
+        distribution: temurin
+        java-version: '17'
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile --ignore-scripts
+
+    # A published APK must be able to receive alerts; a test build may go without.
+    - name: Write Firebase Android config
+      env:
+        GOOGLE_SERVICES_JSON: ${{ secrets.PANE_ANDROID_GOOGLE_SERVICES_JSON }}
+        PUBLISH: ${{ inputs.publish }}
+      run: |
+        set -euo pipefail
+        if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+          if [ "$PUBLISH" = true ]; then
+            echo "::error::PANE_ANDROID_GOOGLE_SERVICES_JSON is not set, so a published APK could not receive alerts (see native/README.md)."
+            exit 1
+          fi
+          echo "::notice::No Firebase config; this APK will not receive alerts."
+          exit 0
+        fi
+        printf '%s' "$GOOGLE_SERVICES_JSON" | base64 --decode > native/google-services.json
+        jq -e '[.client[].client_info.android_client_info.package_name] | index("com.dcouple.pane.mobile")' native/google-services.json > /dev/null 2>&1 \
+          || { echo "::error::PANE_ANDROID_GOOGLE_SERVICES_JSON is not a google-services.json for com.dcouple.pane.mobile."; exit 1; }
+
+    - name: Generate Android project
+      working-directory: native
+      run: pnpm exec expo prebuild --platform android --no-install
+
+    - name: Set up Rust for the pane-direct library
+      run: |
+        rustup toolchain install stable --profile minimal && rustup default stable
+        rustup target add aarch64-linux-android
+        cargo install cargo-ndk --locked
+
+    # The default Gradle heap and metaspace run out while compiling expo-updates.
+    - name: Build release APK
+      working-directory: native/android
+      env:
+        NODE_ENV: production
+      run: >-
+        ./gradlew assembleRelease --no-daemon
+        -PreactNativeArchitectures=arm64-v8a
+        "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=2g"
+
+    - name: Check the APK carries the app and pane-direct
+      working-directory: native/android/app/build/outputs/apk/release
+      # One entry per call: unzip succeeds when any of several names matches.
+      run: |
+        set -euo pipefail
+        for entry in assets/index.android.bundle lib/arm64-v8a/libpane_direct.so; do
+          unzip -Z1 app-release.apk "$entry" > /dev/null || { echo "::error::The APK is missing $entry."; exit 1; }
+        done
+
+    - name: Upload the APK
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: pane-android-apk
+        path: native/android/app/build/outputs/apk/release/app-release.apk
+        if-no-files-found: error
+        retention-days: 14
+
+    - name: Say how to install it
+      run: |
+        {
+          echo '### Pane for Android (test build, debug key)'
+          echo 'Download the `pane-android-apk` artifact below, unzip it, then run `adb install -r app-release.apk`,'
+          echo 'or copy the APK to the phone and open it. Then scan the code that **Pair a device** shows on your computer from inside the app.'
+        } >> "$GITHUB_STEP_SUMMARY"
+
+  # Holds the release key, so it checks nothing out and runs no dependency code.
+  publish:
+    name: Sign and publish
+    needs: build
+    if: inputs.publish && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: android-release
+    permissions:
+      contents: write # To create the pre-release and upload the APK.
+    concurrency:
+      group: native-apk-publish
+      cancel-in-progress: false
+
+    steps:
+    - name: Download the APK
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        name: pane-android-apk
+
+    - name: Sign with the release key
+      env:
+        ANDROID_KEYSTORE_BASE64: ${{ secrets.PANE_ANDROID_KEYSTORE_BASE64 }}
+        ANDROID_KEYSTORE_PASSWORD: ${{ secrets.PANE_ANDROID_KEYSTORE_PASSWORD }}
+        ANDROID_KEY_ALIAS: ${{ secrets.PANE_ANDROID_KEY_ALIAS }}
+        ANDROID_KEY_PASSWORD: ${{ secrets.PANE_ANDROID_KEY_PASSWORD }}
+      run: |
+        set -euo pipefail
+        for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+          if [ -z "${!name}" ]; then
+            echo "::error::PANE_$name is not set in the android-release environment (see RUNBOOK.md). Nothing was published."
+            exit 1
+          fi
+        done
+        keystore="$RUNNER_TEMP/release.keystore"
+        trap 'rm -f "$keystore"' EXIT
+        printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+        apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+        # Signing replaces the build's debug signature.
+        "$apksigner" sign --ks "$keystore" --ks-key-alias "$ANDROID_KEY_ALIAS" \
+          --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD \
+          --v4-signing-enabled false --out pane-android.apk app-release.apk
+        "$apksigner" verify --print-certs pane-android.apk | tee certificates.txt
+        sha256sum pane-android.apk > pane-android.apk.sha256
+
+    - name: Publish to the android-latest pre-release
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: android-latest
+      run: |
+        set -euo pipefail
+        download="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG/pane-android.apk"
+        {
+          echo "Pane for Android phones (arm64-v8a), built from $GITHUB_SHA."
+          echo
+          echo "1. On the phone, download $download"
+          echo "2. Open it and allow your browser to install apps when Android asks."
+          echo "3. In Pane on your computer, choose **Pair a device**, then scan the code from inside the phone app."
+          echo
+          echo "SHA-256: \`$(cut -d ' ' -f 1 pane-android.apk.sha256)\`"
+          echo
+          echo '```'
+          cat certificates.txt
+          echo '```'
+        } > notes.md
+        # A pre-release that is never Latest stays out of the desktop and CLI updaters.
+        if ! gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+          gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title 'Pane for Android' --notes-file notes.md --prerelease --latest=false
+        fi
+        gh release upload "$TAG" pane-android.apk pane-android.apk.sha256 -R "$GITHUB_REPOSITORY" --clobber
+        gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --notes-file notes.md --prerelease --latest=false
+        echo "Published $download" >> "$GITHUB_STEP_SUMMARY"

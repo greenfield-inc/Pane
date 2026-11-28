@@ -224,6 +224,37 @@ interactive `mcp-publisher login github` cannot publish to an organization
 namespace. Check the listing with
 `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=runpane"`.
 
+## Android APK
+
+`Native Android APK` (`native-apk.yml`) builds the phone app's release APK. It
+is manual and separate from the stable release. With `publish` unchecked it
+uploads a debug-key artifact. With `publish` checked, on `main`, it also signs
+the APK with the release key and uploads `pane-android.apk` and its SHA-256 to
+the `android-latest` pre-release, replacing the files there. The tag stays on
+the commit of the first publish; the release notes name the commit of the files.
+
+Once, before the first publish:
+
+1. Create the release key and keep a copy outside GitHub. Losing it means
+   every user must uninstall to take a later build.
+
+   ```bash
+   keytool -genkeypair -keystore pane-release.keystore -alias pane \
+     -keyalg RSA -keysize 4096 -validity 10000
+   ```
+
+2. Create the `android-release` environment, limit it to `main`, add required
+   reviewers, and save the four `PANE_ANDROID_KEY*` secrets in it
+   ([Secrets and variables](#secrets-and-variables)). Encode the keystore with
+   `base64 -w0 pane-release.keystore`.
+3. Add the key's SHA-256 (`keytool -list -v -keystore pane-release.keystore`)
+   to the relay's `PANE_RELAY_ANDROID_CERT_SHA256`, so pairing links open the
+   app ([relay/deploy/RUNBOOK.md](relay/deploy/RUNBOOK.md)).
+
+To publish: `gh workflow run native-apk.yml --ref main -f publish=true`. To roll
+back, revert on `main` and publish again; phones that already installed the bad
+APK need the new one installed over it.
+
 ## CI
 
 `CI result` is the check branch protection requires. It runs even when the
@@ -386,6 +417,8 @@ Names only; values live in the GitHub repository settings.
 | `SITE_REPO_DISPATCH_TOKEN` | `build.yml`, `notify-website.yml` | Sends the `pane-release` event to the website repo |
 | `TRAFFIC_TOKEN` | `traffic-snapshot.yml` | Reads repository traffic |
 | `PANE_RELAY_ACME_EMAIL`, `PANE_RELAY_APNS_KEY_ID`, `PANE_RELAY_APNS_TEAM_ID`, `PANE_RELAY_ANDROID_CERT_SHA256` variables | `relay-deploy.yml` | Relay certificates, iOS alerts and app links; see [relay/deploy/RUNBOOK.md](relay/deploy/RUNBOOK.md) |
+| `PANE_ANDROID_GOOGLE_SERVICES_JSON` | `native-android.yml`, `native-apk.yml` | Firebase Android app config, base64; see [native/README.md](native/README.md#firebase-config-google-servicesjson) |
+| `PANE_ANDROID_KEYSTORE_BASE64`, `PANE_ANDROID_KEYSTORE_PASSWORD`, `PANE_ANDROID_KEY_ALIAS`, `PANE_ANDROID_KEY_PASSWORD` | `native-apk.yml` (`android-release` environment) | Release signing of the published APK. See [Android APK](#android-apk) |
 | `GCP_*`, `CLOUD_RUN_*` variables | `deploy-remote-pwa-preview.yml`, `native-updates.yml` (all but `CLOUD_RUN_SERVICE`) | See [Remote PWA preview](#remote-pwa-preview) |
 
 Local development needs no secrets and no `.env` file.
