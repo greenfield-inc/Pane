@@ -22,6 +22,8 @@ export interface AgentChatConfig {
   paneMcpHttp?: boolean;
   /** How the agent marks skills and takes them in a message; absent when it does not mark them (schema.json). */
   skills?: 'meta' | 'dollar';
+  /** The model of Pane's plain Agent Farm profile, pane/<agent> (T-63). */
+  profileModel?: string;
   legacyClients?: boolean;
   registryIds?: readonly string[];
 }

@@ -33,6 +33,34 @@ A Session already running in a terminal can move to chat with
 terminal agent tab in it (see
 [CHAT_TABS.md](CHAT_TABS.md#switching-a-terminal-tab-to-chat)).
 
+### Sessions run through Agent Farm
+
+With Profiles on (Settings › Advanced › Experimental, `sessionProfilesEnabled`; off
+by default), a new chat Session runs its agent through Pane's own Agent Farm (see
+[CHAT_TABS.md](CHAT_TABS.md#a-sessions-agent-farm-profile)). The record saves which
+profile in `agentProfile`, `{ ref, hash }`: the ref is `pane/claude` or
+`pane/codex` when the Session has no profile (the agent on its own, which adds
+nothing of Agent Farm's), the launch command's profile for `agent-farm run
+<profile>`, or the `agentProfile` passed to `runpane sessions create --from-json`
+(for example `greenfield/orchestrator`, which then picks the agent; a named variant must exist, and Pane asks its Agent Farm which agent a non-default variant runs, refusing an `agent` that disagrees before it saves anything). A new launch command keeps a named profile; a new agent moves the Session to that agent's plain profile. `hash` is the
+content hash of the profile's plugin when the Session took it. The profile's
+instructions go into the Session folder as `PROFILE.md` and a section of its
+`AGENTS.md`, rewritten at every start; a `PROFILE.md` Pane didn't write (it marks its
+own on the first line) is left alone, and the `AGENTS.md` section alone carries the
+profile. Sessions created before this, Sessions that
+keep a terminal, and Cursor, OpenCode and Pi Sessions have no `agentProfile` and
+start their agent directly, as before; so does a new Session when Pane's own
+plugin isn't installed yet. Changing a Session's agent or launch command keeps it
+on Agent Farm. `chat-tab:profiles` lists the profiles a Session can start with on a
+computer (another machine reads it through `machines:read`); Pane's plain profiles
+are marked `hidden`.
+
+With Profiles off, Sessions start as on main: no new Session gets an
+`agentProfile`, `runpane sessions create` refuses one (`SESSION_PROFILE_UNSUPPORTED`),
+a saved one is ignored and dropped when the Session's agent or launch command
+changes, and `chat-tab:profiles` returns an empty list. Turning Profiles on or off
+applies to the next start of a Session's agent.
+
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle
 on top and that kind's form below. When the desktop has saved other machines,
 a **Machine** picker sits between them. It starts on the machine you last

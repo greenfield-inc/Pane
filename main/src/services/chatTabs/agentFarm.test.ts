@@ -50,7 +50,7 @@ describe('the agent-farm command', () => {
 describe('Agent Farm profiles in chat tabs', () => {
   it('starts a profile with its printed settings, selects its mode and keeps env out of saved state', async () => {
     const directory = scratch();
-    const profiles = new AgentFarmProfiles({ ...PROFILES_ON, bundled, adapter: async () => '/adapters/claude/dist/index.js', checkCli: async () => undefined });
+    const profiles = new AgentFarmProfiles({ ...PROFILES_ON, sessionProfile: async () => undefined, bundled, adapter: async () => '/adapters/claude/dist/index.js', checkCli: async () => undefined });
     const saved = new Map<string, string>();
     const panel: ToolPanel = { id: 'p1', sessionId: 'pane', type: 'chat', title: 'implementer', state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
     const store: ChatTabStore = {
@@ -85,7 +85,7 @@ describe('Agent Farm profiles in chat tabs', () => {
   it('checks the CLI of the harness Agent Farm printed, in the printed folder and environment', async () => {
     const directory = realpathSync(scratch());
     const checks: Array<{ agent: string; cwd?: string; profile?: string; path?: string }> = [];
-    const profiles = new AgentFarmProfiles({ ...PROFILES_ON, bundled, adapter: async () => '/adapter.js', checkCli: async (agent, context) => { checks.push({ agent, cwd: context.cwd, profile: context.env?.AGENT_FARM_PROFILE, path: context.env?.PATH }); } });
+    const profiles = new AgentFarmProfiles({ ...PROFILES_ON, sessionProfile: async () => undefined, bundled, adapter: async () => '/adapter.js', checkCli: async (agent, context) => { checks.push({ agent, cwd: context.cwd, profile: context.env?.AGENT_FARM_PROFILE, path: context.env?.PATH }); } });
     // The caller guessed claude; Agent Farm says this profile runs Codex, so Codex is what gets checked.
     const printed = await profiles.print('team/codex', {}, 'claude', directory, { PATH: process.env.PATH ?? '', FAKE_AGENT_FARM_HARNESS: 'codex' });
     expect(printed.harness).toBe('codex');
@@ -94,7 +94,7 @@ describe('Agent Farm profiles in chat tabs', () => {
 
   it('stops a profile whose CLI is too old, with that error', async () => {
     const directory = scratch();
-    const profiles = new AgentFarmProfiles({ ...PROFILES_ON, bundled, adapter: async () => '/adapter.js', checkCli: async () => { throw new PaneError('CHAT_AGENT_OUTDATED', 'Claude Code 2.0.1 is older than 2.1.316.', 'Update it.'); } });
+    const profiles = new AgentFarmProfiles({ ...PROFILES_ON, sessionProfile: async () => undefined, bundled, adapter: async () => '/adapter.js', checkCli: async () => { throw new PaneError('CHAT_AGENT_OUTDATED', 'Claude Code 2.0.1 is older than 2.1.316.', 'Update it.'); } });
     await expect(profiles.print('team/claude', {}, 'claude', directory, { PATH: process.env.PATH ?? '' })).rejects.toMatchObject({ code: 'CHAT_AGENT_OUTDATED' });
   });
 
@@ -108,10 +108,10 @@ describe('Agent Farm profiles in chat tabs', () => {
 
   it('names the profile and the next step when Agent Farm refuses it', async () => {
     const directory = scratch();
-    const profiles = new AgentFarmProfiles({ ...PROFILES_ON, bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    const profiles = new AgentFarmProfiles({ ...PROFILES_ON, sessionProfile: async () => undefined, bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined });
     await expect(profiles.print('missing/profile', {}, 'claude', directory, { PATH: process.env.PATH ?? '' })).rejects.toMatchObject({ code: 'CHAT_PROFILE_FAILED', message: expect.stringContaining('Unknown profile: missing/profile') });
     await expect(profiles.print('old/agent-farm', {}, 'claude', directory, { PATH: process.env.PATH ?? '' })).rejects.toMatchObject({ code: 'CHAT_PROFILE_FAILED', next: expect.stringContaining('Update Agent Farm') });
-    const unbundled = new AgentFarmProfiles({ ...PROFILES_ON, bundled: async () => undefined, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    const unbundled = new AgentFarmProfiles({ ...PROFILES_ON, sessionProfile: async () => undefined, bundled: async () => undefined, adapter: async () => '/adapter.js', checkCli: async () => undefined });
     await expect(unbundled.print('x', {}, 'claude', directory, {})).rejects.toMatchObject({ code: 'CHAT_AGENT_NOT_INSTALLED', next: expect.stringContaining('Reinstall Pane') });
   });
 
@@ -119,7 +119,7 @@ describe('Agent Farm profiles in chat tabs', () => {
     const directory = scratch();
     const calls: string[][] = [];
     const recording = async (args: string[], cwd: string, env: Record<string, string>) => { calls.push(args); return bundled(args, cwd, env); };
-    const profiles = new AgentFarmProfiles({ ...PROFILES_ON, bundled: recording, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    const profiles = new AgentFarmProfiles({ ...PROFILES_ON, sessionProfile: async () => undefined, bundled: recording, adapter: async () => '/adapter.js', checkCli: async () => undefined });
     const { ELECTRON_RUN_AS_NODE: _unset, ...env } = inherited();
     const printed = await profiles.print('greenfield/implementer:opus', {}, 'claude', directory, env);
     expect(printed.harness).toBe('claude');
@@ -137,18 +137,94 @@ describe('Agent Farm profiles in chat tabs with Profiles off', () => {
     const calls: string[][] = [];
     const recording = async (args: string[], cwd: string, env: Record<string, string>) => { calls.push(args); return bundled(args, cwd, env); };
     const { ELECTRON_RUN_AS_NODE: _unset, ...env } = inherited();
-    const withoutOwn = new AgentFarmProfiles({ profilesOn: () => false, executable: () => undefined, bundled: recording, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    const withoutOwn = new AgentFarmProfiles({ profilesOn: () => false, sessionProfile: async () => undefined, executable: () => undefined, bundled: recording, adapter: async () => '/adapter.js', checkCli: async () => undefined });
     const printed = await withoutOwn.print('greenfield/implementer:opus', {}, 'claude', directory, env);
     expect(printed.launch.command.env?.ELECTRON_RUN_AS_NODE).toBe('1');
     expect(calls).toHaveLength(1);
-    const withOwn = new AgentFarmProfiles({ profilesOn: () => false, executable: () => fakeCli(directory), bundled: recording, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    const withOwn = new AgentFarmProfiles({ profilesOn: () => false, sessionProfile: async () => undefined, executable: () => fakeCli(directory), bundled: recording, adapter: async () => '/adapter.js', checkCli: async () => undefined });
     const own = await withOwn.print('greenfield/implementer:opus', {}, 'claude', directory, env);
     expect(calls).toHaveLength(1);
     expect(own.launch.command.env?.ELECTRON_RUN_AS_NODE).toBeUndefined();
   });
 
   it('says to install agent-farm or reinstall Pane when neither is there', async () => {
-    const absent = new AgentFarmProfiles({ profilesOn: () => false, executable: () => undefined, bundled: async () => undefined, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    const absent = new AgentFarmProfiles({ profilesOn: () => false, sessionProfile: async () => undefined, executable: () => undefined, bundled: async () => undefined, adapter: async () => '/adapter.js', checkCli: async () => undefined });
     await expect(absent.print('x', {}, 'claude', scratch(), {})).rejects.toMatchObject({ code: 'CHAT_AGENT_NOT_INSTALLED', next: expect.stringContaining('Install the agent-farm CLI') });
+  });
+});
+
+describe('a Session\'s orchestrator through Agent Farm (T-63)', () => {
+  const panel: ToolPanel = { id: 'orch', sessionId: 'internal', type: 'chat', title: 'Session', state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
+  function session(profile: string, agent: 'claude' | 'codex', extra: Partial<ChatPanelState['launch']> = {}, on = true) {
+    const folder = scratch();
+    const written: Array<{ folder: string; profile: string; instructions: string }> = [];
+    const grants: string[] = [];
+    const profiles = new AgentFarmProfiles({
+      ...(on ? PROFILES_ON : { profilesOn: () => false, executable: () => undefined }), bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined,
+      sessionProfile: async (target, name, instructions) => { written.push({ folder: target, profile: name, instructions }); },
+      grantPaneMcp: tab => { grants.push(tab.panelId); return { PANE_MCP_URL: 'http://127.0.0.1:1/mcp', PANE_MCP_TOKEN: 'token' }; },
+    });
+    // SAFETY: test states only ever widen the profile launch with fullAccess.
+    const launch = { kind: 'profile', profile, ...extra } as ChatPanelState['launch'];
+    const state: ChatPanelState = { agent, launch, cwd: folder, status: 'starting', orchestrationSessionId: 'session-1', sessionFolder: folder };
+    const env = { PATH: process.env.PATH ?? '', FAKE_AGENT_FARM_HARNESS: agent };
+    return { folder, written, grants, resolve: () => profiles.resolve(panel, state, env) };
+  }
+
+  it('moves Claude\'s profile instructions into the Session folder and keeps the person\'s MCP servers beside Pane\'s', async () => {
+    const { folder, written, grants, resolve } = session('greenfield/orchestrator', 'claude');
+    const launch = await resolve();
+    expect(written).toEqual([{ folder, profile: 'greenfield/orchestrator', instructions: 'Profile greenfield/orchestrator\n\nLAUNCH CONTEXT\nheadless: false' }]);
+    expect(launch.meta?.systemPrompt).toBeUndefined();
+    expect(launch.meta?.claudeCode).toEqual({ options: {
+      model: 'claude-opus-5-5', plugins: [{ type: 'local', path: '/bundle/main' }],
+      mcpServers: { profile_server: { type: 'stdio', command: 'x', args: [], env: {} } },
+      strictMcpConfig: false,
+      settings: { deniedMcpServers: [{ serverName: 'plugin:pane:pane' }] },
+    } });
+    expect(grants).toEqual(['orch']);
+    expect(launch.mcpServers).toEqual([expect.objectContaining({ type: 'http', name: 'pane' })]);
+    expect(launch.command.env).toMatchObject({ PANE_MCP_TOKEN: 'token' });
+    // A real profile keeps the permission mode Agent Farm gives it.
+    expect(launch.mode).toBe('bypassPermissions');
+  });
+
+  // Profiles off (T-63's flag): no PROFILE.md and no MCP or permission rewrites; the launch runs as printed, as on main.
+  it('leaves a Session\'s profile launch as Agent Farm printed it with Profiles off', async () => {
+    const { written, grants, resolve } = session('greenfield/orchestrator', 'claude', {}, false);
+    const launch = await resolve();
+    expect(written).toEqual([]);
+    expect(grants).toEqual([]);
+    expect(launch.meta?.systemPrompt).toEqual({ append: expect.stringContaining('LAUNCH CONTEXT') });
+    expect(launch.mcpServers).toBeUndefined();
+    expect(launch.mode).toBe('bypassPermissions');
+    const plain = await session('pane/claude', 'claude', {}, false).resolve();
+    expect(plain.mode).toBe('bypassPermissions');
+  });
+
+  it('runs plain Claude with the permissions it had before Agent Farm, and full access only when the Session asked', async () => {
+    expect((await session('pane/claude', 'claude').resolve()).mode).toBeUndefined();
+    expect((await session('pane/claude', 'claude', { fullAccess: true }).resolve()).mode).toBe('bypassPermissions');
+  });
+
+  it('moves Codex\'s developer_instructions into the Session folder and keeps the rest of its config', async () => {
+    const { written, grants, resolve } = session('pane/codex', 'codex');
+    const launch = await resolve();
+    expect(written[0]?.instructions).toBe('Profile pane/codex\n\nLAUNCH CONTEXT\nheadless: false');
+    expect(JSON.parse(launch.command.env.CODEX_CONFIG ?? '{}')).toEqual({ model: 'gpt-6-astra', mcp_servers: {} });
+    // Plain Codex asks as before; Codex reaches Pane through its own config, so no HTTP grant.
+    expect(launch.command.env.INITIAL_AGENT_MODE).toBeUndefined();
+    expect(launch.mode).toBeUndefined();
+    expect(grants).toEqual([]);
+  });
+
+  it('leaves a profile chat tab outside a Session as Agent Farm printed it', async () => {
+    const written: string[] = [];
+    const profiles = new AgentFarmProfiles({ ...PROFILES_ON, bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined, sessionProfile: async (_folder, profile) => { written.push(profile); } });
+    const state: ChatPanelState = { agent: 'claude', launch: { kind: 'profile', profile: 'greenfield/implementer' }, cwd: scratch(), status: 'starting' };
+    const launch = await profiles.resolve(panel, state, { PATH: process.env.PATH ?? '' });
+    expect(written).toEqual([]);
+    expect(launch.meta?.systemPrompt).toEqual({ append: expect.stringContaining('LAUNCH CONTEXT') });
+    expect(launch.mcpServers).toBeUndefined();
   });
 });

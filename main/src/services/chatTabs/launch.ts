@@ -21,7 +21,9 @@ import type { ChatTabLauncher, ResolvedLaunch } from './manager';
 import { boundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { claudeSessionFolderSettings, isSessionFolderSettings } from '../agents/sessionFolderAccess';
 import type { ResolvedProjectEnv } from '../projectEnvVars';
-import { sessionGitCeiling } from '../sessionWorkspace';
+import { clearSessionProfile, sessionGitCeiling } from '../sessionWorkspace';
+import { plainProfileAgent } from '../agentFarm/agentFarmProfiles';
+import { profilesOn } from '../agentFarm/profilesFeature';
 
 /** API keys a person may set for chat tabs on this machine, kept in the OS secure store. */
 export interface ChatTabSecrets { apiKey(agent: ChatAgent): string | undefined }
@@ -96,9 +98,20 @@ export class AgentChatLauncher implements ChatTabLauncher {
     secrets: ChatTabSecrets; context: ChatLaunchContext; profiles?: ChatProfileResolver; registry?: RegistryAgentLauncher;
     /** An agent's CLI on the PATH terminal agent tabs use. */
     findExecutable?: (name: string) => string | null;
+    /** Settings › Advanced › Profiles (T-63); tests pass their own. */
+    profilesOn?: () => boolean;
+    /** Takes a Session's profile out of its folder (sessionWorkspace.ts); tests pass their own. */
+    clearSessionProfile?: (sessionFolder: string) => void;
   }) {}
 
-  async resolve(panel: ToolPanel, state: ChatPanelState): Promise<ResolvedLaunch> {
+  async resolve(panel: ToolPanel, saved: ChatPanelState): Promise<ResolvedLaunch> {
+    const on = this.options.profilesOn ?? profilesOn;
+    const state = withoutPaneProfile(saved, on);
+    // A Session's agent that starts without Agent Farm writing its profile (Profiles off, a direct
+    // agent such as OpenCode) starts without the profile an earlier start left in its folder (review F-2).
+    if (state.orchestrationSessionId && state.sessionFolder && !(state.launch.kind === 'profile' && on())) {
+      (this.options.clearSessionProfile ?? clearSessionProfile)(state.sessionFolder);
+    }
     const unsupported = this.options.context.unsupportedHost(panel);
     if (unsupported) throw new PaneError('CHAT_UNSUPPORTED_HOST', unsupported, `Open "${agentLabel(state.agent)} in Terminal" from the + menu instead.`);
     // A Session orchestrator's Pane belongs to no project, as in terminals.
@@ -300,3 +313,15 @@ export function sessionFolderMeta(state: Pick<ChatPanelState, 'agent' | 'cwd' | 
   return { [namespace]: { options: { settings: claudeSessionFolderSettings(state.sessionFolder) } } };
 }
 
+
+/**
+ * A tab saved with a profile Pane chose (T-63) while Profiles was on (Pane's plain pane/<agent>, or
+ * the Session's own Agent Farm profile) starts its agent on its own once Profiles is off, with the
+ * access the profile kept, as main starts it (review F-2). Every other launch, a launch command's
+ * `agent-farm run` included, is returned as it is.
+ */
+export function withoutPaneProfile(state: ChatPanelState, on: () => boolean = profilesOn): ChatPanelState {
+  if (state.launch.kind !== 'profile' || on()) return state;
+  if (plainProfileAgent(state.launch.profile) !== state.agent && state.launch.fromSession !== true) return state;
+  return { ...state, launch: state.launch.fullAccess ? { kind: 'agent', fullAccess: true } : { kind: 'agent' } };
+}

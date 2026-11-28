@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -12,11 +12,14 @@ import {
   agentFarmTelemetrySync,
   bundledAgentFarmProcess,
   installBundledAgentFarm,
+  paneAgentFarmHarness,
   paneAgentFarmProcess,
   writeAgentFarmTelemetry,
   type AgentFarmProcess,
   type BundledAgentFarm,
 } from './bundledAgentFarm';
+import { parseProfileList } from './agentFarmProfiles';
+import { configuredAgent } from '../../../../shared/agents';
 
 const temporary: string[] = [];
 afterEach(() => {
@@ -49,8 +52,11 @@ function recordingRunner(calls: AgentFarmProcess[], fail?: string, failUninstall
       return `{\n  "name": "${name}",\n  "removed": ["a.md", "b.md"],\n  "stayed": [{ "file": "c.md", "reason": "modified" }]\n}\n`;
     }
     if (fail) throw Object.assign(new Error('Command failed'), { stderr: `warning\n${fail}\n` });
-    const name = process.args[3] === '--config-root' ? 'greenfield' : process.args[3];
+    // No name installs greenfield; a path installs the plugin in that folder (Pane's own).
+    const name = process.args[3] === '--config-root' ? 'greenfield' : path.basename(process.args[3]);
     mkdirSync(path.join(root, 'plugins', name), { recursive: true });
+    // A plugin from a folder is copied, as Agent Farm does.
+    if (process.args[3] !== '--config-root' && path.isAbsolute(process.args[3])) cpSync(process.args[3], path.join(root, 'plugins', name), { recursive: true });
     return `note: installed\n{\n  "name": "${name}",\n  "version": "1.2.3",\n  "changed": 4\n}\n`;
   };
 }
@@ -75,9 +81,10 @@ describe('installBundledAgentFarm', () => {
     const logs: string[] = [];
     const status = await installBundledAgentFarm({ paneDir, bundle: fakeBundle(), run: recordingRunner(calls), log: (line) => logs.push(line) });
     expect(status).toMatchObject({ state: 'ready', version: '0.2.34', configRoot: agentFarmConfigRoot(paneDir) });
-    expect(Object.keys(status.plugins)).toEqual([...BUNDLED_AGENT_FARM_PLUGINS]);
+    expect(Object.keys(status.plugins)).toEqual([...BUNDLED_AGENT_FARM_PLUGINS, 'pane']);
     expect(calls.map((call) => call.args.slice(1))).toEqual([
       ['plugin', 'install', '--config-root', path.join(paneDir, 'agent-farm')],
+      ['plugin', 'install', path.join(paneDir, 'agent-farm', 'pane-plugin', 'pane'), '--config-root', path.join(paneDir, 'agent-farm')],
     ]);
     expect(calls.every((call) => call.env.ELECTRON_RUN_AS_NODE === '1')).toBe(true);
     const manifest = JSON.parse(readFileSync(path.join(paneDir, 'agent-farm', 'pane-manifest.json'), 'utf8'));
@@ -104,8 +111,8 @@ describe('installBundledAgentFarm', () => {
       ['plugin', 'uninstall', 'bigbrain'],
     ]);
     expect(status).toMatchObject({ state: 'ready', plugins: { greenfield: '1.2.3' } });
-    expect(Object.keys(status.plugins)).toEqual(['greenfield']);
-    expect(Object.keys(JSON.parse(readFileSync(manifestPath, 'utf8')).plugins)).toEqual(['greenfield']);
+    expect(Object.keys(status.plugins)).toEqual(['greenfield', 'pane']);
+    expect(Object.keys(JSON.parse(readFileSync(manifestPath, 'utf8')).plugins)).toEqual(['greenfield', 'pane']);
     expect(logs).toContainEqual(expect.stringContaining('Uninstalled retired plugin dcouple: removed 2 files, left 1 changed file in place (c.md).'));
     expect(logs).toContainEqual(expect.stringContaining('Uninstalled retired plugin bigbrain'));
     // Idempotent: the next start finds nothing to retire and nothing to reinstall.
@@ -131,7 +138,7 @@ describe('installBundledAgentFarm', () => {
     expect(calls).toEqual([]);
     expect(readFileSync(local, 'utf8')).toBe('name: mine\n');
     expect(status).toMatchObject({ state: 'ready', plugins: { greenfield: '1.2.3' } });
-    expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toEqual({ ...manifest, plugins: { greenfield: '1.2.3' } });
+    expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toEqual({ ...manifest, plugins: { greenfield: '1.2.3', pane: '1.2.3' } });
     expect(logs).toContainEqual(expect.stringContaining('dropped dcouple from the manifest'));
   });
 
@@ -144,7 +151,8 @@ describe('installBundledAgentFarm', () => {
     const logs: string[] = [];
     const status = await installBundledAgentFarm({ paneDir, bundle: fakeBundle(), run: recordingRunner(calls), log: (line) => logs.push(line) });
     expect(status).toMatchObject({ state: 'ready', plugins: { greenfield: '1.2.3' } });
-    expect(calls.map((call) => call.args.slice(1, 3))).toEqual([['plugin', 'install']]);
+    // greenfield, then Pane's own plugin.
+    expect(calls.map((call) => call.args.slice(1, 3))).toEqual([['plugin', 'install'], ['plugin', 'install']]);
     const aside = readdirSync(path.join(configRoot, '.plugins')).filter((file) => file.startsWith('dcouple'));
     expect(aside).toHaveLength(1);
     expect(aside[0].endsWith('.json')).toBe(false);
@@ -160,7 +168,7 @@ describe('installBundledAgentFarm', () => {
     const logs: string[] = [];
     const status = await installBundledAgentFarm({ paneDir, bundle: fakeBundle(), run: recordingRunner(calls, undefined, 'error: permission denied'), log: (line) => logs.push(line) });
     expect(status).toMatchObject({ state: 'ready', plugins: { greenfield: '1.2.3' } });
-    expect(calls.map((call) => call.args.slice(1, 3))).toEqual([['plugin', 'uninstall'], ['plugin', 'install']]);
+    expect(calls.map((call) => call.args.slice(1, 3))).toEqual([['plugin', 'uninstall'], ['plugin', 'install'], ['plugin', 'install']]);
     expect(logs).toContainEqual(expect.stringContaining("Pane couldn't uninstall the retired Agent Farm plugin dcouple"));
     expect(logs).toContainEqual(expect.stringContaining('error: permission denied'));
   });
@@ -184,10 +192,10 @@ describe('installBundledAgentFarm', () => {
     writeFileSync(path.join(bundle.root, 'plugins', 'greenfield', 'plugin.yaml'), 'name: greenfield\nversion: 0.0.47\n');
     const calls: AgentFarmProcess[] = [];
     await installBundledAgentFarm({ paneDir, bundle, run: recordingRunner(calls), log: () => undefined });
-    expect(calls).toHaveLength(BUNDLED_AGENT_FARM_PLUGINS.length);
+    expect(calls).toHaveLength(BUNDLED_AGENT_FARM_PLUGINS.length + 1);
     const again: AgentFarmProcess[] = [];
     await installBundledAgentFarm({ paneDir, bundle: { ...bundle, version: '0.2.35' }, run: recordingRunner(again), log: () => undefined });
-    expect(again).toHaveLength(BUNDLED_AGENT_FARM_PLUGINS.length);
+    expect(again).toHaveLength(BUNDLED_AGENT_FARM_PLUGINS.length + 1);
   });
 
   it('reports a failed install with Agent Farm\'s own last line, without throwing', async () => {
@@ -284,7 +292,7 @@ describe('installBundledAgentFarm with the pinned package', () => {
     const status = await installBundledAgentFarm({ paneDir, telemetry: false, log: () => undefined });
     expect(status.error).toBeUndefined();
     expect(status.state).toBe('ready');
-    expect(Object.keys(status.plugins)).toEqual([...BUNDLED_AGENT_FARM_PLUGINS]);
+    expect(Object.keys(status.plugins)).toEqual([...BUNDLED_AGENT_FARM_PLUGINS, 'pane']);
     expect(JSON.parse(readFileSync(path.join(configRoot, 'settings.json'), 'utf8'))).toEqual({ telemetry: { enabled: false, directory: path.join(configRoot, 'telemetry') } });
   }, 120_000);
 
@@ -365,6 +373,32 @@ describe('installBundledAgentFarm after a partial install (review F-1)', () => {
     expect(retried.error).toBeUndefined();
     expect(retried).toMatchObject({ state: 'ready', edited: [] });
     expect(readFileSync(path.join(configRoot, '.plugins', 'greenfield.json'), 'utf8')).toContain('"name": "greenfield"');
+  }, 180_000);
+});
+
+describe('Pane\'s own plugin with the pinned package', () => {
+  it('installs pane/claude and pane/codex with only a harness and the contract\'s model, and replaces an edit', async () => {
+    const paneDir = tempDir();
+    const configRoot = agentFarmConfigRoot(paneDir);
+    const first = await installBundledAgentFarm({ paneDir, log: () => undefined });
+    expect(first.error).toBeUndefined();
+    const bundle = bundledAgentFarm()!;
+    const list = (): string => {
+      const process = bundledAgentFarmProcess(bundle, ['profiles', 'list'], configRoot);
+      return execFileSync(process.executable, process.args, { env: process.env, encoding: 'utf8' });
+    };
+    const plain = parseProfileList(list()).filter((entry) => entry.plugin === 'pane');
+    expect(plain.map(({ ref, harness, model, hidden }) => ({ ref, harness, model, hidden }))).toEqual([
+      { ref: 'pane/claude', harness: 'claude', model: configuredAgent('claude').chat?.profileModel, hidden: true },
+      { ref: 'pane/codex', harness: 'codex', model: configuredAgent('codex').chat?.profileModel, hidden: true },
+    ]);
+    // Only harness, model and description: no identity text, skills or subagents.
+    expect(readFileSync(path.join(configRoot, 'plugins', 'pane', 'agents', 'claude.md'), 'utf8').split('---')[2].trim()).toBe('');
+    writeFileSync(path.join(configRoot, 'plugins', 'pane', 'agents', 'claude.md'), '---\nharness: claude\nmodel:\n  name: claude-sonnet-5-5\n---\nMine.\n');
+    // The same bundle at the next start: the edit is still replaced (QA F4).
+    const status = await installBundledAgentFarm({ paneDir, log: () => undefined });
+    expect(status).toMatchObject({ state: 'ready', edited: [] });
+    expect(readFileSync(path.join(configRoot, 'plugins', 'pane', 'agents', 'claude.md'), 'utf8')).not.toContain('Mine.');
   }, 180_000);
 });
 
@@ -527,6 +561,18 @@ describe('writeAgentFarmTelemetry when a settings.json write fails', () => {
     await writeAgentFarmTelemetry(paneDir, undefined);
     expect(settings()).toEqual({ enabled: false, directory });
   });
+});
+
+// Review F-4: a Session checks a non-default variant's agent with Agent Farm before it is saved.
+describe('paneAgentFarmHarness with the pinned package', () => {
+  it('reads the harness a variant really runs, and undefined for a profile Agent Farm lacks', async () => {
+    const paneDir = tempDir();
+    const status = await installBundledAgentFarm({ paneDir, telemetry: false, log: () => undefined });
+    expect(status.state).toBe('ready');
+    expect(await paneAgentFarmHarness(paneDir, 'greenfield/orchestrator:codex')).toBe('codex');
+    expect(await paneAgentFarmHarness(paneDir, 'greenfield/orchestrator')).toBe('claude');
+    expect(await paneAgentFarmHarness(paneDir, 'greenfield/no-such-profile')).toBeUndefined();
+  }, 120_000);
 });
 
 describe('paneAgentFarmProcess', () => {

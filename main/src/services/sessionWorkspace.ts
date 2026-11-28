@@ -12,6 +12,7 @@ import { LeftAlone, writeOwnedBlock, type BlockMarkers } from './instructionsBlo
 import { withTodosText } from '../../../shared/todosText';
 import { todosOn } from './todos/todosFeature';
 import { quoteShellWord } from './agents/shellWord';
+import { PaneError } from '../../../shared/paneError';
 
 const START = '<!-- pane-session-context:start -->';
 const END = '<!-- pane-session-context:end -->';
@@ -87,6 +88,127 @@ export function prepareSessionWorkspace(
     writeManagedInstructions(path.join(cwd, 'runtime-context.md'), wslRouting(record));
   }
   return cwd;
+}
+
+const PROFILE_START = '<!-- pane-session-profile:start -->';
+const PROFILE_END = '<!-- pane-session-profile:end -->';
+const PROFILE_MARKERS: BlockMarkers = { begin: PROFILE_START, end: PROFILE_END, repair: 'try again' };
+/** The Session's Agent Farm profile instructions, which Pane rewrites at every start of its agent (T-63). */
+const SESSION_PROFILE_FILE = 'PROFILE.md';
+/** The first line of a PROFILE.md Pane wrote; Pane replaces or removes only a file that starts with it (review F-1). */
+const PROFILE_FILE_MARKER = '<!-- pane-session-profile-file: Pane writes this file at every start of the Session\'s agent. -->';
+/** How a PROFILE.md this branch wrote before it carried the marker begins, so Pane still owns those. */
+const LEGACY_PROFILE_FILE = /^# Agent Farm profile: \S+\n\nPane writes this file from the profile at every start of this Session's agent;/;
+
+/** The Session folder for `sessionFolder`, or a refusal when it isn't one directly under Pane's sessions folder. */
+function ownSessionFolder(sessionFolder: string): string {
+  const root = path.resolve(sessionGitCeiling());
+  const cwd = path.resolve(sessionFolder);
+  if (path.dirname(cwd) !== root || fs.lstatSync(cwd).isSymbolicLink()) {
+    throw new PaneError('SESSION_PROFILE_FOLDER', `Pane writes a Session's profile only into its own Session folder, not ${sessionFolder}.`, 'Start the Session again from its row in the sidebar.');
+  }
+  return cwd;
+}
+
+/**
+ * Whether PROFILE.md in a Session folder is Pane's to replace or remove: nothing there, or a regular
+ * file Pane wrote. A file a person or agent wrote there is theirs and stays as it is (review F-1).
+ */
+function paneOwnsProfileFile(file: string): 'missing' | 'pane' | 'theirs' {
+  const current = lstatOrMissing(file);
+  if (!current) return 'missing';
+  if (!current.isFile()) return 'theirs';
+  const text = fs.readFileSync(file, 'utf8');
+  return text.startsWith(PROFILE_FILE_MARKER) || LEGACY_PROFILE_FILE.test(text) ? 'pane' : 'theirs';
+}
+
+/**
+ * Puts a Session's Agent Farm profile instructions in its folder: PROFILE.md, and the same text in
+ * its own marked section of AGENTS.md (which CLAUDE.md imports), because a resumed conversation
+ * reads instruction files again but not a launch's system prompt. Both are rewritten at every
+ * start, so a reload or switch reaches the agent. Only a folder under Pane's sessions folder is
+ * written, and a PROFILE.md Pane didn't write stays as it is: the AGENTS.md section alone then
+ * carries the profile (review F-1).
+ */
+export function writeSessionProfile(sessionFolder: string, profile: string, instructions: string): void {
+  const cwd = ownSessionFolder(sessionFolder);
+  const text = instructions.trim();
+  const file = path.join(cwd, SESSION_PROFILE_FILE);
+  const owner = paneOwnsProfileFile(file);
+  if (owner !== 'theirs') {
+    writeFileWithoutFollowingLinks(file, `${PROFILE_FILE_MARKER}\n# Agent Farm profile: ${profile}\n\nPane writes this file from the profile at every start of this Session's agent; edit the profile instead.\n\n${text}\n`);
+  } else if (!lstatOrMissing(file)?.isFile()) {
+    throw new PaneError('SESSION_PROFILE_FILE', `${file} is not a regular file (it may be a link), so Pane did not write the Session's profile there.`, `Remove ${file}, then start the Session again.`);
+  }
+  const section = [
+    '## Agent Farm profile',
+    owner === 'theirs'
+      ? `This Session runs the Agent Farm profile ${profile}. Its instructions follow (${SESSION_PROFILE_FILE} here is not Pane's and is not this profile). Where they disagree with the Pane Session rules above, the Pane rules win.`
+      : `This Session runs the Agent Farm profile ${profile}. Its instructions follow (Pane keeps the same text in ${SESSION_PROFILE_FILE}). Where they disagree with the Pane Session rules above, the Pane rules win.`,
+    '',
+    text,
+  ].join('\n');
+  try {
+    writeOwnedBlock(path.join(cwd, 'AGENTS.md'), PROFILE_MARKERS, [PROFILE_START, ...escapeProfileMarkers(section).split('\n'), PROFILE_END], { createMode: 0o600 });
+  } catch (error) {
+    if (error instanceof LeftAlone) throw new PaneError('SESSION_PROFILE_FILE', `Pane couldn't put the profile into ${path.join(cwd, 'AGENTS.md')}: ${error.message}`, 'Fix the file, then start the Session again.');
+    throw error;
+  }
+}
+
+/**
+ * Replaces a Pane-owned file in a Session folder without following a link an agent put in its place
+ * (review F-1): a link or any other non-file there is refused, and the new text lands through a fresh
+ * temporary file renamed over the path, which replaces a file and never writes through a link.
+ */
+function writeFileWithoutFollowingLinks(file: string, content: string): void {
+  const refuse = () => new PaneError('SESSION_PROFILE_FILE', `${file} is not a regular file (it may be a link), so Pane did not write the Session's profile there.`, `Remove ${file}, then start the Session again.`);
+  const current = lstatOrMissing(file);
+  if (current && !current.isFile()) throw refuse();
+  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+  // 'wx' fails if anything, a link included, already sits at the temporary path.
+  fs.writeFileSync(temporary, content, { mode: 0o600, flag: 'wx' });
+  try {
+    // A link put in place since the check above is still never written through: rename replaces the link itself.
+    const now = lstatOrMissing(file);
+    if (now && !now.isFile()) throw refuse();
+    fs.renameSync(temporary, file);
+  } catch (error) {
+    fs.rmSync(temporary, { force: true });
+    throw error;
+  }
+}
+
+/** The entry at `file` without following a link, or undefined when nothing is there; any other error is thrown. */
+function lstatOrMissing(file: string): fs.Stats | undefined {
+  try { return fs.lstatSync(file); }
+  catch (error) {
+    // SAFETY: fs.lstatSync throws only Node system errors, which carry `code`.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
+/**
+ * Takes a Session's profile out of its folder (a PROFILE.md Pane wrote, and its AGENTS.md section)
+ * when its agent starts without one (T-63), so it starts with main's instructions. Best effort: a file Pane can't change
+ * is logged and left as it is.
+ */
+export function clearSessionProfile(sessionFolder: string): void {
+  const cwd = path.resolve(sessionFolder);
+  try {
+    ownSessionFolder(cwd);
+    const file = path.join(cwd, SESSION_PROFILE_FILE);
+    // Only a PROFILE.md Pane wrote; one a person or agent wrote stays (review F-1).
+    if (paneOwnsProfileFile(file) === 'pane') fs.rmSync(file, { force: true });
+    writeOwnedBlock(path.join(cwd, 'AGENTS.md'), PROFILE_MARKERS, undefined);
+  } catch (error) {
+    console.warn(`[Sessions] Pane couldn't take the Agent Farm profile out of ${cwd}: ${error instanceof Error ? error.message : String(error)}. Remove PROFILE.md and the profile section of AGENTS.md there by hand.`);
+  }
+}
+
+function escapeProfileMarkers(content: string): string {
+  return escapeMarkers(content).split(PROFILE_START).join('<!-- pane-session-profile start -->').split(PROFILE_END).join('<!-- pane-session-profile end -->');
 }
 
 /** The Session folder's copy of the bundled /wrap-up guide, or undefined when the bundle is unreadable. */

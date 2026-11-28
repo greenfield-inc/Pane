@@ -4,7 +4,7 @@ import { sessionRuntimePath } from './sessionRuntime';
 import { findClaudeSessionTranscript } from './claudeSessionTranscript';
 import { CLI_AGENT_TYPES, resolveAgentTypeFromCommand } from './agents/agentIdentity';
 import { assertDirectOpenCodeLaunchCommand } from './agents/opencodeLaunch';
-import { prepareSessionWorkspace, sessionWorkspacePath, discardSessionScaffold, isPristineSessionWorkspace } from './sessionWorkspace';
+import { prepareSessionWorkspace, sessionWorkspacePath, discardSessionScaffold, isPristineSessionWorkspace, clearSessionProfile } from './sessionWorkspace';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
@@ -13,8 +13,12 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { panelManager } from './panelManager';
 import { getChatTabManager } from './chatTabs';
 import { sessionChatLaunch } from './chatTabs/launch';
+import { agentFarmConfigRoot, listPaneAgentFarmProfiles, paneAgentFarmHarness } from './agentFarm/bundledAgentFarm';
+import { installedPluginHash, plainProfileAgent, plainProfileRef, profilePlugin } from './agentFarm/agentFarmProfiles';
+import { profilesEnabled } from './agentFarm/profilesFeature';
+import type { AgentFarmProfileList, SessionAgentProfile } from '../../../shared/types/agentFarmProfiles';
 import type { SessionAdoption } from './chatTabs/switchToChat';
-import type { ChatPanelState } from '../../../shared/types/chatTab';
+import type { ChatPanelState, ChatTabLaunch } from '../../../shared/types/chatTab';
 import type { NotifySession } from '../../../shared/types/notify';
 
 /** What a Session needs from the host's chat tabs. */
@@ -22,6 +26,15 @@ export interface SessionChatTabs {
   ensure(panelId: string): Promise<void>;
   isRunning(panelId: string): boolean;
   agentState(panelId: string): AgentState;
+}
+
+/** What a Session needs from Pane's own Agent Farm (T-63). */
+export interface SessionAgentFarm {
+  /** An installed plugin's content hash, or undefined when it isn't installed. */
+  pluginHash(plugin: string): Promise<string | undefined>;
+  profiles(): Promise<AgentFarmProfileList>;
+  /** The harness a profile variant (`plugin/profile:variant`) really runs, or undefined when it can't be read. */
+  harness(ref: string): Promise<string | undefined>;
 }
 import { terminalPanelManager } from './terminalPanelManager';
 import { databaseService } from './database';
@@ -422,8 +435,15 @@ export class OrchestrationSessionManager extends EventEmitter {
       const defaultAgent = normalizePaneChatAgent(config.defaultOrchestratorAgent);
       const agent = explicitAgent ?? launchAgent(launchCommand.trim() || agentTerminalCommand(defaultAgent), customResume)
         ?? defaultAgent;
-      resolveSessionAgent(agent, launchCommand, customResume);
-      this.assertAgentSupported(agent, input.runtime);
+      const explicitProfile = input.agentProfile ? await this.explicitAgentProfile(input, !!sourcePanel, terminal) : undefined;
+      // A profile names its own agent and replaces the launch command and custom resume.
+      const sessionAgent = explicitProfile?.agent ?? agent;
+      const sessionLaunchCommand = explicitProfile ? '' : launchCommand;
+      const sessionResume = explicitProfile ? null : customResume;
+      resolveSessionAgent(sessionAgent, sessionLaunchCommand, sessionResume);
+      this.assertAgentSupported(sessionAgent, input.runtime);
+      const agentProfile = explicitProfile?.profile ?? (sourcePanel || terminal(sessionAgent) ? undefined
+        : await this.implicitAgentProfile({ agent: sessionAgent, runtime: input.runtime, resume: input.resume, customResume: sessionResume, launchCommand: sessionLaunchCommand }));
       const record: OrchestrationSessionRecord = {
         // Omitted runtime is the native host; 'windows' is a legacy name for it.
         runtime: input.runtime === 'wsl' ? 'wsl' : undefined,
@@ -435,9 +455,9 @@ export class OrchestrationSessionManager extends EventEmitter {
         archived: false,
         isPinned: input.isPinned ?? false,
         todoNumber: input.todoNumber,
-        agent,
-        launchCommand,
-        customResume,
+        agent: sessionAgent,
+        launchCommand: sessionLaunchCommand,
+        customResume: sessionResume,
         resume: input.resume,
         openingPrompt: input.openingPrompt?.trim() || undefined,
         profile: input.profile ?? this.configManager.getConfig().defaultSessionProfile ?? DEFAULT_SESSION_PROFILE,
@@ -460,6 +480,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         createdAt: now,
         updatedAt: now,
       };
+      if (agentProfile) record.agentProfile = agentProfile;
       const next: OrchestrationSessionStoreData = {
         ...data,
         selectedSessionId: record.id,
@@ -549,6 +570,18 @@ export class OrchestrationSessionManager extends EventEmitter {
         activity: [...current.activity],
       };
       if (input.name !== undefined) delete nextRecord.nameIsDefault;
+      // A Session that runs through Agent Farm keeps doing so with its new agent or launch command.
+      if (current.agentProfile && (agentChanging || input.launchCommand !== undefined || input.customResume !== undefined)) {
+        let agentProfile = await this.implicitAgentProfile(nextRecord);
+        // A named profile stays while the agent does: a new launch command for the same agent doesn't drop it,
+        // but one that runs another agent does (review F-2), as an explicit agent change already did.
+        if (agentProfile && nextRecord.agent === current.agent && !plainProfileAgent(current.agentProfile.ref) && plainProfileAgent(agentProfile.ref)) {
+          const hash = await this.agentFarm().pluginHash(profilePlugin(current.agentProfile.ref));
+          agentProfile = hash === undefined ? agentProfile : { ref: current.agentProfile.ref, hash };
+        }
+        if (agentProfile) nextRecord.agentProfile = agentProfile;
+        else delete nextRecord.agentProfile;
+      }
       // Restore here: a Session that moved away runs here again, so it is no longer marked moved.
       if (input.archived === false && nextRecord.move?.state === 'moved') delete nextRecord.move;
       if (nextRecord.move && nextRecord.move.state !== 'moved' && input.archived !== undefined) {
@@ -1358,6 +1391,8 @@ export class OrchestrationSessionManager extends EventEmitter {
   private async ensurePanelForAgent(record: OrchestrationSessionRecord, terminal = false): Promise<ToolPanel> {
     if (!Object.values(record.panelIds).some(id => this.agentStarted(id))) {
       prepareSessionWorkspace(record.id, record.profile, record);
+      // A profile written while Profiles was on doesn't follow the agent once it is off.
+      if (!this.profilesOn()) clearSessionProfile(sessionWorkspacePath(record.id));
     }
     await this.finishPromotion(record);
     const panelId = record.panelIds[record.agent];
@@ -1397,12 +1432,92 @@ export class OrchestrationSessionManager extends EventEmitter {
    * tab. Sessions that resume or promote a terminal conversation, run in WSL, use a truly
    * custom resume, or launch a wrapper keep their terminal (`sessionChatLaunch` says why).
    */
-  private chatLaunch(record: OrchestrationSessionRecord) {
+  private chatLaunch(record: Pick<OrchestrationSessionRecord, 'agent' | 'runtime' | 'resume' | 'promotedFrom' | 'customResume' | 'launchCommand' | 'agentProfile'>) {
     if (this.configManager.getConfig().chatTabsEnabled !== true) return undefined;
-    return sessionChatLaunch({
+    const result = sessionChatLaunch({
       agent: record.agent, runtime: record.runtime, resume: record.resume, promoted: !!record.promotedFrom, customResume: record.customResume,
       launchCommand: record.launchCommand?.trim() || agentTerminalCommand(record.agent),
     });
+    // T-63: a Session with a profile runs it through Agent Farm; the agent on its own is pane/<agent>,
+    // which keeps the full access its launch command gave it. A launch command's own profile stays as it is.
+    // With Profiles off (Settings › Advanced), a saved profile is ignored and the agent starts as on main.
+    if (!record.agentProfile || !this.profilesOn() || !('launch' in result) || result.launch.kind !== 'agent') return result;
+    const launch: ChatTabLaunch = { kind: 'profile', profile: record.agentProfile.ref, fromSession: true };
+    if (result.launch.fullAccess === true || result.launch.mode) launch.fullAccess = true;
+    return { launch };
+  }
+
+  private agentFarmPort?: SessionAgentFarm;
+
+  /** Settings › Advanced › Profiles (T-63): off, Sessions start their agent directly, as before T-63. */
+  private profilesOn(): boolean { return profilesEnabled(this.configManager.getConfig()); }
+
+  /** Pane's own Agent Farm, for a Session's profile; tests pass their own. */
+  attachAgentFarm(port: SessionAgentFarm): void { this.agentFarmPort = port; }
+
+  private agentFarm(): SessionAgentFarm {
+    return this.agentFarmPort ?? {
+      pluginHash: plugin => installedPluginHash(agentFarmConfigRoot(getAppDirectory()), plugin),
+      profiles: () => listPaneAgentFarmProfiles(getAppDirectory()),
+      harness: ref => paneAgentFarmHarness(getAppDirectory(), ref),
+    };
+  }
+
+  /**
+   * The profile a new chat Session runs when the caller named none (T-63): the launch command's own
+   * Agent Farm profile, or the agent on its own (`pane/<agent>`). Undefined when the Session keeps a
+   * terminal, its agent isn't one Agent Farm runs, or Pane's plugin isn't installed: it then starts
+   * its agent directly, as before. Always undefined while Profiles is off, so a Session created or
+   * changed then has no profile.
+   */
+  private async implicitAgentProfile(record: Pick<OrchestrationSessionRecord, 'agent' | 'runtime' | 'resume' | 'customResume' | 'launchCommand'>): Promise<SessionAgentProfile | undefined> {
+    if (!this.profilesOn()) return undefined;
+    const chat = this.chatLaunch({ ...record, promotedFrom: undefined, agentProfile: undefined });
+    if (!chat || !('launch' in chat)) return undefined;
+    const ref = chat.launch.kind === 'profile' ? chat.launch.profile : plainProfileRef(record.agent);
+    if (!ref) return undefined;
+    const hash = await this.agentFarm().pluginHash(profilePlugin(ref));
+    if (hash === undefined) {
+      console.warn(`[Sessions] ${ref} isn't installed in Pane's Agent Farm, so the Session starts ${configuredAgent(record.agent).title} directly.`);
+      return undefined;
+    }
+    return { ref, hash };
+  }
+
+  /** The profile a caller named for a new Session, and the agent it runs; refused when it can't start. */
+  private async explicitAgentProfile(input: OrchestrationSessionCreateInput, promoted: boolean, terminal: (agent: PaneChatAgent) => boolean): Promise<{ profile: SessionAgentProfile; agent: PaneChatAgent }> {
+    const ref = input.agentProfile ?? '';
+    const refuse = (code: string, message: string, next: string): never => { throw new PaneError(code, `${message} No Session was created.`, next); };
+    if (!this.profilesOn()) refuse('SESSION_PROFILE_UNSUPPORTED', `Profiles is off on this computer, so the Session can't start with ${ref}.`, 'Turn on Profiles in Settings > Advanced > Experimental, or leave out the profile.');
+    if (promoted || input.resume) refuse('SESSION_PROFILE_UNSUPPORTED', `A Session that continues an earlier conversation can't start with the profile ${ref}.`, 'Create the Session without a profile.');
+    if (input.runtime === 'wsl') refuse('SESSION_PROFILE_UNSUPPORTED', `Profiles run in chat tabs, which don't run in WSL, so the Session can't start with ${ref}.`, 'Create a native Session, or leave out the profile.');
+    if (this.configManager.getConfig().chatTabsEnabled !== true) refuse('SESSION_PROFILE_UNSUPPORTED', `Profiles run in chat tabs, which are off on this computer, so the Session can't start with ${ref}.`, 'Turn on Chat tabs in Settings > AI & Agents, then try again.');
+    const [qualified, variant] = ref.split(':');
+    const plain = plainProfileAgent(qualified);
+    let agent: PaneChatAgent | undefined = plain;
+    if (plain && variant) refuse('SESSION_PROFILE_UNKNOWN', `${qualified} has no variants, so ${ref} can't start.`, `Name ${qualified} without a variant.`);
+    if (!agent) {
+      const list: AgentFarmProfileList = await this.agentFarm().profiles();
+      const entry = list.profiles.find(candidate => candidate.ref === qualified);
+      if (!entry) return refuse('SESSION_PROFILE_UNKNOWN', `This computer's Pane has no Agent Farm profile named ${qualified}.${list.error ? ` ${list.error}` : ''}`, 'List them with agent-farm profiles list in a Pane terminal, or install the profile\'s plugin first.');
+      if (variant && !entry.variants?.some(candidate => candidate.name === variant)) {
+        refuse('SESSION_PROFILE_UNKNOWN', `${qualified} has no variant named ${variant}.`, entry.variants?.length ? `Pick one of ${entry.variants.map(candidate => candidate.name).join(', ')}.` : `Name ${qualified} without a variant.`);
+      }
+      // The list gives only the default variant's harness; Agent Farm says another variant's, checked
+      // before anything is saved, so the chat can't refuse it later (review F-4).
+      const otherVariant = !!variant && variant !== entry.defaultVariant;
+      const harness = otherVariant ? await this.agentFarm().harness(ref) : entry.harness;
+      if (!harness) return refuse('SESSION_PROFILE_UNKNOWN', `Pane couldn't read which agent the variant ${ref} runs from its Agent Farm.`, 'Restart Pane so it sets up its Agent Farm, then try again.');
+      if (otherVariant && input.agent && normalizePaneChatAgent(input.agent) !== harness) {
+        refuse('SESSION_PROFILE_AGENT_MISMATCH', `The variant ${ref} runs ${harness}, not ${input.agent}.`, `Pass agent ${harness}, or leave out agent so the profile picks it.`);
+      }
+      agent = normalizePaneChatAgent(harness);
+      if (!agentConfig(agent)?.chat?.adapter || agent !== harness) refuse('SESSION_PROFILE_UNSUPPORTED', `The profile ${ref} runs ${harness}, which Pane can't start through Agent Farm.`, 'Pick a Claude or Codex profile.');
+    }
+    if (!agent || terminal(agent)) return refuse('SESSION_PROFILE_UNSUPPORTED', `This app can't show the chat tab a profile runs in, so the Session can't start with ${ref}.`, 'Create the Session from the desktop app, or leave out the profile.');
+    const hash = await this.agentFarm().pluginHash(profilePlugin(ref));
+    if (hash === undefined) return refuse('SESSION_PROFILE_UNKNOWN', `The plugin of ${ref} isn't installed in this computer's Pane.`, 'Restart Pane so it sets up its Agent Farm, or install the plugin, then try again.');
+    return { profile: { ref, hash }, agent };
   }
 
   /** Why a Session with chat tabs on runs in a terminal, for its overview. */

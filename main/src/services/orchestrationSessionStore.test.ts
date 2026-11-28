@@ -294,6 +294,18 @@ describe('OrchestrationSessionStore', () => {
     expect(fs.readFileSync(path.join(path.dirname(filePath), backups[0]), 'utf8')).toBe(raw);
   });
 
+  it('keeps a Session\'s Agent Farm profile through a reload, and drops only an unreadable one (T-63)', () => {
+    const filePath = createStorePath();
+    const profiled = createRecord({ id: 'profiled', agentProfile: { ref: 'greenfield/orchestrator', hash: 'abc' } });
+    const damaged = { ...createRecord({ id: 'damaged' }), agentProfile: { ref: 7 } };
+    fs.writeFileSync(filePath, JSON.stringify(createData(profiled)));
+    expect(new OrchestrationSessionStore(filePath).read().sessions[0].agentProfile).toEqual({ ref: 'greenfield/orchestrator', hash: 'abc' });
+    fs.writeFileSync(filePath, JSON.stringify({ ...createData(profiled), sessions: [profiled, damaged] }));
+    const sessions = new OrchestrationSessionStore(filePath).read().sessions;
+    expect(sessions.map(session => session.id)).toEqual(['profiled', 'damaged']);
+    expect(sessions[1].agentProfile).toBeUndefined();
+  });
+
   it('rejects unsafe links and evidence-free reports at the persistence boundary', () => {
     const filePath = createStorePath();
     const store = new OrchestrationSessionStore(filePath);

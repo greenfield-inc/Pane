@@ -1,3 +1,4 @@
+import { PROFILE_REF_PATTERN } from '../../../shared/types/agentFarmProfiles';
 import { PaneError } from '../../../shared/paneError';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import type { OrchestrationLink, OrchestrationReport } from '../../../shared/types/orchestrationSession';
@@ -24,6 +25,12 @@ const isoDateSchema = boundary.refine(
 
 export const orchestrationTextSchema = boundary.string;
 export const orchestrationTextArraySchema = boundary.array(orchestrationTextSchema);
+/** An Agent Farm profile a Session starts with (T-63): `plugin/profile[:variant]`, optional. */
+export const orchestrationAgentProfileSchema = boundary.optional(boundary.refine(
+  boundary.nonEmptyString,
+  value => PROFILE_REF_PATTERN.test(value),
+  'expected an Agent Farm profile such as greenfield/orchestrator',
+));
 
 export const orchestrationLinkSchema: BoundarySchema<OrchestrationLink> = boundary.object({
   label: boundary.nonEmptyString,

@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
-import { prepareSessionWorkspace, sessionWorkspacePath, isPristineSessionWorkspace, sessionGitCeiling, discardSessionScaffold, statusPageRenderer } from './sessionWorkspace';
+import { prepareSessionWorkspace, sessionWorkspacePath, isPristineSessionWorkspace, sessionGitCeiling, discardSessionScaffold, statusPageRenderer, writeSessionProfile, clearSessionProfile } from './sessionWorkspace';
 
 describe('Session workspace instructions', () => {
   const previousPaneDir = process.env.PANE_DIR;
@@ -306,3 +306,97 @@ describe('Session workspace instructions', () => {
   });
 
 });
+
+describe('A Session\'s Agent Farm profile in its folder (T-63)', () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-session-profile-'));
+    vi.stubEnv('PANE_DIR', root);
+  });
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('writes PROFILE.md and the same text into its own AGENTS.md section, replaced at the next start', async () => {
+    const folder = prepareSessionWorkspace('profiled');
+    await fs.appendFile(path.join(folder, 'AGENTS.md'), '\nMy own note.\n');
+    writeSessionProfile(folder, 'greenfield/orchestrator', 'You are the orchestrator.\n\nLAUNCH CONTEXT\nheadless: false\n');
+    const profile = await fs.readFile(path.join(folder, 'PROFILE.md'), 'utf8');
+    expect(profile).toContain('# Agent Farm profile: greenfield/orchestrator');
+    expect(profile).toContain('You are the orchestrator.\n\nLAUNCH CONTEXT\nheadless: false\n');
+    const agents = await fs.readFile(path.join(folder, 'AGENTS.md'), 'utf8');
+    expect(agents).toContain('# Pane Session');
+    expect(agents).toContain('My own note.');
+    expect(agents).toMatch(/<!-- pane-session-profile:start -->\n## Agent Farm profile\nThis Session runs the Agent Farm profile greenfield\/orchestrator\.[^\n]*\n\nYou are the orchestrator\./);
+    // A reload or switch rewrites both; the Pane section and the person's own lines stay.
+    writeSessionProfile(folder, 'greenfield/planner', 'Marker: KUMQUAT');
+    prepareSessionWorkspace('profiled');
+    const after = await fs.readFile(path.join(folder, 'AGENTS.md'), 'utf8');
+    expect(after).toContain('Marker: KUMQUAT');
+    expect(after).not.toContain('You are the orchestrator.');
+    expect(after).toContain('My own note.');
+    expect(after.match(/pane-session-profile:start/g)).toHaveLength(1);
+    expect(await fs.readFile(path.join(folder, 'PROFILE.md'), 'utf8')).toContain('Marker: KUMQUAT');
+    // CLAUDE.md still imports AGENTS.md, so Claude reads the profile section too.
+    expect(await fs.readFile(path.join(folder, 'CLAUDE.md'), 'utf8')).toContain('@AGENTS.md');
+  });
+
+  it('keeps profile text from closing Pane\'s sections early', async () => {
+    const folder = prepareSessionWorkspace('markers');
+    writeSessionProfile(folder, 'x/y', 'a <!-- pane-session-profile:end --> b <!-- pane-session-context:end -->');
+    const agents = await fs.readFile(path.join(folder, 'AGENTS.md'), 'utf8');
+    expect(agents.match(/<!-- pane-session-profile:end -->/g)).toHaveLength(1);
+    expect(agents.match(/<!-- pane-session-context:end -->/g)).toHaveLength(1);
+  });
+
+  // Review F-1: an agent can plant PROFILE.md as a link; Pane must never write through it.
+  it.each(['dangling', 'existing'])('refuses a PROFILE.md that is a %s link and writes nothing outside the folder', async kind => {
+    const folder = prepareSessionWorkspace(`link-${kind}`);
+    const target = path.join(root, `outside-${kind}.md`);
+    if (kind === 'existing') await fs.writeFile(target, 'theirs');
+    await fs.symlink(target, path.join(folder, 'PROFILE.md'));
+    expect(() => writeSessionProfile(folder, 'x/y', 'text')).toThrow(expect.objectContaining({ code: 'SESSION_PROFILE_FILE' }));
+    if (kind === 'existing') expect(await fs.readFile(target, 'utf8')).toBe('theirs');
+    else await expect(fs.lstat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await fs.lstat(path.join(folder, 'PROFILE.md'))).isSymbolicLink()).toBe(true);
+    expect((await fs.readdir(folder)).filter(name => name.includes('.tmp'))).toEqual([]);
+  });
+
+  // Review F-1: a PROFILE.md a person or agent wrote is theirs; Pane replaces and removes only its own.
+  it('keeps a PROFILE.md Pane did not write, and still puts the profile in AGENTS.md', async () => {
+    const folder = prepareSessionWorkspace('theirs');
+    const file = path.join(folder, 'PROFILE.md');
+    await fs.writeFile(file, '# My profile notes\n');
+    writeSessionProfile(folder, 'greenfield/orchestrator', 'Marker: QUINCE');
+    expect(await fs.readFile(file, 'utf8')).toBe('# My profile notes\n');
+    const agents = await fs.readFile(path.join(folder, 'AGENTS.md'), 'utf8');
+    expect(agents).toContain('Marker: QUINCE');
+    expect(agents).toContain('PROFILE.md here is not Pane\'s');
+    clearSessionProfile(folder);
+    expect(await fs.readFile(file, 'utf8')).toBe('# My profile notes\n');
+    expect(await fs.readFile(path.join(folder, 'AGENTS.md'), 'utf8')).not.toContain('Marker: QUINCE');
+  });
+
+  it('removes only the PROFILE.md Pane wrote, including one from before its marker', async () => {
+    const folder = prepareSessionWorkspace('ours');
+    const file = path.join(folder, 'PROFILE.md');
+    writeSessionProfile(folder, 'x/y', 'Marker: FIG');
+    clearSessionProfile(folder);
+    await expect(fs.lstat(file)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await fs.readFile(path.join(folder, 'AGENTS.md'), 'utf8')).not.toContain('Marker: FIG');
+    await fs.writeFile(file, "# Agent Farm profile: x/y\n\nPane writes this file from the profile at every start of this Session's agent; edit the profile instead.\n\nold\n");
+    clearSessionProfile(folder);
+    await expect(fs.lstat(file)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('writes only into a Session folder under Pane\'s sessions folder', async () => {
+    const outside = await fs.mkdtemp(path.join(root, 'elsewhere-'));
+    expect(() => writeSessionProfile(outside, 'x/y', 'text')).toThrow(expect.objectContaining({ code: 'SESSION_PROFILE_FOLDER' }));
+    await expect(fs.access(path.join(outside, 'PROFILE.md'))).rejects.toThrow();
+    const folder = prepareSessionWorkspace('linked');
+    await fs.mkdir(path.join(folder, 'PROFILE.md'));
+    expect(() => writeSessionProfile(folder, 'x/y', 'text')).toThrow(expect.objectContaining({ code: 'SESSION_PROFILE_FILE' }));
+  });
+});
+

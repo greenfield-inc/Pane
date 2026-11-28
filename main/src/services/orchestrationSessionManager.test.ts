@@ -23,7 +23,7 @@ import { LEGACY_ORCHESTRATION_SESSION_ID } from '../../../shared/types/orchestra
 import { getPaneChatPanelId, PANE_CHAT_SESSION_ID, type PaneChatAgent } from '../../../shared/types/paneChat';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { terminalPanelManager, TerminalPanelManager } from './terminalPanelManager';
-import { sessionWorkspacePath, prepareSessionWorkspace } from './sessionWorkspace';
+import { sessionWorkspacePath, prepareSessionWorkspace, writeSessionProfile } from './sessionWorkspace';
 import { OrchestrationSessionManager } from './orchestrationSessionManager';
 import { normalizeAgentReport } from './agentReport';
 import { serializeJsonTransport } from '../daemon/jsonTransport';
@@ -307,6 +307,153 @@ describe('OrchestrationSessionManager', () => {
     } finally {
       Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false });
     }
+  });
+
+  describe('through Agent Farm (T-63)', () => {
+    const agentFarm = (installed: string[] = ['pane', 'greenfield']) => ({
+      pluginHash: vi.fn(async (plugin: string) => installed.includes(plugin) ? `hash-${plugin}` : undefined),
+      profiles: vi.fn(async () => ({ profiles: [
+        { ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false, defaultVariant: 'claude', variants: [{ name: 'claude', model: 'claude-opus-5-5' }, { name: 'codex', model: 'gpt-6-astra' }] },
+        { ref: 'greenfield/product-researcher', plugin: 'greenfield', version: '0.0.46', harness: 'codex', hidden: false },
+      ] })),
+      harness: vi.fn(async (ref: string) => (ref === 'greenfield/orchestrator:codex' ? 'codex' : undefined)),
+    });
+    const withChatTabs = async (run: (fixture: ReturnType<typeof createFixture>, port: ReturnType<typeof agentFarm>) => Promise<void>, installed?: string[], profiles = true) => {
+      const fixture = createFixture();
+      const port = agentFarm(installed);
+      fixture.manager.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });
+      fixture.manager.attachAgentFarm(port);
+      Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: true, sessionProfilesEnabled: profiles });
+      try { await run(fixture, port); }
+      finally { Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false, sessionProfilesEnabled: undefined }); }
+    };
+    const withProfilesOff = (run: (fixture: ReturnType<typeof createFixture>, port: ReturnType<typeof agentFarm>) => Promise<void>) => withChatTabs(run, undefined, false);
+
+    // Settings › Advanced › Profiles off (T-63's flag): Sessions start their agent as main does.
+    it('starts a new Session\'s agent directly with Profiles off, as main does', async () => withProfilesOff(async (fixture, port) => {
+      const claude = await fixture.manager.create({ name: 'Plain Claude', agent: 'claude' });
+      expect(claude.session.agentProfile).toBeUndefined();
+      expect(claude.panel.state.customState).toMatchObject({ agent: 'claude', launch: { kind: 'agent', mode: 'bypassPermissions' } });
+      // A launch command's own profile runs as it did on main, and nothing is recorded.
+      const fromDialog = await fixture.manager.create({ name: 'From the dialog', agent: 'claude', launchCommand: 'agent-farm run greenfield/orchestrator --arg task=x' });
+      expect(fromDialog.session.agentProfile).toBeUndefined();
+      expect(fromDialog.panel.state.customState).toMatchObject({ launch: { kind: 'profile', profile: 'greenfield/orchestrator', args: { task: 'x' } } });
+      expect(port.pluginHash).not.toHaveBeenCalled();
+      expect(port.profiles).not.toHaveBeenCalled();
+    }));
+
+    it('refuses a named profile with Profiles off, and creates nothing', async () => withProfilesOff(async fixture => {
+      await expect(fixture.manager.create({ name: 'Named', agentProfile: 'greenfield/orchestrator' })).rejects.toMatchObject({ code: 'SESSION_PROFILE_UNSUPPORTED', next: expect.stringContaining('Settings > Advanced') });
+      expect(fixture.store.read().sessions.map(session => session.name)).not.toContain('Named');
+    }));
+
+    it('starts a profile saved while Profiles was on without it once it is off, and drops it when the agent changes', async () => withChatTabs(async fixture => {
+      const created = await fixture.manager.create({ name: 'Was on', agent: 'claude' });
+      expect(created.session.agentProfile?.ref).toBe('pane/claude');
+      const folder = sessionWorkspacePath(created.session.id);
+      writeSessionProfile(folder, 'pane/claude', 'Profile pane/claude');
+      Object.assign(fixture.configManager.getConfig(), { sessionProfilesEnabled: false });
+      const second = await fixture.manager.create({ name: 'Made off', agent: 'codex' });
+      expect(second.session.agentProfile).toBeUndefined();
+      // A restart starts the Session's agent again, now without the profile's files.
+      const restarted = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager, fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+      restarted.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });
+      restarted.attachAgentFarm(agentFarm());
+      await restarted.initialize();
+      await restarted.getView({ sessionId: created.session.id });
+      expect(fs.existsSync(path.join(folder, 'PROFILE.md'))).toBe(false);
+      expect(fs.readFileSync(path.join(folder, 'AGENTS.md'), 'utf8')).not.toContain('pane-session-profile');
+      const updated = await restarted.update({ sessionId: created.session.id }, { agent: 'codex' });
+      expect(updated.agentProfile).toBeUndefined();
+    }));
+
+    it('starts a new Session with no profile as the plain agent, pane/<agent>, keeping its full access', async () => withChatTabs(async fixture => {
+      const claude = await fixture.manager.create({ name: 'Plain Claude', agent: 'claude' });
+      expect(claude.session.agentProfile).toEqual({ ref: 'pane/claude', hash: 'hash-pane' });
+      expect(claude.panel.state.customState).toMatchObject({ agent: 'claude', launch: { kind: 'profile', profile: 'pane/claude', fullAccess: true } });
+      const codex = await fixture.manager.create({ name: 'Plain Codex', agent: 'codex', launchCommand: 'codex' });
+      expect(codex.session.agentProfile?.ref).toBe('pane/codex');
+      expect(codex.panel.state.customState).toMatchObject({ agent: 'codex', launch: { kind: 'profile', profile: 'pane/codex' } });
+      expect(JSON.stringify(codex.panel.state.customState)).not.toContain('fullAccess');
+      // Saved with the record, so it survives a restart.
+      expect(fixture.store.read().sessions.find(session => session.id === claude.session.id)?.agentProfile).toEqual({ ref: 'pane/claude', hash: 'hash-pane' });
+    }));
+
+    it('records a launch command\'s own profile and keeps its launch', async () => withChatTabs(async fixture => {
+      const created = await fixture.manager.create({ name: 'From the dialog', agent: 'claude', launchCommand: 'agent-farm run greenfield/orchestrator --arg task=x' });
+      expect(created.session.agentProfile).toEqual({ ref: 'greenfield/orchestrator', hash: 'hash-greenfield' });
+      expect(created.panel.state.customState).toMatchObject({ launch: { kind: 'profile', profile: 'greenfield/orchestrator', args: { task: 'x' } } });
+      // A launch command's profile isn't Pane's choice, so it keeps running through Agent Farm with Profiles off (review F-2).
+      expect(created.panel.state.customState).not.toHaveProperty('launch.fromSession');
+    }));
+
+    it('starts a named profile with the agent it runs, and refuses one this computer lacks', async () => withChatTabs(async fixture => {
+      const created = await fixture.manager.create({ name: 'Researcher', agentProfile: 'greenfield/product-researcher' });
+      expect(created.session).toMatchObject({ agent: 'codex', launchCommand: '', agentProfile: { ref: 'greenfield/product-researcher', hash: 'hash-greenfield' } });
+      // Marked as Pane's choice, so the next start with Profiles off runs Codex directly (review F-2).
+      expect(created.panel.state.customState).toMatchObject({ agent: 'codex', launch: { kind: 'profile', profile: 'greenfield/product-researcher', fromSession: true } });
+      await expect(fixture.manager.create({ name: 'Unknown', agentProfile: 'team/missing' })).rejects.toMatchObject({ code: 'SESSION_PROFILE_UNKNOWN' });
+      await expect(fixture.manager.create({ name: 'Resumed', agent: 'claude', agentProfile: 'pane/claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' })).rejects.toMatchObject({ code: 'SESSION_PROFILE_UNSUPPORTED' });
+      expect(fixture.store.read().sessions.map(session => session.name)).not.toEqual(expect.arrayContaining(['Unknown']));
+      expect(fixture.store.read().sessions.map(session => session.name)).not.toEqual(expect.arrayContaining(['Resumed']));
+    }));
+
+    it('starts the agent directly when Pane\'s plugin is missing, a Session keeps a terminal, or the agent has no plain profile', async () => withChatTabs(async fixture => {
+      const missing = await fixture.manager.create({ name: 'No plugin', agent: 'claude' });
+      expect(missing.session.agentProfile).toBeUndefined();
+      expect(missing.panel.state.customState).toMatchObject({ launch: { kind: 'agent' } });
+    }, []));
+
+    it('leaves a Session from before T-63 starting its agent directly', async () => withChatTabs(async fixture => {
+      fixture.manager.attachAgentFarm(agentFarm([]));
+      const old = await fixture.manager.create({ name: 'Before', agent: 'claude' });
+      expect(old.session.agentProfile).toBeUndefined();
+      fixture.manager.attachAgentFarm(agentFarm());
+      // Repaired at startup (its tab gone), it still starts the agent directly.
+      await panelManager.deletePanel(old.panel.id);
+      const restarted = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager, fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+      restarted.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });
+      restarted.attachAgentFarm(agentFarm());
+      await restarted.initialize();
+      const view = await restarted.getView({ sessionId: old.session.id });
+      expect(view.session.agentProfile).toBeUndefined();
+      expect(view.panel.state.customState).toMatchObject({ launch: { kind: 'agent' } });
+    }));
+
+    // QA F1, F2, review F-4: a variant must exist, and one that isn't the default runs the agent Agent Farm says it does.
+    it('checks a named variant before creating anything', async () => withChatTabs(async fixture => {
+      await expect(fixture.manager.create({ name: 'No such variant', agentProfile: 'greenfield/orchestrator:nope' })).rejects.toMatchObject({ code: 'SESSION_PROFILE_UNKNOWN', next: expect.stringContaining('claude, codex') });
+      await expect(fixture.manager.create({ name: 'Plain variant', agentProfile: 'pane/claude:x' })).rejects.toMatchObject({ code: 'SESSION_PROFILE_UNKNOWN' });
+      // The caller's agent must be the one the variant really runs; a mismatch saves nothing.
+      await expect(fixture.manager.create({ name: 'Wrong agent', agent: 'claude', agentProfile: 'greenfield/orchestrator:codex' })).rejects.toMatchObject({ code: 'SESSION_PROFILE_AGENT_MISMATCH', next: expect.stringContaining('codex') });
+      const codex = await fixture.manager.create({ name: 'Codex variant', agent: 'codex', agentProfile: 'greenfield/orchestrator:codex' });
+      expect(codex.session).toMatchObject({ agent: 'codex', agentProfile: { ref: 'greenfield/orchestrator:codex' } });
+      // Without an agent, the variant picks its own.
+      const picked = await fixture.manager.create({ name: 'Variant picks', agentProfile: 'greenfield/orchestrator:codex' });
+      expect(picked.session.agent).toBe('codex');
+      const byDefault = await fixture.manager.create({ name: 'Default variant', agentProfile: 'greenfield/orchestrator:claude' });
+      expect(byDefault.session.agent).toBe('claude');
+      expect(fixture.store.read().sessions.map(session => session.name)).not.toEqual(expect.arrayContaining(['No such variant', 'Plain variant', 'Wrong agent']));
+    }));
+
+    // QA F3: a new launch command alone must not turn a named profile into the plain one.
+    it('keeps a named profile when only the launch command changes', async () => withChatTabs(async fixture => {
+      const created = await fixture.manager.create({ name: 'Orchestrator', agentProfile: 'greenfield/orchestrator' });
+      const updated = await fixture.manager.update({ sessionId: created.session.id }, { launchCommand: 'claude --dangerously-skip-permissions' });
+      expect(updated.agentProfile?.ref).toBe('greenfield/orchestrator');
+      // Review F-2: a launch command that runs another agent drops the named profile for that agent's plain one.
+      const other = await fixture.manager.create({ name: 'Becomes Codex', agentProfile: 'greenfield/orchestrator' });
+      const codex = await fixture.manager.update({ sessionId: other.session.id }, { launchCommand: 'codex' });
+      expect(codex).toMatchObject({ agent: 'codex', agentProfile: { ref: 'pane/codex' } });
+      const moved = await fixture.manager.update({ sessionId: created.session.id }, { launchCommand: 'agent-farm run greenfield/product-researcher' });
+      expect(moved.agentProfile?.ref).toBe('greenfield/product-researcher');
+    }));
+
+    it('moves a plain Session to the new agent\'s plain profile when its agent changes', async () => withChatTabs(async fixture => {
+      const created = await fixture.manager.create({ name: 'Changes agent', agent: 'claude' });
+      const updated = await fixture.manager.update({ sessionId: created.session.id }, { agent: 'codex' });
+      expect(updated.agentProfile).toEqual({ ref: 'pane/codex', hash: 'hash-pane' });
+    }));
   });
 
   it('starts a Session created by a phone app too old for chat tabs in a terminal (D-203)', async () => {

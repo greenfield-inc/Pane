@@ -52,6 +52,8 @@ export const MACHINE_READ_CHANNELS = [
   'sessions:get-all-with-projects',
   'orchestration-sessions:list',
   'orchestration-sessions:runtimes',
+  // The Agent Farm profiles a Session can start with there (T-63).
+  'chat-tab:profiles',
   'permission:getPending',
   'notify:remote-snapshot',
   // To-dos (D-409): another machine's to-dos, for the To-dos list.
