@@ -20,7 +20,7 @@ const overview: ProfilesOverview = {
       ref: 'greenfield/orchestrator',
       entry: 'agents/orchestrator.md',
       harness: 'claude',
-      tree: [{ kind: 'subagent', id: 'helper', alias: 'helper', agent: 'helper', label: 'Helper', harness: 'claude', identity: 'agents/helper.md', children: [] }],
+      tree: [{ kind: 'subagent', id: 'helper', alias: 'helper', agent: 'helper', mode: 'launch', label: 'Helper', harness: 'claude', identity: 'agents/helper.md', children: [] }],
     }],
   }],
 };

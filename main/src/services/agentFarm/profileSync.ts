@@ -374,12 +374,11 @@ export class ProfileSyncHost {
   }
 
   /**
-   * Whether a Pane plugin has a title (pane.yaml) or a cover page here. Pane's plugins ship neither,
-   * and Agent Farm's receipt doesn't cover them, so one is an edit of yours (review F-13).
+   * Whether a Pane plugin has a cover page here. Pane's plugins ship none, and Agent Farm's receipt
+   * doesn't cover them, so one is an edit of yours (review F-13). Titles are display overrides (T-83).
    */
   private async hasPaneFiles(name: string): Promise<boolean> {
     const root = this.pluginRoot(name);
-    if ((await fs.lstat(path.join(root, 'pane.yaml')).catch(() => undefined))?.isFile()) return true;
     const covers = await fs.readdir(path.join(root, 'covers'), { withFileTypes: true }).catch(() => []);
     return covers.some(child => child.isFile() && PANE_FILE.test(`covers/${child.name}`));
   }

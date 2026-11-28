@@ -668,15 +668,15 @@ describe('profile sync: review fixes (fix round 3)', () => {
     expect(await b.editor.read('greenfield', planner)).not.toContain('Marker: MANGO');
   }, 240_000);
 
-  it('syncs a title edit on an otherwise unchanged Pane plugin (F-13)', async () => {
+  it('syncs a cover page added to an otherwise unchanged Pane plugin (F-13)', async () => {
     const a = computer('studio', 'a-id');
     const b = computer('build', 'b-id');
     await installBundledAgentFarm({ paneDir: a.paneDir, bundle, log: () => undefined });
     await installBundledAgentFarm({ paneDir: b.paneDir, bundle, log: () => undefined });
     a.clock.now = Date.now() + 60_000;
-    await a.editor.save('greenfield', [{ path: 'pane.yaml', content: 'profiles:\n  orchestrator:\n    title: Chief planner\n' }]);
+    await a.editor.save('greenfield', [{ path: 'covers/orchestrator.md', content: '# Chief planner\n' }]);
     await desktop(a, [b]).syncNow();
-    expect(readFileSync(path.join(agentFarmConfigRoot(b.paneDir), 'plugins', 'greenfield', 'pane.yaml'), 'utf8')).toContain('Chief planner');
+    expect(readFileSync(path.join(agentFarmConfigRoot(b.paneDir), 'plugins', 'greenfield', 'covers', 'orchestrator.md'), 'utf8')).toContain('Chief planner');
   }, 240_000);
 
   it('keeps a computer\'s failed status when a Session brings a different profile up to date (F-14)', async () => {
