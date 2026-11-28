@@ -78,6 +78,31 @@ test('the conversation shows through the dock\'s gaps and still scrolls its last
   await expect.poll(() => page.locator('.chat-viewport').evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(2);
 });
 
+// T-138 (time on hover): each finished agent turn shows its finish time at the end of its action
+// row when you hover it; the latest turn keeps its time in view; your own messages keep only the tooltip.
+test('an agent turn shows when it finished on hover, and the latest keeps it in view', async ({ page }) => {
+  await open(page, `status=1&conversation=1&times=1&width=${width()}`);
+  const turns = page.locator('.chat-column .chat-turn');
+  const first = turns.first().locator('.chat-turn-time');
+  const latest = turns.last().locator('.chat-turn-time');
+  await expect(first).toHaveText(/\d{1,2}:\d{2}/);
+  await expect(first).toHaveAttribute('title', /\d{4}/);
+  await expect(turns.first().locator('.chat-user-row .chat-turn-time')).toHaveCount(0);
+  await expect(latest).toHaveCSS('opacity', '1');
+  if (test.info().project.name === 'phone') return; // No hover on a touch screen: times stay visible, like Copy.
+  await page.mouse.move(0, 0);
+  await expect(first).toHaveCSS('opacity', '0');
+  await turns.first().locator('.chat-response-actions').hover();
+  await expect(first).toHaveCSS('opacity', '1');
+  // It sits at the row's far end, apart from Copy.
+  const copy = await turns.first().getByRole('button', { name: 'Copy response' }).boundingBox();
+  const time = await first.boundingBox();
+  const row = await turns.first().locator('.chat-response-actions').boundingBox();
+  expect(time!.x).toBeGreaterThan(copy!.x + copy!.width);
+  expect(time!.x + time!.width).toBeGreaterThan(row!.x + row!.width - 2);
+  if (shots) await page.screenshot({ path: `${shots}/hover-time-${test.info().project.name}.png` });
+});
+
 if (shots) for (const theme of ['light', 'dark']) {
   test(`screenshots: bullets, a tall input and the floating dock (${theme})`, async ({ page }) => {
     const project = test.info().project.name;

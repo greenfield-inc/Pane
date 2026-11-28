@@ -451,8 +451,10 @@ and notices fold into one row, "Worked for 27s", that opens to them.
 
 The latest turn says when it finished (D-202): "Worked for 27s · 2:04 PM", or
 "2:04 PM" alone when it did nothing but answer. An older time reads "Yesterday
-4:12 PM" or "Nov 3, 4:12 PM", in the person's locale. Every other message shows
-its time on hover; on the phone, a long press shows it. A conversation reopened
+4:12 PM" or "Nov 3, 4:12 PM", in the person's locale. Every other finished
+agent turn shows its time at the far end of its Copy row when you hover the turn
+(T-138); on a touch screen it stays in view, like Copy. Your own messages show
+theirs as a tooltip; on the phone, a long press shows it. A conversation reopened
 after a restart keeps the times of its last 200 turns; older turns show none.
 
 The conversation stays in the order things happened (D-193). Claude can start a

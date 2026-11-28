@@ -44,6 +44,17 @@ if (params.has('long')) {
   const messages = view.transcript!.messages;
   view.transcript!.messages = [...Array.from({ length: 4 }, (_, round) => messages.map(message => ({ ...message, id: `${message.id}:${round}` }))).flat(), ...messages];
 }
+// ?times=1: each agent turn ends with Pane's turn marker, a few minutes apart, so turns show their finish time (T-138).
+if (params.has('times')) {
+  const assistants = view.transcript!.messages.filter(message => message.role === 'assistant');
+  const at = (index: number) => new Date(Date.now() - (assistants.length - index) * 7 * 60_000);
+  view.transcript!.messages = view.transcript!.messages.map(message => {
+    const index = assistants.indexOf(message);
+    if (index < 0) return message;
+    const end = at(index);
+    return { ...message, parts: [...message.parts, { type: 'content', content: { type: 'pane_turn', stopReason: 'end_turn', startedAt: new Date(end.getTime() - 60_000).toISOString(), endedAt: end.toISOString() } }] };
+  });
+}
 // ?permission=1: an approval docked above the composer.
 if (params.has('permission')) {
   view.permissions = [{ id: 'perm', generation: 1, title: 'Run pnpm test', toolCall: { kind: 'execute', title: 'pnpm test', rawInput: { command: 'pnpm test' } }, options: [option('allow', 'Allow once'), option('always', 'Always allow'), option('reject', 'Reject')].map(({ value, name }) => ({ optionId: value, name, kind: value === 'reject' ? 'reject_once' : value === 'always' ? 'allow_always' : 'allow_once' })) }];
