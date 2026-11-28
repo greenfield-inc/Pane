@@ -167,6 +167,8 @@ Preview components never enter the editable auto-save path, even on errors.
   Process-table reads are confined to archive preparation/teardown/retry, each
   subprocess bounded to five seconds. Windows uses kernel start times and
   pinned process handles; POSIX revalidates start times before individual signals.
+  On Linux a start time is the boot id and start ticks from `/proc/<pid>/stat`,
+  since `ps` lstart moves when the clock is stepped; macOS compares lstart.
   Create/remove also check the cleanup path guard;
   Restore is blocked until cleanup completes. Quarantine lives under
   `<git-common-dir>/pane-archive-cleanup`, separate from legacy trash sweeps.

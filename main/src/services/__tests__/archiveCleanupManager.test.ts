@@ -111,6 +111,17 @@ describe('durable archive cleanup', { timeout: 15000 }, () => {
     expect(existsSync(f.source)).toBe(true);
   });
 
+  it('keeps a retained process\'s kernel start across restart, so a clock step cannot orphan it', async () => {
+    const f = fixture();
+    const job = await f.manager.prepare(f.session, true, false);
+    const kernelStart = '6a1f0c7e-3b44-4f0e-9a51-2a0c1d9e7b10:500';
+    job.processes = [{ pid: 1000001, parent: 1, started: 'Mon Nov 16 09:00:00 2026', kernelStart }, { pid: 1000002, parent: 1, started: 'Mon Nov 16 09:00:01 2026' }];
+    f.db.archiveSession(f.session.id, job);
+    const saved = f.db.getArchiveCleanupJobs()[0].processes;
+    expect(saved?.[0]).toEqual({ pid: 1000001, parent: 1, started: 'Mon Nov 16 09:00:00 2026', kernelStart });
+    expect(saved?.[1].kernelStart).toBeUndefined();
+  });
+
   it('captures before commit and terminates retained processes after a commit-before-enqueue crash', async () => {
     const f = fixture();
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true });

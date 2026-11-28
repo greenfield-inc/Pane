@@ -26,7 +26,7 @@ const jobSchema = boundary.object({
   endTime: boundary.optional(boundary.string),
   error: boundary.optional(boundary.string),
   processes: boundary.optional(boundary.array(boundary.object({
-    pid: boundary.number, parent: boundary.number, started: boundary.string,
+    pid: boundary.number, parent: boundary.number, started: boundary.string, kernelStart: boundary.optional(boundary.string),
   }))),
 });
 
