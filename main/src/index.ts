@@ -137,6 +137,7 @@ import { worktreePoolManager } from './services/worktreePoolManager';
 import { removePaneFsmonitorConfig } from './services/gitPerformanceConfig';
 import { usageManager } from './services/usage/usageManager';
 import { SharedCredentialSync } from './services/sharedCredentialSync';
+import { profileSync } from './ipc/profiles';
 import { startSecretLeases } from './services/secretLeaseRuntime';
 import { MachineConnections, remoteMachineAccess } from './services/machineConnections';
 import { MachineMirror } from './services/machineMirror';
@@ -1309,7 +1310,10 @@ async function initializeServices() {
       relayKey: (tailnet, secret) => tailnetRelayKey(tailnet, secret, readTailscaleStatus),
     },
   });
-  registerMachineConnectionHandlers(ipcMain, machineConnections);
+  registerMachineConnectionHandlers(ipcMain, machineConnections, {
+    // A Session started with a profile on another computer runs that computer's copy, brought up to date first.
+    beforeCreateSession: (machineId, plugin) => profileSync()?.bringCurrent(plugin, machineId) ?? Promise.resolve(),
+  });
   // A switch to a machine this connection heard from in the last 30 s skips the connection checklist.
   remotePaneClientController.setRecentAnswers((computerId, ms) => machineConnections?.answeredWithin(computerId, ms) ?? null);
   setDeviceMachines(machineConnections);
@@ -1705,6 +1709,8 @@ if (launchRemoteSetup) {
     void machineMirror.start().catch(error => console.warn('[Machine mirror] Could not start:', error));
     sharedCredentialSync = new SharedCredentialSync(configManager, machineConnections);
     sharedCredentialSync.start();
+    // Every profile save reaches your other computers, and a computer that was away catches up (T-63 PR 6).
+    profileSync()?.start(machineConnections);
     // Secret leases: renewal reminders, and pushing a lease again to a machine that lost it.
     startSecretLeases({ configManager, machines: machineConnections, notifyQueue: () => paneDaemonHost?.services.notifyService?.queue, packaged: app.isPackaged });
   }
@@ -1752,6 +1758,7 @@ if (launchRemoteSetup) {
   usageManager.stop();
   void sharedCredentialSync?.stop();
   void machineMirror?.stop();
+  profileSync()?.stop();
   void machineConnections?.stop();
 
   // Guard against multiple shutdown attempts

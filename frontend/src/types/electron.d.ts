@@ -163,6 +163,12 @@ interface ElectronAPI {
     setDetails: (plugin: string, profile: string, details: import('../../../shared/types/profileEditor').ProfileDetails) => Promise<IPCResponse<import('../../../shared/types/profileEditor').ProfileSaveResult>>;
     /** YAML as data for a preview, or why it doesn't parse. */
     parseYaml: (source: string) => Promise<IPCResponse<{ data?: import('../../../shared/validation/boundaryDecoder').JsonValue; error?: string }>>;
+    /** How each of your other computers stands with this one's profiles (T-63 PR 6). */
+    syncStatus: () => Promise<IPCResponse<import('../../../shared/types/profileSync').ProfileSyncStatus>>;
+    /** Sync now: sends every profile to every computer again. */
+    syncNow: () => Promise<IPCResponse<import('../../../shared/types/profileSync').ProfileSyncStatus>>;
+    onSyncStatus: (callback: (status: import('../../../shared/types/profileSync').ProfileSyncStatus) => void) => () => void;
+    onChanged: (callback: () => void) => () => void;
   };
   paneSecrets: {
     list: () => Promise<IPCResponse<PaneSecretsOverview>>;

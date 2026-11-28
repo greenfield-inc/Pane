@@ -68,6 +68,8 @@ const READS_FOR_EVENT = {
   'permission:resolved': ['permissions'],
   'notify:shared-changed': ['notify'],
   'remote:settings-changed': [],
+  // A profile changed there; the main process syncs profiles, and the sidebar lists need nothing (T-63 PR 6).
+  'profiles:changed': [],
   // A Session member's report, for the main process's Session journal; nothing to refresh here.
   'workspace:entry': [],
   // Machine health is read by the Resources page itself; the sidebar lists need nothing.

@@ -11,6 +11,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { createPreferencesApi } from '../../shared/types/preferences';
 import { isDaemonOwnedChannel } from '../../shared/types/daemon';
 import { SESSION_LIST_SUMMARY } from '../../shared/types/orchestrationSession';
+import type { ProfileSyncStatus } from '../../shared/types/profileSync';
 import { BROWSER_TAB_NOTICE_CHANNEL, BROWSER_VIEW_LIVE_CHANNEL, type BrowserTabNotice } from '../../shared/types/browser';
 import {
   WINDOW_CONTROLS_OVERLAY_ARG,
@@ -446,6 +447,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     removePhoto: (ref: string): Promise<IPCResponse> => ipcRenderer.invoke('profiles:remove-photo', ref),
     setDetails: (plugin: string, profile: string, details: { title: string; description: string }): Promise<IPCResponse> => ipcRenderer.invoke('profiles:set-details', plugin, profile, details),
     parseYaml: (source: string): Promise<IPCResponse> => ipcRenderer.invoke('profiles:parse-yaml', source),
+    syncStatus: (): Promise<IPCResponse> => ipcRenderer.invoke('profiles:sync-status'),
+    syncNow: (): Promise<IPCResponse> => ipcRenderer.invoke('profiles:sync-now'),
+    /** Each computer's sync state, whenever a sync starts or ends (T-63 PR 6). */
+    onSyncStatus: (callback: (status: ProfileSyncStatus) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, status: ProfileSyncStatus) => callback(status);
+      ipcRenderer.on('profiles:sync-status', wrappedCallback);
+      return () => ipcRenderer.removeListener('profiles:sync-status', wrappedCallback);
+    },
+    /** A profile changed here: a save, or one that arrived from another computer. */
+    onChanged: (callback: () => void) => {
+      const wrappedCallback = () => callback();
+      ipcRenderer.on('profiles:changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('profiles:changed', wrappedCallback);
+    },
   },
   /** Settings → Secrets: this computer's Pane secret store. Values go in only; nothing returns one. */
   paneSecrets: {
