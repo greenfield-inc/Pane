@@ -42,6 +42,15 @@ describe('which terminal launches a chat tab can run', () => {
       expect(chatLaunchFromCommand('agent-farm run greenfield/planner --parent', 'claude')).toBeUndefined();
     });
 
+    // Review F-4: a custom agent-farm the person named by its path is theirs, not Pane's shim.
+    it('keeps the terminal for any other agent-farm path with Profiles on', () => {
+      readProfilesSwitchFrom(() => ({ sessionProfilesEnabled: true }));
+      expect(chatLaunchFromCommand('/opt/tools/agent-farm run greenfield/planner', 'claude')).toBeUndefined();
+      expect(chatLaunchFromCommand(`${path.join(getAppDirectory(), 'elsewhere', 'agent-farm')} run greenfield/planner`, 'claude')).toBeUndefined();
+      expect(chatLaunchFromCommand(`${path.join(getAppDirectory(), 'bin', 'agent-farm-launch', 'agent-farm')} run greenfield/planner`, 'claude'))
+        .toEqual({ kind: 'profile', profile: 'greenfield/planner' });
+    });
+
     it('keeps the terminal with Profiles off, as on main', () => {
       expect(chatLaunchFromCommand(`${shim()} run greenfield/planner`, 'claude')).toBeUndefined();
       expect(chatLaunchFromCommand('agent-farm run greenfield/planner --parent greenfield/orchestrator@af-1', 'claude')).toBeUndefined();

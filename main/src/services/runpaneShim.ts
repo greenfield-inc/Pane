@@ -359,6 +359,19 @@ const AGENT_FARM_LAUNCHER = 'agent-farm.cjs';
 const AGENT_FARM_WINDOWS_FOLDER = 'agent-farm-launch';
 const AGENT_FARM_SHIM_FILES = ['agent-farm', 'agent-farm.cmd', AGENT_FARM_LAUNCHER, path.join(AGENT_FARM_WINDOWS_FOLDER, 'agent-farm.cmd')];
 
+/**
+ * Whether `cli` names one of Pane's own agent-farm shims in `binDir` (`<PANE_DIR>/bin`), as a launch
+ * link's command prints it. Any other path stays the person's own executable (review F-4).
+ */
+export function isAgentFarmShimPath(cli: string, binDir: string): boolean {
+  const resolved = path.resolve(cli);
+  const folder = path.join(binDir, AGENT_FARM_WINDOWS_FOLDER);
+  return [binDir, folder].some(dir => ['agent-farm', 'agent-farm.cmd'].some(name => {
+    const shim = path.resolve(dir, name);
+    return process.platform === 'win32' ? shim.toLowerCase() === resolved.toLowerCase() : shim === resolved;
+  }));
+}
+
 /** The CLI path Agent Farm prints in child launches (agentFarmLauncher): the shim on POSIX, the .cmd-only folder's name on Windows. */
 function agentFarmLaunchAs(binDir: string, platform: NodeJS.Platform): string {
   return platform === 'win32' ? path.join(binDir, AGENT_FARM_WINDOWS_FOLDER, 'agent-farm') : path.join(binDir, 'agent-farm');

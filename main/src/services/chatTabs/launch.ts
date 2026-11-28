@@ -25,6 +25,7 @@ import { clearSessionProfile, sessionGitCeiling } from '../sessionWorkspace';
 import { plainProfileAgent } from '../../../../shared/agentProfiles';
 import { profilesOn } from '../agentFarm/profilesFeature';
 import { agentFarmConfigRoot } from '../agentFarm/bundledAgentFarm';
+import { isAgentFarmShimPath } from '../runpaneShim';
 
 /** API keys a person may set for chat tabs on this machine, kept in the OS secure store. */
 export interface ChatTabSecrets { apiKey(agent: ChatAgent): string | undefined }
@@ -194,12 +195,13 @@ function fullAccessLaunch(chat: AgentChatConfig | undefined, launch: ChatTabLaun
 /**
  * An `agent-farm run <profile> …` command as a chat tab's profile launch, or the first token a chat
  * tab can't run the same way. `--arg k=v` always carries over. With Profiles on (T-83 P3) so does
- * what Agent Farm prints for a launch link: the CLI as a path to an `agent-farm` (Pane's shim),
+ * what Agent Farm prints for a launch link: the CLI as the path to Pane's own `agent-farm` shim (any
+ * other path is the person's own executable and keeps its terminal),
  * `--parent <token>`, and `--config-root` naming Pane's own config root, which chat tabs always use.
  */
 function agentFarmRunLaunch(tokens: readonly string[], on: boolean = profilesOn()): { launch: Extract<ChatTabLaunch, { kind: 'profile' }> } | { unsupported: string } | undefined {
   const cli = tokens[0] ?? '';
-  const named = cli === 'agent-farm' || (on && /^agent-farm(\.cmd)?$/i.test(path.basename(cli.replace(/\\/g, '/'))));
+  const named = cli === 'agent-farm' || (on && path.isAbsolute(cli) && isAgentFarmShimPath(cli, path.join(getAppDirectory(), 'bin')));
   if (!named || tokens[1] !== 'run' || !tokens[2] || tokens[2].startsWith('-')) return undefined;
   const args: Record<string, string> = {};
   let parent: string | undefined;
