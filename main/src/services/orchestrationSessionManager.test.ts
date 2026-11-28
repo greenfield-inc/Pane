@@ -604,7 +604,7 @@ describe('OrchestrationSessionManager', () => {
         expect(created.panel.state.customState).toMatchObject({ launch: { kind: 'profile', profile: 'greenfield/orchestrator', args: { task: 'x' } } });
         const switched = await switchTo(fixture, created.session.id, 'pane/claude', 'kept');
         expect(switched.session.launchCommand).toBe('');
-        expect(port.relaunch).toHaveBeenCalledWith(created.panel.id, expect.objectContaining({ launch: { kind: 'profile', profile: 'pane/claude', fromSession: true, fullAccess: true } }));
+        expect(port.relaunch).toHaveBeenCalledWith(created.panel.id, expect.objectContaining({ launch: { kind: 'profile', profile: 'pane/claude', fromSession: true, fullAccess: true, snapshot: expect.stringContaining('snapshots') } }));
         // A Session that took a named profile is marked too, so Profiles off starts its agent on its own.
         const named = await fixture.manager.create({ name: 'Named', agentProfile: 'greenfield/orchestrator' });
         expect(named.panel.state.customState).toMatchObject({ launch: { kind: 'profile', profile: 'greenfield/orchestrator', fromSession: true } });
@@ -715,9 +715,9 @@ describe('OrchestrationSessionManager', () => {
         const chat = await fixture.manager.create({ name: 'Chat lead', agentProfile: 'greenfield/product-researcher' });
         const taken = () => farm.snapshot.mock.calls.length;
         let before = taken();
-        await expect(fixture.manager.switchProfile({ sessionId: terminal.session.id }, 'pane/claude')).rejects.toMatchObject({ code: 'SESSION_PROFILE_TERMINAL' });
+        await expect(switchTo(fixture, terminal.session.id, 'pane/claude', 'kept')).rejects.toMatchObject({ code: 'SESSION_PROFILE_TERMINAL' });
         expect(taken()).toBe(before);
-        expect((await fixture.manager.switchProfile({ sessionId: chat.session.id }, 'greenfield/product-researcher')).effect).toBe('current');
+        expect((await switchTo(fixture, chat.session.id, 'greenfield/product-researcher', 'kept')).effect).toBe('current');
         expect(taken()).toBe(before);
         farm.profiles.mockResolvedValue({ profiles: [{ ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.1.0', harness: 'claude', hidden: false }], linked: [] });
         before = taken();
@@ -736,7 +736,7 @@ describe('OrchestrationSessionManager', () => {
         fixture.manager.attachChatTabs(port);
         const created = await fixture.manager.create({ name: 'Keeps its profile', agent: 'claude' });
         farm.snapshot.mockRejectedValueOnce(new PaneError('AGENT_FARM_SNAPSHOT_FAILED', 'Agent Farm couldn\'t save the Session\'s snapshot: disk full.', 'Restart Pane.'));
-        await expect(fixture.manager.switchProfile({ sessionId: created.session.id }, 'greenfield/orchestrator')).rejects.toMatchObject({ code: 'AGENT_FARM_SNAPSHOT_FAILED', message: expect.stringContaining('The Session was not switched.') });
+        await expect(switchTo(fixture, created.session.id, 'greenfield/orchestrator', 'kept')).rejects.toMatchObject({ code: 'AGENT_FARM_SNAPSHOT_FAILED', message: expect.stringContaining('The Session was not switched.') });
         expect(port.relaunch).not.toHaveBeenCalled();
         expect(fixture.store.read().sessions.find(session => session.id === created.session.id)).toMatchObject({ agentProfile: { ref: 'pane/claude' }, agentFarmSnapshot: created.session.agentFarmSnapshot });
       }));
@@ -833,7 +833,7 @@ describe('OrchestrationSessionManager', () => {
         fixture.manager.attachChatTabs(port);
         const created = await fixture.manager.create({ name: 'Switches', agent: 'claude' });
         const calls = farm.snapshot.mock.calls.length;
-        const switched = await fixture.manager.switchProfile({ sessionId: created.session.id }, 'greenfield/orchestrator');
+        const switched = await switchTo(fixture, created.session.id, 'greenfield/orchestrator', 'kept');
         expect(farm.snapshot.mock.calls.length).toBe(calls + 1);
         expect(switched.session.agentFarmSnapshot).not.toBe(created.session.agentFarmSnapshot);
         expect(port.relaunch).toHaveBeenCalledWith(created.panel.id, expect.objectContaining({ launch: expect.objectContaining({ snapshot: expect.stringContaining(String(switched.session.agentFarmSnapshot).split('/').pop()) }) }));

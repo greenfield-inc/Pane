@@ -1265,7 +1265,8 @@ describe('TerminalPanelManager hidden output delivery', () => {
       initialInput: newSessionFirstMessagePrompt('How are you doing?'),
     });
 
-    expect(result.commandToRun).toBe('codex --yolo "How are you doing?"');
+    // The shell's own quoting: single quotes on POSIX, double on Windows.
+    expect(result.commandToRun).toMatch(/^codex --yolo (['"])How are you doing\?\1$/);
   });
 
   it('opens a fresh Pi tab on a Pane-chosen --session-id and records it', () => {

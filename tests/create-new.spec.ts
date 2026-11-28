@@ -465,7 +465,8 @@ test('a first message a PowerShell or cmd terminal can\'t take holds Create and 
 
 test('launch settings follow the chosen agent: unedited defaults are main\'s, a profile sends none, and an edited resume says it can\'t take a message (F-5)', async ({ page }) => {
   const resume = { mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} -- --resume {sessionId}' };
-  await openApp(page, { initialConfig: { defaultSessionResume: resume } });
+  // A saved custom command brings its own resume template (build 8: Create New has no resume options).
+  await openApp(page, { initialConfig: { defaultSessionResume: resume, customCommands: [{ name: 'Verbose Claude', command: 'claude --verbose', resume }] } });
   await page.getByTestId('new-orchestration-session').click();
   // Codex, unedited, with a message: main picks the launch; the default custom resume doesn't come along.
   await page.keyboard.type('codex');
@@ -492,7 +493,7 @@ test('launch settings follow the chosen agent: unedited defaults are main\'s, a 
   await dialog(page).getByLabel('Custom command and arguments', { exact: true }).fill('claude --verbose');
   await dialog(page).getByRole('button', { name: 'Back', exact: true }).click();
   await dialog(page).getByRole('textbox', { name: 'Message', exact: true }).fill('Continue.');
-  await expect(dialog(page).getByTestId('create-new-blocked')).toContainText('can\'t take a first message. Clear Resume in More options');
+  await expect(dialog(page).getByTestId('create-new-blocked')).toContainText('can\'t take a first message. Its resume template comes from Settings');
   expect(await createInputs(page)).toHaveLength(2);
 });
 
@@ -615,13 +616,16 @@ test('Create New has no resume options: Pane resumes chat Sessions itself, and a
   await dialog(page).getByTestId('create-new-submit').click();
   await expect(dialog(page)).toHaveCount(0);
   expect((await createInputs(page))[1]).toMatchObject({ launchCommand: 'typed-agent --x', customResume: null });
-  // The dialog never writes the Settings resume template.
+  // A command is remembered with its own template (#1762 F-1): the Settings template is never written alone.
   const configUpdates = await page.evaluate(() => {
     // SAFETY: installElectronApiMock installs this controller before the app loads.
     const mockWindow = window as typeof window & { __paneTestElectronMock: { getConfigUpdates: () => JsonObject[] } };
     return mockWindow.__paneTestElectronMock.getConfigUpdates();
   });
-  expect(configUpdates.some(update => 'defaultSessionResume' in update)).toBe(false);
+  expect(configUpdates.filter(update => 'defaultSessionResume' in update)).toEqual([
+    expect.objectContaining({ defaultSessionCommand: 'saved-agent', defaultSessionResume: SAVED_RESUME }),
+    expect.objectContaining({ defaultSessionCommand: 'typed-agent --x', defaultSessionResume: null }),
+  ]);
 });
 
 test('with Profiles off, the Create Session dialog keeps its resume options', async ({ page }) => {
