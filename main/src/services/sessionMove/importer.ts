@@ -26,13 +26,14 @@ import { isBinaryFile } from '../../utils/binaryFile';
 import { placeConversation, undoConversationPlacement, type PlacedConversation } from './conversations';
 import { addWorktree, applySnapshot, deleteRefs, importBundle, MoveGitError, placeBranch, snapshotMatches } from './gitSnapshot';
 import { moveManifestSchema, movedApprovals, panelBuffersSchema, readTabFields, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveRepo, type MoveTab } from './manifest';
-import { buildPathMap, mapPath, rewriteJson, rewriteJsonText, rewriteText, type PathMap } from './pathMap';
+import { buildPathMap, mapPath, rewriteJson, rewriteJsonText, rewriteLaunchCommand, rewriteText, type PathMap } from './pathMap';
 import { arrivingPreview, previewSourcePath, relativeInside, type MovedRoot } from './filePreviews';
 import { bindMovedApprovals } from './approvals';
 import type { MovedApproval } from '../notify/notifyService';
 import { MoveReceiver, type WriteRequest, type WriteResult } from './transfer';
-import { isRegeneratedSessionFile, isTextFile } from './sessionFolder';
-import { agentFarmProfileOf, movedLine } from './rules';
+import { isRegeneratedSessionFile, isTextFile, isVerbatimSessionFile } from './sessionFolder';
+import { unreadableSnapshots } from '../agentFarm/sessionSnapshot';
+import { agentFarmProfileOf, movedLine, profileChecks, tabAgentFarmLaunch } from './rules';
 import { MoveLedger, type CommitPlan, type JournalRecord, type LedgerEntry, type LedgerTab, type UndoStep } from './ledger';
 
 const run = promisify(execFile);
@@ -185,6 +186,21 @@ async function snapshotBlobs(worktree: string, snapshot: string, sourceRoot: str
     if (match) blobs.set(match[2], match[1]);
   }
   return blobs;
+}
+
+/**
+ * The snapshot digests the moving Session and its tabs resolve from (#1762 F-7), read from the
+ * source's paths: the Session's own, and each Agent Farm tab's (its `--snapshot`, its chat launch's,
+ * or the one it was pinned).
+ */
+function referencedSnapshots(manifest: MoveManifest): Set<string> {
+  const root = manifest.sessionFolder.root;
+  const recordSnapshot = decodeOptionalBoundary(manifest.session.agentFarmSnapshot, boundary.string);
+  const folders = [
+    recordSnapshot ? path.join(root, ...recordSnapshot.split('/')) : undefined,
+    ...manifest.panes.flatMap(pane => pane.tabs.map(tab => tabAgentFarmLaunch(tab.state, root, recordSnapshot)?.folder)),
+  ];
+  return new Set(folders.flatMap(folder => folder ? [path.basename(folder)] : []));
 }
 
 /** `<executable> --version`, or null when it isn't installed here. */
@@ -408,15 +424,10 @@ export class MoveImporter {
     const wantedProfiles = Object.entries(manifest.source.profiles);
     if (wantedProfiles.length) {
       const here = await agentFarmProfiles();
-      for (const [profile, version] of wantedProfiles) {
-        if (!here[profile]) {
-          checks.push({ id: `profile:${profile}`, level: 'block', title: `Agent Farm profile ${profile} isn't on ${machine}`, detail: `Tabs launched with it can't resume there. Install its plugin with agent-farm plugin install on ${machine}, then check again.` });
-        } else if (version && here[profile] !== version) {
-          checks.push({ id: `profile:${profile}`, level: 'warning', title: `${profile} is ${here[profile]} there, ${version} here`, detail: `Tabs resume with ${here[profile]}. Update Agent Farm on ${machine} to match.` });
-        } else {
-          installed.push(`Agent Farm ${profile}${version ? ` ${version}` : ''}`);
-        }
-      }
+      // T-110 (D-3): a profile the Session's snapshot holds runs from it here, whatever is installed.
+      const profileResult = profileChecks(manifest.source.profiles, here, manifest.source.snapshotProfiles ?? [], { machine, source: manifest.source.machine, snapshots: profilesOn() });
+      checks.push(...profileResult.checks);
+      installed.push(...profileResult.installed);
       // Agent Farm stops untrusted workspaces: each repository its tabs use must be trusted here.
       for (const found of repos.values()) {
         if (!found.found || !found.path) continue;
@@ -702,14 +713,27 @@ export class MoveImporter {
     const backup = `${targetFolder}.pane-move-${moveId}`;
     this.journal(job, `the Session folder ${targetFolder}`, { kind: 'restoreFolder', target: targetFolder, backup: hadFolder ? backup : null });
     if (hadFolder) await fs.promises.rename(targetFolder, backup);
+    const executable = new Set(manifest.files.filter(file => file.executable).map(file => file.path));
     for (const relative of manifest.sessionFolder.files) {
       if (isRegeneratedSessionFile(relative)) continue;
       const source = this.receiver.filePath(moveId, `session/${relative}`);
       const target = path.join(targetFolder, ...relative.split('/'));
       await fs.promises.mkdir(path.dirname(target), { recursive: true });
-      const text = await readTextFile(source, relative);
+      const text = isVerbatimSessionFile(relative) ? null : await readTextFile(source, relative);
       if (text === null) await fs.promises.copyFile(source, target);
       else await fs.promises.writeFile(target, rewriteText(map, text));
+      // #1762 F-2: a script that ran there runs here; only execute bits, where it can be read.
+      // Behind Profiles, which brings the snapshots that hold such scripts; off, a move copies as it did.
+      if (profilesOn() && executable.has(`session/${relative}`)) {
+        const mode = (await fs.promises.stat(target)).mode & 0o777;
+        await fs.promises.chmod(target, mode | ((mode & 0o444) >> 2));
+      }
+    }
+    // T-110 (D-3): each Agent Farm snapshot the Session or a tab still resolves from must read here
+    // as it did there, or its agents would refuse to start; an old one nothing names can't block (#1762 F-7).
+    const brokenSnapshots = await unreadableSnapshots(targetFolder, referencedSnapshots(manifest));
+    if (brokenSnapshots.length) {
+      throw new PaneError('ERR_MOVE_SNAPSHOT_UNREADABLE', `The Session's Agent Farm snapshot ${brokenSnapshots[0].path} didn't arrive intact on ${thisMachineName()}: ${brokenSnapshots[0].problem}.`, `Nothing was changed on ${manifest.source.machine}. Reload the Session's profile there, then move it again.`);
     }
     const moved: SessionMoveRecord = {
       moveId, from: manifest.source.machine, to: thisMachineName(), at: new Date().toISOString(), paths: map.entries,
@@ -765,6 +789,11 @@ export class MoveImporter {
         if (tab.type === 'terminal') {
           state.cwd = cwd;
           state.isInitialized = false;
+          // T-110 review F-11: a restore replays the command with --resume, so its --snapshot moves as one word.
+          for (const key of ['launchCommand', 'initialCommand'] as const) {
+            const command = decodeOptionalBoundary(tab.state[key], boundary.string);
+            if (command) state[key] = rewriteLaunchCommand(map, command);
+          }
           delete state.conversationReport;
           const { resumeDirectory } = readTabFields(state);
           if (resumeDirectory) state.resumeDirectory = mapPath(map, resumeDirectory) ?? cwd;

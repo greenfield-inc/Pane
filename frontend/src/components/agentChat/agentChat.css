@@ -4,7 +4,7 @@
  */
 @import '../../styles/tokens/agentChat.css';
 
-.agent-chat { --thread-max-width: 44rem; --composer-radius: 1rem; background: var(--chat-background); color: var(--chat-foreground); font-size: 16px; line-height: 1.5; }
+.agent-chat { --thread-max-width: 44rem; --composer-radius: 1rem; background: var(--chat-background); color: var(--chat-foreground); font-size: var(--chat-message-font-size); line-height: var(--chat-message-line-height); }
 .chat-header { display:grid; grid-template-columns:minmax(0,1fr); flex-shrink:0; align-items:center; gap:8px; min-height:44px; padding:6px 12px; }
 .chat-header-state { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; min-width:0; }
 .chat-status { min-width:0; flex:1 1 140px; font-size:12px; color:var(--chat-muted-foreground); }

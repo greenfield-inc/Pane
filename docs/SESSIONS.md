@@ -95,15 +95,20 @@ PowerShell or cmd, which can't take it on the launch line (turn on Chat tabs,
 or create without a message). Nothing in the draft is cleared. A Session that
 resumes with a custom command can't take a first message either: with launch
 settings left alone, a default custom resume is left out when there is a
-message; one you set in More options holds Create. Launch settings left alone
+message; a launch command you set in More options whose Settings resume template
+resumes holds Create. Launch settings left alone
 are the chosen agent's defaults; a profile sends none.
 
 **Create session** has a menu that switches it to **Create pane** (the project,
 base branch and Pane name), and Create New opens in that mode next time.
-**More options** holds every setting the old dialogs had: for a Session, what
-it's for, Start pinned, Run agent in (the Run on machine's WSL distributions),
-and the launch command and behavior; for a Pane, Start pinned, Use worktree and
-the number of Panes. Create is only on the main screen: **Back** returns there.
+**More options** holds the old dialogs' settings: for a Session, what it's for,
+Start pinned, Run agent in (the Run on machine's WSL distributions), and the
+launch command and behavior; for a Pane, Start pinned, Use worktree and the
+number of Panes. Create is only on the main screen: **Back** returns there.
+Create New has no resume options: Pane reconnects a chat Session itself, and
+Agent Farm resumes a profile or plain Claude or Codex. A custom launch command
+takes its resume template from Settings (a saved custom command's own, or
+**Settings › AI Agents › Session defaults** for the default command).
 A project's `+` opens Create New as a Pane in that project, on this computer.
 
 Session rows show the profile's avatar at the row's left padding (a profile's
@@ -148,10 +153,46 @@ the agent to finish its current reply, then restart its chat tab on the new laun
   history silently. The transcript for that case is kept in Pane's own chat-tabs
   folder and goes into the Session folder only when it is handed over; otherwise
   it is deleted once the agent has started.
+- Each Session created with Profiles on gets a snapshot when it is created: Agent
+  Farm's frozen copy of every plugin installed in Pane's Agent Farm
+  (`agent-farm snapshot create --directory <Session folder>`), kept at
+  `<Session folder>/.agent-farm/snapshots/<digest>/` and saved on the Session as
+  `agentFarmSnapshot`, relative to that folder. The lead's chat starts with
+  `--snapshot <folder>` at every start, so restarting Pane doesn't change its
+  version, and every terminal and chat tab opened in the Session's Panes gets
+  `AGENT_FARM_SNAPSHOT=<folder>`, so an `agent-farm run` typed in one reads the
+  same files (not in WSL or over SSH). A tab keeps the snapshot it opened with.
+  A chat tab started from a launch link's command keeps the link's `--snapshot`.
+  A greenfield update reaches a running Session only through Reload profile or
+  Switch profile, which take a new snapshot. The lead and tabs opened after that
+  get it; agents already running keep theirs until they close. A Session whose
+  lead runs in a terminal (a promoted or resumed conversation, WSL, a wrapper or
+  custom resume command, or Chat tabs off) gets a snapshot too. Its Reload profile
+  takes a new snapshot without restarting the lead, so only tabs opened afterwards
+  use it. The lead keeps the snapshot it started with, even across a Pane restart,
+  and its tab can't be closed: to run a lead on the new snapshot, start a new
+  Session. If a Reload or Switch can't save its snapshot, it changes nothing and
+  says so (`AGENT_FARM_SNAPSHOT_FAILED`, "Nothing was reloaded."). If the snapshot
+  can't be saved when the Session is created, the Session is still created
+  without one. Its activity then says "No Agent Farm snapshot", and its agents
+  read the installed plugins until Reload profile, or, for a Session whose lead
+  runs in a terminal and so has nothing to reload, until a new Session. Sessions from before snapshots
+  have none.
 - When a profile's plugin changes after a Session took it, the row shows an amber
-  dot and Reload profile is marked; listing Sessions re-checks the plugins at most
-  every 10 seconds. A Session whose agent runs in a terminal, or one from before
-  profiles (Reload only), refuses with why.
+  dot and Reload profile is marked. For a Session with a snapshot, the dot means
+  that some plugin in the snapshot differs from the installed copy (a worker may
+  run any plugin), not only the profile's own. Only the files the plugin's Agent
+  Farm receipt lists count, as a snapshot copies only those: a cache, `.venv` or
+  `.DS_Store` beside them never marks a Session, and an edit in place does. Pane
+  re-checks the plugins every 10 seconds, whether or not anything lists Sessions.
+  The dot shows only where Reload can act on it: on a Session with a snapshot, or
+  on a chat lead's profile. A Session from before profiles refuses Reload and says
+  why.
+- When Agent Farm refuses the Session's snapshot because it was deleted, a file
+  in it changed, or a newer Agent Farm wrote it, it never falls back to the
+  installed plugins. The lead's chat stops (`CHAT_PROFILE_SNAPSHOT_UNREADABLE`)
+  with **Reload profile**, which takes a new snapshot and keeps the conversation.
+  Another tab says to reload from the lead.
 - When this computer's Agent Farm no longer lists a Session's profile (greenfield
   0.1.0 removed most of them), neither as a profile nor as an agent a profile
   links to (a Session started from a launch link's command runs one), or its
@@ -166,6 +207,7 @@ A Session tab whose profile Pane chose (its creation or a Switch, saved with
 `fromSession`) starts its agent on its own, as main does; a launch command's own
 Agent Farm profile still runs. A Reload or Switch still waiting for a reply is
 dropped, and a waiting confirmation or Undo toast closes.
+No snapshot is taken, no launch gets `--snapshot`, and no tab gets `AGENT_FARM_SNAPSHOT`.
 
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle
 on top and that kind's form below. When the desktop has saved other machines,
@@ -298,8 +340,9 @@ not stored.
 
 ## Resuming custom launchers
 
-Use **Enable custom command resume** in Session launch settings or a saved custom
-command's editor. This is an explicit contract, independent of executable names.
+Use **Enable custom command resume** in Session launch settings (Settings › AI
+Agents › Session defaults, or the Create Session dialog with Profiles off) or a
+saved custom command's editor. This is an explicit contract, independent of executable names.
 Agent Farm is the one exception, described in [Agent Farm](#agent-farm) below.
 Choose a session ID source and provide first-launch and resume templates:
 
@@ -645,7 +688,18 @@ Pane then packs, sends and rebuilds the Session:
   continued after an earlier move is never overwritten: the move stops instead;
 - the Session folder is copied with its text files rewritten for that machine's
   paths. `moved.json` in the folder records the path map, for anything that
-  still names the old paths (conversation history keeps them);
+  still names the old paths (conversation history keeps them). Agent Farm's
+  rebuilt launch bundles (`.agent-farm/generated/`) stay behind; its snapshots
+  (`.agent-farm/snapshots/`) are copied byte for byte, so the Session runs the
+  same profile files on that machine until Reload profile. The other machine
+  checks each snapshot against its own checksums. One that doesn't arrive intact
+  fails the move (`ERR_MOVE_SNAPSHOT_UNREADABLE`), and nothing changes on this
+  machine. The check before the move accepts a tab's Agent Farm profile that the
+  snapshot holds even when that machine hasn't installed its plugin, and blocks only
+  a profile that neither the snapshot nor that machine's plugins hold (with
+  Profiles off there, only the installed plugins count). A tab started from a launch
+  link's command keeps its `--snapshot`, which a restore replays before Agent Farm's own
+  record, so the move points it at the moved folder, quoted as one word for that machine;
 - a browser tab previewing a file (`runpane panels open --file`) moves when
   the file moved with the Session: in one of its worktrees or its Session
   folder, and there on the other machine. It opens the file at its new path

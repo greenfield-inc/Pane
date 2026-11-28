@@ -1,5 +1,3 @@
-import { PANE_ONE_TIME_PROMPT_OPENING } from '../../../../shared/types/paneChat';
-
 /** What Create New remembers on this computer between opens (T-63). */
 const MODE_KEY = 'pane.new.mode';
 const TO_KEY = 'pane.new.to';
@@ -38,15 +36,6 @@ export function rememberedTo(): string | null {
 
 export function rememberTo(key: string): void {
   write(TO_KEY, key);
-}
-
-/**
- * The opening prompt that carries the person's first message to a new Session's agent. Like every
- * one-time prompt, it begins with Pane's marker, so a relaunch never sends it twice.
- */
-export function firstMessagePrompt(message: string): string | undefined {
-  const text = message.trim();
-  return text ? `${PANE_ONE_TIME_PROMPT_OPENING}, with the person's first message from New Session:\n\n${text}` : undefined;
 }
 
 /** The images a chat can take with a message, as the chat composer sends them. */

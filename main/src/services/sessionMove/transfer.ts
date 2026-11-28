@@ -136,6 +136,16 @@ async function withRetry<T>(work: () => Promise<T>, label: string): Promise<T> {
   throw new PaneError('ERR_MOVE_SEND_FAILED', `Sending ${label} failed ${ATTEMPTS} times: ${reason}`, 'Check the connection between the two machines, then try again.');
 }
 
+/**
+ * A file's manifest entry: its size and SHA-256, and whether it is executable (#1762 F-2), which
+ * the transfer itself doesn't carry. Windows has no execute bits to send.
+ */
+export async function packageFile(packagePath: string, source: string): Promise<PackageFile> {
+  const digest = await fileDigest(source);
+  const executable = process.platform !== 'win32' && ((await fs.promises.stat(source)).mode & 0o111) !== 0;
+  return executable ? { path: packagePath, ...digest, executable: true } : { path: packagePath, ...digest };
+}
+
 /** Sends one file, compressed and in chunks; resolves with the target's checked size and SHA-256. */
 export async function sendFile(sender: ChunkSender, moveId: string, packagePath: string, file: string, { chunkBytes = WRITE_CHUNK_BYTES }: { chunkBytes?: number } = {}): Promise<PackageFile> {
   const original = await fileDigest(file);

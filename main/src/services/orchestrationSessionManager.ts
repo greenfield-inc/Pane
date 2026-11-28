@@ -13,7 +13,8 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { panelManager } from './panelManager';
 import { getChatTabManager } from './chatTabs';
 import { sessionChatLaunch } from './chatTabs/launch';
-import { agentFarmConfigRoot, listPaneAgentFarmProfiles, paneAgentFarmHarness } from './agentFarm/bundledAgentFarm';
+import { agentFarmConfigRoot, createPaneSessionSnapshot, listPaneAgentFarmProfiles, paneAgentFarmHarness } from './agentFarm/bundledAgentFarm';
+import { ReceiptHashes, snapshotLocation, snapshotPluginHashes, type SessionSnapshot } from './agentFarm/sessionSnapshot';
 import { installedPluginHash, profilePlugin } from './agentFarm/agentFarmProfiles';
 import { plainProfileAgent, plainProfileRef, profileDisplayName, profileSwitchEffect } from '../../../shared/agentProfiles';
 import { profilesEnabled } from './agentFarm/profilesFeature';
@@ -46,6 +47,12 @@ export interface SessionAgentFarm {
   profiles(): Promise<AgentFarmProfileList>;
   /** The harness a profile variant (`plugin/profile:variant`) really runs, or undefined when it can't be read. */
   harness(ref: string): Promise<string | undefined>;
+  /** Saves a snapshot of every installed plugin in a Session folder (T-110), with its path relative to that folder. */
+  snapshot(sessionFolder: string): Promise<SessionSnapshot>;
+  /** The receipt-listed files' hash of each plugin in a snapshot folder (absolute), by plugin name. */
+  snapshotHashes(snapshotFolder: string): Promise<Record<string, string>>;
+  /** The same hash of an installed plugin (its receipt-listed files as they are now), or undefined when it isn't installed. */
+  receiptHash(plugin: string): Promise<string | undefined>;
 }
 import { terminalPanelManager } from './terminalPanelManager';
 import { databaseService } from './database';
@@ -500,6 +507,17 @@ export class OrchestrationSessionManager extends EventEmitter {
         updatedAt: now,
       };
       if (agentProfile) record.agentProfile = agentProfile;
+      // T-110 (D-4): every Profiles-on Session gets one snapshot, before its lead first starts.
+      if (this.profilesOn()) {
+        try { record.agentFarmSnapshot = (await this.agentFarm().snapshot(sessionWorkspacePath(record.id))).path; }
+        catch (error) {
+          console.warn(`[Sessions] ${record.name} has no Agent Farm snapshot, so its agents read the installed plugins as before: ${reasonOf(error)}`);
+          // Review F-2: the Session says it isn't pinned, so a greenfield update reaching it is no surprise.
+          // Only a Session with a profile has a Reload profile that can act; any other one starts over (QA r3).
+          const way = record.agentProfile ? 'until Reload profile' : 'for as long as it runs. Start a new Session to get one';
+          record.activity.push(this.activity('updated', `No Agent Farm snapshot: Agent Farm couldn't save one (${reasonOf(error)}), so this Session's agents read the installed plugins ${way}.`, 'user'));
+        }
+      }
       const next: OrchestrationSessionStoreData = {
         ...data,
         selectedSessionId: record.id,
@@ -677,33 +695,21 @@ export class OrchestrationSessionManager extends EventEmitter {
     const ref = request.ref;
     this.refuseProfilesOff(outcome);
     const target = await this.profileTarget(ref, request.agent, outcome);
+    // Review F-3: the cheap refusals come before the snapshot, which writes a folder.
+    const before = this.switchChecks(await this.get(selector), target, ref, request, outcome);
+    const snapshot = before.effect === 'current' ? undefined : await this.newSnapshot(selector, outcome);
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       const data = this.store.read();
       const current = this.findSession(data, selector);
-      const fromPanel = this.profileChatPanel(current, 'switched');
-      const previous = { agent: current.agent, ref: current.agentProfile?.ref };
-      const effect = profileSwitchEffect(previous, { agent: target.agent, ref });
+      const { fromPanel, toPanel, effect, agentChanging, previous } = this.switchChecks(current, target, ref, request, outcome);
       if (effect === 'current') return { session: this.withComputed(clone(current)), previous, effect };
-      // What the person saw when they chose must still hold: a new conversation is never started unasked.
-      if (request.expect.agent !== previous.agent || (request.expect.ref ?? undefined) !== previous.ref || request.expect.effect !== effect) {
-        throw new PaneError('SESSION_PROFILE_CHANGED', `${current.name} changed since you chose ${profileDisplayName(ref)}${effect === 'new-conversation' ? ', and the switch would now start a new conversation' : ''}. ${outcome}`, 'Open the Session\'s menu and choose the profile again.');
-      }
-      this.assertAgentSupported(target.agent, current.runtime);
-      const agentChanging = target.agent !== current.agent;
-      const toPanel = agentChanging ? panelManager.getPanel(current.panelIds[target.agent]) : fromPanel;
-      if (toPanel && toPanel.type !== 'chat') {
-        throw new PaneError('SESSION_PROFILE_TERMINAL', `${current.name}'s ${configuredAgent(target.agent).title} tab is a terminal, which can't run a profile. ${outcome}`, `Start a new Session with ${profileDisplayName(ref)}.`);
-      }
       const name = profileDisplayName(ref);
-      // A new conversation is given the transcript as it stands, so the reply in progress must end first.
-      if (effect === 'new-conversation' && this.chatTabs().replying(fromPanel.id)) {
-        throw new PaneError('SESSION_PROFILE_BUSY', `${current.name}'s ${configuredAgent(current.agent).title} is still replying. ${outcome}`, `Switch to ${name} again when the reply ends, or press Stop first.`);
-      }
       const next: OrchestrationSessionRecord = {
         ...current, agent: target.agent, agentProfile: target.profile,
         revision: current.revision + 1, updatedAt: new Date().toISOString(), activity: [...current.activity],
       };
+      if (snapshot) next.agentFarmSnapshot = snapshot.path;
       if (agentChanging) { next.launchCommand = ''; next.customResume = undefined; next.resume = undefined; }
       // A launch command that runs its own Agent Farm profile gives way to the switched one, args and all (review F-2).
       const own = this.chatLaunch(current);
@@ -739,42 +745,74 @@ export class OrchestrationSessionManager extends EventEmitter {
           .catch(error => console.warn(`[Sessions] ${current.name}'s ${configuredAgent(current.agent).title} tab did not stop: ${reasonOf(error)}`));
       }
       this.pluginHashes.set(profilePlugin(ref), target.profile.hash);
+      if (snapshot) this.snapshotChanged.delete(next.id);
       this.emitChanged(next, 'updated');
       return { session: this.withComputed(clone(next)), previous, effect };
     });
   }
 
+  /** What a Switch to `ref` does to `current`, or why it is refused, before anything is written. */
+  private switchChecks(current: OrchestrationSessionRecord, target: { profile: SessionAgentProfile; agent: PaneChatAgent }, ref: string, request: OrchestrationSessionProfileSwitchRequest, outcome: string) {
+    const fromPanel = this.profileChatPanel(current, 'switched');
+    const previous = { agent: current.agent, ref: current.agentProfile?.ref };
+    const effect = profileSwitchEffect(previous, { agent: target.agent, ref });
+    const agentChanging = target.agent !== current.agent;
+    const toPanel = agentChanging ? panelManager.getPanel(current.panelIds[target.agent]) : fromPanel;
+    if (effect !== 'current') {
+      // What the person saw when they chose must still hold: a new conversation is never started unasked (review F-1).
+      if (request.expect.agent !== previous.agent || (request.expect.ref ?? undefined) !== previous.ref || request.expect.effect !== effect) {
+        throw new PaneError('SESSION_PROFILE_CHANGED', `${current.name} changed since you chose ${profileDisplayName(ref)}${effect === 'new-conversation' ? ', and the switch would now start a new conversation' : ''}. ${outcome}`, 'Open the Session\'s menu and choose the profile again.');
+      }
+      this.assertAgentSupported(target.agent, current.runtime);
+      if (toPanel && toPanel.type !== 'chat') {
+        throw new PaneError('SESSION_PROFILE_TERMINAL', `${current.name}'s ${configuredAgent(target.agent).title} tab is a terminal, which can't run a profile. ${outcome}`, `Start a new Session with ${profileDisplayName(ref)}.`);
+      }
+      // A new conversation is given the transcript as it stands, so the reply in progress must end first.
+      if (effect === 'new-conversation' && this.chatTabs().replying(fromPanel.id)) {
+        throw new PaneError('SESSION_PROFILE_BUSY', `${current.name}'s ${configuredAgent(current.agent).title} is still replying. ${outcome}`, `Switch to ${profileDisplayName(ref)} again when the reply ends, or press Stop first.`);
+      }
+    }
+    return { fromPanel, toPanel, effect, agentChanging, previous };
+  }
+
   /**
    * Reload profile (T-63): the Session's agent takes its profile's saved files at its next start, which
-   * waits for the current reply, and continues the conversation.
+   * waits for the current reply, and continues the conversation. A Session whose lead runs in a
+   * terminal (D-9) takes a new snapshot only: its lead keeps running, and tabs opened afterwards get it.
    */
   async reloadProfile(selector: OrchestrationSessionSelector, source: 'user' | 'agent' = 'user'): Promise<OrchestrationSessionRecord> {
-    this.refuseProfilesOff('Nothing was reloaded.');
-    const ref = (await this.get(selector).catch(() => undefined))?.agentProfile?.ref;
-    if (ref) await this.bringProfileCurrent(ref);
+    const outcome = 'Nothing was reloaded.';
+    this.refuseProfilesOff(outcome);
+    // Review F-3: every refusal comes before the snapshot, which writes a folder.
+    const before = await this.get(selector);
+    const mode = this.reloadMode(before, outcome);
+    let checked: { ref: string; hash: string } | undefined;
+    if (mode === 'lead' && before.agentProfile) {
+      await this.bringProfileCurrent(before.agentProfile.ref);
+      checked = await this.reloadableProfile(before, before.agentProfile.ref, outcome);
+    }
+    // T-110 (D-2): the lead, and tabs opened from now on, move to a new snapshot of what is installed.
+    const snapshot = await this.newSnapshot(selector, outcome);
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       const data = this.store.read();
       const current = this.findSession(data, selector);
-      const outcome = 'Nothing was reloaded.';
-      const panel = this.profileChatPanel(current, 'reloaded');
-      const profile = current.agentProfile;
-      if (!profile) throw new PaneError('SESSION_PROFILE_NONE', `${current.name} started before Sessions had profiles, so it has none to reload. ${outcome}`, 'Use Switch profile to give it one.');
-      const hash = await this.agentFarm().pluginHash(profilePlugin(profile.ref));
-      if (hash === undefined) throw new PaneError('SESSION_PROFILE_UNKNOWN', `The plugin of ${profile.ref} isn't installed in this computer's Pane. ${outcome}`, 'Restart Pane so it sets up its Agent Farm, or switch the Session to another profile.');
-      // A ref Agent Farm no longer lists (T-83 P3), or a variant its profile no longer has (review F-6): the person picks a profile again.
-      if (!plainProfileAgent(profile.ref.split(':')[0])) {
-        const list = await this.agentFarm().profiles();
-        if (!list.error && !profileListed(list, profile.ref)) {
-          if (!this.goneProfiles.has(profile.ref)) { this.goneProfiles.add(profile.ref); this.emitChanged(current, 'updated'); }
-          throw new PaneError('SESSION_PROFILE_GONE', `${current.name} runs the profile ${profile.ref}, which this computer's Agent Farm no longer has. ${outcome}`, 'Pick a profile again: right-click the Session, then Switch profile.');
-        }
+      if (this.reloadMode(current, outcome) !== mode) throw new PaneError('SESSION_PROFILE_CHANGED', `${current.name} changed while it was reloading. ${outcome}`, 'Reload profile again.');
+      const next: OrchestrationSessionRecord = { ...current, revision: current.revision + 1, updatedAt: new Date().toISOString(), activity: [...current.activity] };
+      if (snapshot) next.agentFarmSnapshot = snapshot.path;
+      if (mode === 'snapshot') {
+        next.activity.push(this.activity('updated', 'Reloaded the Session\'s Agent Farm snapshot · its lead keeps running as it is, and tabs opened from now on use the new one. The lead keeps the snapshot it started with: to run a lead on the new one, start a new Session.', source));
+        this.trimActivity(next);
+        this.store.write(replaceSession(data, next));
+        if (snapshot) this.snapshotChanged.delete(next.id);
+        this.emitChanged(next, 'updated');
+        return this.withComputed(clone(next));
       }
+      const profile = current.agentProfile;
+      if (!profile || !checked || checked.ref !== profile.ref) throw new PaneError('SESSION_PROFILE_CHANGED', `${current.name} changed profile while it was reloading. ${outcome}`, 'Reload profile again.');
+      const panel = this.profileChatPanel(current, 'reloaded');
       const name = profileDisplayName(profile.ref);
-      const next: OrchestrationSessionRecord = {
-        ...current, agentProfile: { ref: profile.ref, hash },
-        revision: current.revision + 1, updatedAt: new Date().toISOString(), activity: [...current.activity],
-      };
+      next.agentProfile = { ref: profile.ref, hash: checked.hash };
       const chat = this.chatLaunch(next);
       if (!chat || !('launch' in chat)) throw new PaneError('SESSION_PROFILE_UNSUPPORTED', `Profiles run in chat tabs, which are off on this computer. ${outcome}`, 'Turn on Chat tabs in Settings > AI & Agents, then try again.');
       const divider = `Reloaded ${name} · conversation kept`;
@@ -782,10 +820,67 @@ export class OrchestrationSessionManager extends EventEmitter {
       this.trimActivity(next);
       this.store.write(replaceSession(data, next));
       this.chatTabs().relaunch(panel.id, { launch: chat.launch, divider });
-      this.pluginHashes.set(profilePlugin(profile.ref), hash);
+      this.pluginHashes.set(profilePlugin(profile.ref), checked.hash);
+      if (snapshot) this.snapshotChanged.delete(next.id);
       this.emitChanged(next, 'updated');
       return this.withComputed(clone(next));
     });
+  }
+
+  /**
+   * How a Reload applies to a Session (D-9): `lead` restarts a chat lead on its profile; `snapshot`
+   * takes a new snapshot only, for a Session with one whose lead runs in a terminal. Anything else is
+   * refused, with `outcome`.
+   */
+  private reloadMode(record: OrchestrationSessionRecord, outcome: string): 'lead' | 'snapshot' {
+    if (record.archived === true || record.move) {
+      this.profileChatPanel(record, 'reloaded');
+    }
+    const lead = panelManager.getPanel(record.panelIds[record.agent]);
+    if (lead?.type === 'chat') {
+      // Review r2 N-5: a Session created with Profiles on whose agent or launch command later took no profile.
+      if (!record.agentProfile) {
+        const why = record.agentFarmSnapshot ? `has no profile now: its agent or launch command changed to one without one` : 'started before Sessions had profiles';
+        throw new PaneError('SESSION_PROFILE_NONE', `${record.name} ${why}, so it has none to reload. ${outcome}`, 'Use Switch profile to give it one.');
+      }
+      // Review r2 F-3: refused before the snapshot, which writes a folder.
+      if (this.configManager.getConfig().chatTabsEnabled !== true) throw new PaneError('SESSION_PROFILE_UNSUPPORTED', `Profiles run in chat tabs, which are off on this computer. ${outcome}`, 'Turn on Chat tabs in Settings > AI & Agents, then try again.');
+      return 'lead';
+    }
+    if (record.agentFarmSnapshot) return 'snapshot';
+    if (!record.agentProfile) throw new PaneError('SESSION_PROFILE_NONE', `${record.name} started before Sessions had profiles, so it has none to reload. ${outcome}`, 'Use Switch profile to give it one.');
+    this.profileChatPanel(record, 'reloaded');
+    return 'lead';
+  }
+
+  /** A chat lead's profile as Reload takes it: its plugin's hash, refused when the plugin or the profile is gone. */
+  private async reloadableProfile(record: OrchestrationSessionRecord, ref: string, outcome: string): Promise<{ ref: string; hash: string }> {
+    const hash = await this.agentFarm().pluginHash(profilePlugin(ref));
+    if (hash === undefined) throw new PaneError('SESSION_PROFILE_UNKNOWN', `The plugin of ${ref} isn't installed in this computer's Pane. ${outcome}`, 'Restart Pane so it sets up its Agent Farm, or switch the Session to another profile.');
+    // A ref Agent Farm no longer lists (T-83 P3), or a variant its profile no longer has (review F-6): the person picks a profile again.
+    if (!plainProfileAgent(ref.split(':')[0])) {
+      const list = await this.agentFarm().profiles();
+      if (!list.error && !profileListed(list, ref)) {
+        if (!this.goneProfiles.has(ref)) { this.goneProfiles.add(ref); this.emitChanged(record, 'updated'); }
+        throw new PaneError('SESSION_PROFILE_GONE', `${record.name} runs the profile ${ref}, which this computer's Agent Farm no longer has. ${outcome}`, 'Pick a profile again: right-click the Session, then Switch profile.');
+      }
+    }
+    return { ref, hash };
+  }
+
+  /**
+   * A new snapshot of what is installed, for a Switch or Reload (T-110), saved in the Session's folder.
+   * Undefined for a Session that can't be found here (the caller's own lookup refuses it); a snapshot
+   * that can't be saved refuses the change with `outcome`.
+   */
+  private async newSnapshot(selector: OrchestrationSessionSelector, outcome: string): Promise<SessionSnapshot | undefined> {
+    const record = await this.get(selector).catch(() => undefined);
+    if (!record || record.archived === true || record.move) return undefined;
+    try { return await this.agentFarm().snapshot(sessionWorkspacePath(record.id)); }
+    catch (error) {
+      if (error instanceof PaneError) throw new PaneError(error.code, `${error.message} ${outcome}`, error.next);
+      throw new PaneError('AGENT_FARM_SNAPSHOT_FAILED', `Agent Farm couldn't save ${record.name}'s snapshot: ${reasonOf(error)}. ${outcome}`, 'Restart Pane, then try again.');
+    }
   }
 
   /** Switch and Reload exist only with Profiles on (T-63); off, Sessions behave as on main. */
@@ -810,22 +905,82 @@ export class OrchestrationSessionManager extends EventEmitter {
   private readonly pluginHashes = new Map<string, string>();
   /** Profiles (refs without a variant) live Sessions run that Agent Farm's list no longer has, for the gone mark (T-83 P3). */
   private readonly goneProfiles = new Set<string>();
+  /** Each snapshot folder's plugin hashes; a snapshot never changes once written (T-110). */
+  private readonly snapshotHashes = new Map<string, Record<string, string>>();
+  /** Sessions with a snapshot in which some plugin differs from the installed one, for the changed mark (T-110). */
+  private readonly snapshotChanged = new Set<string>();
+  /** Each installed plugin's receipt-listed files' hash, which a snapshot's plugins compare with (review r2). */
+  private readonly receiptHashes = new Map<string, string>();
   private pluginHashesCheckedAt = 0;
   private pluginHashesChecking?: Promise<void>;
+
+  private profileWatch: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Re-checks the plugins every 10 s on the host, so a Session's Changed dot lights while nothing
+   * lists Sessions (an idle sidebar, QA F1). Started once at startup; reads nothing with Profiles off.
+   */
+  watchProfileChanges(): void {
+    if (this.profileWatch) return;
+    this.profileWatch = setInterval(() => {
+      void this.refreshPluginHashes(false, 'timer').catch(error => console.warn(`[Sessions] Could not check Sessions' profiles for changes: ${reasonOf(error)}`));
+    }, PLUGIN_HASH_INTERVAL_MS);
+    this.profileWatch.unref?.();
+  }
+
+  stopWatchingProfileChanges(): void {
+    if (this.profileWatch) clearInterval(this.profileWatch);
+    this.profileWatch = null;
+  }
 
   /**
    * Hashes the plugins live Sessions run, at most every few seconds, and announces the Sessions whose
    * profile changed since (T-63). PR 5's Save calls it after a save, with `force`.
    */
-  refreshPluginHashes(force = false): Promise<void> {
+  refreshPluginHashes(force = false, from: 'list' | 'timer' = 'list'): Promise<void> {
     // With Profiles off nothing shows the mark, so no plugin is read.
     if (!this.profilesOn()) return Promise.resolve();
+    // The gone mark lists Agent Farm's profiles (a process): listing and Save refresh it on its own
+    // throttle, so the 10 s hash check never holds it back (review r2 N-1); the timer never runs it.
+    const gone = from === 'timer' ? Promise.resolve() : this.refreshGoneMarks(force);
+    return Promise.all([gone, this.refreshHashes(force)]).then(() => undefined);
+  }
+
+  private goneCheckedAt = 0;
+  private goneChecking?: Promise<void>;
+
+  /** Marks live Sessions whose profile Agent Farm no longer lists, at most every 10 s unless forced. */
+  private refreshGoneMarks(force: boolean): Promise<void> {
+    if (this.goneChecking) return this.goneChecking;
+    if (!force && Date.now() - this.goneCheckedAt < PLUGIN_HASH_INTERVAL_MS) return Promise.resolve();
+    this.goneCheckedAt = Date.now();
+    this.goneChecking = (async () => {
+      const sessions = this.store.read().sessions.filter(session => session.archived !== true && !session.move && session.agentProfile);
+      const goneChanged = await this.refreshGoneProfiles(sessions.map(session => session.agentProfile!.ref));
+      for (const session of sessions) if (goneChanged.has(session.agentProfile!.ref)) this.emitChanged(session, 'updated');
+    })().finally(() => { this.goneChecking = undefined; });
+    return this.goneChecking;
+  }
+
+  /** Hashes the plugins live Sessions run and marks those whose profile or snapshot changed (see refreshPluginHashes). */
+  private refreshHashes(force: boolean): Promise<void> {
     if (this.pluginHashesChecking) return this.pluginHashesChecking;
     if (!force && Date.now() - this.pluginHashesCheckedAt < PLUGIN_HASH_INTERVAL_MS) return Promise.resolve();
     this.pluginHashesCheckedAt = Date.now();
     this.pluginHashesChecking = (async () => {
-      const sessions = this.store.read().sessions.filter(session => session.archived !== true && session.agentProfile);
-      const plugins = [...new Set(sessions.map(session => profilePlugin(session.agentProfile!.ref)))];
+      const live = this.store.read().sessions.filter(session => session.archived !== true && !session.move);
+      const sessions = live.filter(session => session.agentProfile);
+      // T-110: a Session with a snapshot compares every plugin in it, so plugins workers run count too.
+      const snapshotted = live.filter(session => session.agentFarmSnapshot);
+      const held = new Map<string, Record<string, string>>();
+      for (const session of snapshotted) held.set(session.id, await this.snapshotHashesOf(session));
+      // Review F-4: a Session with a snapshot is marked from its snapshot, never from the whole-folder hash.
+      const plugins = [...new Set(sessions.filter(session => !session.agentFarmSnapshot).map(session => profilePlugin(session.agentProfile!.ref)))];
+      // Only what a snapshot would copy counts: a cache or .DS_Store beside the plugin's files never marks a Session.
+      for (const plugin of new Set([...held.values()].flatMap(hashes => Object.keys(hashes)))) {
+        const hash = await this.agentFarm().receiptHash(plugin).catch(() => undefined);
+        if (hash === undefined) this.receiptHashes.delete(plugin); else this.receiptHashes.set(plugin, hash);
+      }
       const changed = new Set<string>();
       for (const plugin of plugins) {
         const hash = await this.agentFarm().pluginHash(plugin).catch(() => undefined);
@@ -833,12 +988,35 @@ export class OrchestrationSessionManager extends EventEmitter {
         this.pluginHashes.set(plugin, hash);
         changed.add(plugin);
       }
-      const goneChanged = await this.refreshGoneProfiles(sessions.map(session => session.agentProfile!.ref));
-      for (const session of sessions) {
-        if (changed.has(profilePlugin(session.agentProfile!.ref)) || goneChanged.has(session.agentProfile!.ref)) this.emitChanged(session, 'updated');
+      const flipped = new Set<string>();
+      for (const session of snapshotted) {
+        // A plugin no longer installed here doesn't count: Reload couldn't take it either.
+        const differs = Object.entries(held.get(session.id) ?? {}).some(([plugin, hash]) => { const installed = this.receiptHashes.get(plugin); return installed !== undefined && installed !== hash; });
+        if (differs === this.snapshotChanged.has(session.id)) continue;
+        if (differs) this.snapshotChanged.add(session.id); else this.snapshotChanged.delete(session.id);
+        flipped.add(session.id);
+      }
+      for (const session of live) {
+        const own = !session.agentFarmSnapshot && !!session.agentProfile && changed.has(profilePlugin(session.agentProfile.ref));
+        if (own || flipped.has(session.id)) this.emitChanged(session, 'updated');
       }
     })().finally(() => { this.pluginHashesChecking = undefined; });
     return this.pluginHashesChecking;
+  }
+
+  /** The plugin hashes of a Session's snapshot, read once per snapshot; empty when it can't be read. */
+  private async snapshotHashesOf(record: OrchestrationSessionRecord): Promise<Record<string, string>> {
+    const folder = snapshotLocation(sessionWorkspacePath(record.id), record.agentFarmSnapshot ?? '');
+    const cached = this.snapshotHashes.get(folder);
+    if (cached) return cached;
+    try {
+      const hashes = await this.agentFarm().snapshotHashes(folder);
+      this.snapshotHashes.set(folder, hashes);
+      return hashes;
+    } catch (error) {
+      console.warn(`[Sessions] Could not read ${record.name}'s Agent Farm snapshot for changes: ${reasonOf(error)}`);
+      return {};
+    }
   }
 
   /**
@@ -1219,7 +1397,10 @@ export class OrchestrationSessionManager extends EventEmitter {
     const profile = record.agentProfile;
     const newest = profile && this.profilesOn() ? this.pluginHashes.get(profilePlugin(profile.ref)) : undefined;
     const gone = !!profile && this.profilesOn() && this.goneProfiles.has(profile.ref);
-    const agentProfileChanged = !gone && newest !== undefined && newest !== profile?.hash ? true as const : undefined;
+    // Review F-1 (D-9): the mark shows only where Reload can act on it (any Session with a snapshot, or a chat lead's profile).
+    const changed = record.agentFarmSnapshot ? this.profilesOn() && this.snapshotChanged.has(record.id)
+      : newest !== undefined && newest !== profile?.hash && panelManager.getPanel(record.panelIds[record.agent])?.type === 'chat';
+    const agentProfileChanged = !gone && changed ? true as const : undefined;
     const agentProfileGone = gone ? true as const : undefined;
     const viewedAt = this.sessionManager.getSession(record.internalSessionId)?.lastViewedAt;
     const openedMs = viewedAt ? parseSessionTimestampMs(viewedAt) : NaN;
@@ -1659,7 +1840,7 @@ export class OrchestrationSessionManager extends EventEmitter {
    * tab. Sessions that resume or promote a terminal conversation, run in WSL, use a truly
    * custom resume, or launch a wrapper keep their terminal (`sessionChatLaunch` says why).
    */
-  private chatLaunch(record: Pick<OrchestrationSessionRecord, 'agent' | 'runtime' | 'resume' | 'promotedFrom' | 'customResume' | 'launchCommand' | 'agentProfile'>) {
+  private chatLaunch(record: Pick<OrchestrationSessionRecord, 'agent' | 'runtime' | 'resume' | 'promotedFrom' | 'customResume' | 'launchCommand' | 'agentProfile'> & Partial<Pick<OrchestrationSessionRecord, 'id' | 'agentFarmSnapshot'>>) {
     if (this.configManager.getConfig().chatTabsEnabled !== true) return undefined;
     const result = sessionChatLaunch({
       agent: record.agent, runtime: record.runtime, resume: record.resume, promoted: !!record.promotedFrom, customResume: record.customResume,
@@ -1674,10 +1855,13 @@ export class OrchestrationSessionManager extends EventEmitter {
     // Marked as Pane's choice, so the tab starts its agent on its own again once Profiles is off (review F-5).
     const launch: ChatTabLaunch = { kind: 'profile', profile: record.agentProfile.ref, fromSession: true };
     if (result.launch.fullAccess === true || (result.launch.kind === 'agent' && result.launch.mode)) launch.fullAccess = true;
+    // T-110: the lead resolves from the Session's snapshot at every start, so a restart keeps its version.
+    if (record.id && record.agentFarmSnapshot) launch.snapshot = snapshotLocation(sessionWorkspacePath(record.id), record.agentFarmSnapshot);
     return { launch };
   }
 
   private agentFarmPort?: SessionAgentFarm;
+  private receiptHashCache?: ReceiptHashes;
   private profileSyncPort?: (plugin: string) => Promise<void>;
 
   /**
@@ -1702,6 +1886,10 @@ export class OrchestrationSessionManager extends EventEmitter {
       pluginHash: plugin => installedPluginHash(agentFarmConfigRoot(getAppDirectory()), plugin),
       profiles: () => listPaneAgentFarmProfiles(getAppDirectory()),
       harness: ref => paneAgentFarmHarness(getAppDirectory(), ref),
+      snapshot: folder => createPaneSessionSnapshot(getAppDirectory(), folder),
+      snapshotHashes: snapshotPluginHashes,
+      // One cache for the life of the host: a plugin is reread only when its files change on disk (review F-4).
+      receiptHash: plugin => (this.receiptHashCache ??= new ReceiptHashes(agentFarmConfigRoot(getAppDirectory()))).hash(plugin),
     };
   }
 

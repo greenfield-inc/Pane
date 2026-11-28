@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type RefObject } from 'react';
 import { FileText, LayoutTemplate, Pencil, Save, SquareTerminal } from 'lucide-react';
 import { agentLabel } from '../../../../shared/agents';
 import type { ProfilePlugin, ProfileSubagentNode, ProfileSummary } from '../../../../shared/types/profileEditor';
@@ -8,6 +8,8 @@ import { isMac } from '../../utils/platformUtils';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { TODOS_HEADER_BUTTON } from '../todos/todoStyles';
+import { FindBar } from '../find/FindBar';
+import { ProfileSourceEditor } from './ProfileSourceEditor';
 import { GeneratedCover, HtmlPage, MarkdownWithMeta, YamlPreview } from './ProfilePreviews';
 import { findNode, previewKind, subagentLabel } from './profilePreview';
 import { savedSyncText } from './profileSyncText';
@@ -15,6 +17,9 @@ import { tabActionLabel, tabCommand, useTabPane } from './subagentTab';
 import { isProfilesEnabled, useConfigStore } from '../../stores/configStore';
 
 const MOD = isMac() ? '⌘' : 'Ctrl+';
+
+/** Pane's find on the profile page (build 8 feedback 3): ⌘F from the tree or the file searches the file. */
+export const PROFILES_FIND_ID = 'profiles-file';
 
 /** How many Sessions on this computer use one of the plugin's profiles. */
 function useSessionsOnPlugin(plugin: ProfilePlugin): number {
@@ -27,9 +32,10 @@ function useSessionsOnPlugin(plugin: ProfilePlugin): number {
  * The right side of the profile page (T-63, build-6 feedback items 3 and 5): the cover page or a
  * file, previewed first. Edit shows its source; ⌘S saves (checked by Agent Farm), Cancel or Esc
  * leaves without saving, asking first when there are edits. A file you have unsaved edits in opens
- * in Edit. The changed-on-disk notice (profileDiskSync.ts) shows here either way.
+ * in Edit. The changed-on-disk notice (profileDiskSync.ts) shows here either way. ⌘F searches the
+ * preview with Pane's find, and the source in Edit with the editor's own, as in a file tab.
  */
-export function ProfileFilePane({ plugin, profile, file, notify, onShow, onOpenTab }: {
+export function ProfileFilePane({ plugin, profile, file, notify, onShow, onOpenTab, searchRef }: {
   plugin: ProfilePlugin;
   profile: ProfileSummary;
   file: string;
@@ -38,6 +44,8 @@ export function ProfileFilePane({ plugin, profile, file, notify, onShow, onOpenT
   onShow: (id: string | null, file: string) => void;
   /** Opens a launch or process agent in a tab (T-83 P4), from its cover. */
   onOpenTab: (node: ProfileSubagentNode) => void;
+  /** What Pane's find searches: the file shown, below its header. */
+  searchRef: RefObject<HTMLDivElement | null>;
 }) {
   const overview = useProfilesStore(state => state.overview);
   const open = useProfilesStore(state => state.open);
@@ -115,24 +123,16 @@ export function ProfileFilePane({ plugin, profile, file, notify, onShow, onOpenT
   if (readError && saved === undefined) body = <p role="alert" className="p-4 text-[13px] text-status-error">{readError}</p>;
   else if (editing && path) {
     body = (
-      <textarea
-        aria-label={`Edit ${plugin.name}/${path}`}
-        data-testid="profiles-editor"
-        spellCheck={false}
-        autoFocus
+      <ProfileSourceEditor
+        // One editor per file (#1762 F-3): a reused one would undo into another file's text.
+        key={key}
+        path={path}
+        label={`Edit ${plugin.name}/${path}`}
         value={value}
-        disabled={saved === undefined}
-        onChange={event => edit(plugin.name, path, event.target.value)}
-        onKeyDown={event => {
-          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
-            event.preventDefault();
-            void runSave();
-          } else if (event.key === 'Escape') {
-            event.preventDefault();
-            cancel();
-          }
-        }}
-        className="min-h-0 flex-1 resize-none bg-bg-primary px-4 py-3 font-mono text-[13px] leading-[1.55] text-text-primary focus:outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--color-interactive)]"
+        readOnly={saved === undefined}
+        onChange={next => edit(plugin.name, path, next)}
+        onSave={() => { void runSave(); }}
+        onCancel={cancel}
       />
     );
   } else if (cover && !path) {
@@ -190,7 +190,10 @@ export function ProfileFilePane({ plugin, profile, file, notify, onShow, onOpenT
           <button type="button" className={TODOS_HEADER_BUTTON} data-testid="profiles-disk-keep" onClick={() => resolveDiskChange(plugin.name, path, 'mine')}>Keep mine</button>
         </div>
       )}
-      {body}
+      <div ref={searchRef} tabIndex={-1} className="relative flex min-h-0 flex-1 flex-col focus:outline-none" data-testid="profiles-file-body">
+        {body}
+        <FindBar panelId={PROFILES_FIND_ID} />
+      </div>
       {saveError && <p role="alert" className="border-t border-border-primary px-4 py-2 text-[12.5px] text-status-error" data-testid="profiles-save-error">{saveError}</p>}
       {editing && <div className="flex h-[34px] shrink-0 items-center border-t border-border-primary px-4 text-[12px] text-text-secondary" data-testid="profiles-editor-status">{status}</div>}
       <ConfirmDialog

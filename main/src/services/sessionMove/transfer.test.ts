@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { MoveReceiver, sendFile, type ChunkSender } from './transfer';
+import { MoveReceiver, packageFile, sendFile, type ChunkSender } from './transfer';
 
 let dir: string;
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-move-transfer-')); });
@@ -73,5 +73,16 @@ describe('sendFile', () => {
   it('refuses a package path that climbs out of the staging folder', async () => {
     const receiver = new MoveReceiver(path.join(dir, 'staging'));
     await expect(receiver.write({ moveId: 'move-12345678', path: '../escape', offset: 0, content: '' })).rejects.toThrow(/package path/);
+  });
+});
+
+describe('packageFile (#1762 F-2)', () => {
+  it.skipIf(process.platform === 'win32')('marks an executable file, which the transfer alone would lose, and nothing else', async () => {
+    const script = path.join(dir, 'run.sh');
+    fs.writeFileSync(script, '#!/bin/sh\necho hi\n', { mode: 0o755 });
+    const plain = path.join(dir, 'notes.md');
+    fs.writeFileSync(plain, 'notes', { mode: 0o644 });
+    expect(await packageFile('session/run.sh', script)).toEqual({ path: 'session/run.sh', bytes: 18, sha256: sha(fs.readFileSync(script)), executable: true });
+    expect(await packageFile('session/notes.md', plain)).toEqual({ path: 'session/notes.md', bytes: 5, sha256: sha(Buffer.from('notes')) });
   });
 });

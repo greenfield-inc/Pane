@@ -199,6 +199,12 @@ export interface TerminalPanelState {
   orchestrationProfile?: string;
   /** Folder of the Session this worker's Pane belongs to, as the agent sees it; exported as PANE_SESSION_DIR. */
   sessionFolder?: string;
+  /**
+   * The Session's Agent Farm snapshot folder when the tab opened (T-110, Profiles on), exported as
+   * AGENT_FARM_SNAPSHOT so an `agent-farm run` in it reads the Session's files. Kept after a Reload
+   * profile: a tab already open keeps the version it started with (D-2).
+   */
+  agentFarmSnapshot?: string;
   /** Wrapper/custom commands own their flags and resume behavior. */
   preserveLaunchCommand?: boolean;
   customResume?: CustomCommandResume | null;

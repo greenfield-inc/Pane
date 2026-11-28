@@ -181,6 +181,8 @@ export interface ChatTabPanelProps {
   stoppedNotice?: ReactNode;
   /** Above the composer, below the conversation: such as Autopilot's answer receipts. */
   dock?: ReactNode;
+  /** A Session's own tab: Reload profile, offered when Agent Farm refused the Session's snapshot (T-110). */
+  onReloadProfile?: () => Promise<void>;
   /**
    * Offers /clear (a fresh conversation in this tab). Off for Autopilot, whose conversation
    * holds what Start told it; a fresh one would carry on without it.
@@ -220,7 +222,7 @@ function TurnsSkeleton() {
   </>;
 }
 
-export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, session, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
+export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, session, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, onReloadProfile, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
   const catalog = useChatAgents(client);
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
@@ -588,7 +590,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         restart={!readOnly && !(stoppedNotice && stopped)}
         onRestart={() => void act(() => client.restart(panelId))}
         onSignIn={() => void act(() => client.signIn(panelId))}
-        onInstall={url => void window.electronAPI?.openExternal(url)} />}
+        onInstall={url => void window.electronAPI?.openExternal(url)}
+        onReloadProfile={onReloadProfile ? () => void act(onReloadProfile) : undefined} />}
       {view?.banner && <ChatSwitchBanner banner={view.banner} busy={busy || !connected || readOnly}
         onPickAnother={() => setPicking(true)} onDismiss={() => void act(() => client.dismissBanner(panelId))} />}
       {snapshot.error && <div role="alert" className="chat-alert">{snapshot.error}</div>}

@@ -17,7 +17,8 @@ import { ConfirmDialog } from '../ConfirmDialog';
 import { isTypingTarget, overlayOpen } from '../todos/todosNavigation';
 import { TODOS_HEADER_BUTTON, TODOS_PILL, TODOS_PILL_OFF } from '../todos/todoStyles';
 import { ProfileAvatar } from './ProfileAvatar';
-import { ProfileFilePane } from './ProfileFilePane';
+import { PROFILES_FIND_ID, ProfileFilePane } from './ProfileFilePane';
+import { useSurfaceFind } from '../find/surfaceFind';
 import { ProfileTree } from './ProfileTree';
 import { isPinned, pinnedFirst, togglePinnedProfile, usePinnedProfiles } from './profilePins';
 import { PHOTO_ACCEPT, PHOTO_SAMPLES, readSvgPhoto } from './profilePhotos';
@@ -357,8 +358,12 @@ function ProfileDetail({ plugin, profile, file, notify }: { plugin: ProfilePlugi
   const [restoring, setRestoring] = useState(false);
   const [details, setDetails] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // ⌘F from the tree or the file searches the file (build 8 feedback 3).
+  const findRoot = useRef<HTMLDivElement>(null);
+  const findSearch = useRef<HTMLDivElement>(null);
+  useSurfaceFind(PROFILES_FIND_ID, findRoot, true, findSearch);
 
-  const show = (id: string | null, next: string) => {
+  const show =(id: string | null, next: string) => {
     setSelectedId(id);
     openFile(next);
   };
@@ -414,9 +419,9 @@ function ProfileDetail({ plugin, profile, file, notify }: { plugin: ProfilePlugi
           </button>
         )}
       </div>
-      <div className="flex min-h-0 flex-1">
+      <div ref={findRoot} className="flex min-h-0 flex-1">
         <ProfileTree plugin={plugin.name} profile={profile} file={file} selectedId={selectedId} onSelect={show} onOpenTab={openTab} />
-        <ProfileFilePane plugin={plugin} profile={profile} file={file} notify={notify} onShow={show} onOpenTab={openTab} />
+        <ProfileFilePane plugin={plugin} profile={profile} file={file} notify={notify} onShow={show} onOpenTab={openTab} searchRef={findSearch} />
       </div>
       {newKind && <NewFileDialog kind={newKind} plugin={plugin} profile={profile} onClose={() => setNewKind(null)} notify={notify} onCreated={path => show(null, path)} />}
       {details && <EditDetailsDialog plugin={plugin} profile={profile} onClose={() => setDetails(false)} notify={notify} />}

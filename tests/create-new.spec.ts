@@ -11,6 +11,9 @@ import { DEFAULT_NOTIFY_SETTINGS } from '../shared/types/notify';
  */
 
 const PROFILES_ON = { sessionProfilesEnabled: true, chatTabsEnabled: true };
+/** Resume templates kept in Settings (Session defaults, and a saved custom command), never in Create New. */
+const SETTINGS_RESUME = { mode: 'reported' as const, initialTemplate: '{command}', resumeTemplate: '{command} --resume {sessionId}' };
+const SAVED_RESUME = { mode: 'reported' as const, initialTemplate: '{command}', resumeTemplate: '{command} --continue {sessionId}' };
 const profile = (ref: string, harness = 'claude', extra: JsonObject = {}) => ({ ref, plugin: ref.split('/')[0], version: '1.0.0', harness, hidden: ref.startsWith('pane/'), ...extra });
 const PROFILES = { profiles: [
   profile('pane/claude'), profile('pane/codex', 'codex'),
@@ -462,7 +465,8 @@ test('a first message a PowerShell or cmd terminal can\'t take holds Create and 
 
 test('launch settings follow the chosen agent: unedited defaults are main\'s, a profile sends none, and an edited resume says it can\'t take a message (F-5)', async ({ page }) => {
   const resume = { mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} -- --resume {sessionId}' };
-  await openApp(page, { initialConfig: { defaultSessionResume: resume } });
+  // A saved custom command brings its own resume template (build 8: Create New has no resume options).
+  await openApp(page, { initialConfig: { defaultSessionResume: resume, customCommands: [{ name: 'Verbose Claude', command: 'claude --verbose', resume }] } });
   await page.getByTestId('new-orchestration-session').click();
   // Codex, unedited, with a message: main picks the launch; the default custom resume doesn't come along.
   await page.keyboard.type('codex');
@@ -489,7 +493,7 @@ test('launch settings follow the chosen agent: unedited defaults are main\'s, a 
   await dialog(page).getByLabel('Custom command and arguments', { exact: true }).fill('claude --verbose');
   await dialog(page).getByRole('button', { name: 'Back', exact: true }).click();
   await dialog(page).getByRole('textbox', { name: 'Message', exact: true }).fill('Continue.');
-  await expect(dialog(page).getByTestId('create-new-blocked')).toContainText('can\'t take a first message. Clear Resume in More options');
+  await expect(dialog(page).getByTestId('create-new-blocked')).toContainText('can\'t take a first message. Its resume template comes from Settings');
   expect(await createInputs(page)).toHaveLength(2);
 });
 
@@ -549,4 +553,87 @@ test('To lists profiles by title and description, light and dark', async ({ page
     await expect(dialog(page).getByRole('listbox', { name: 'Agents and profiles' }).getByRole('option')).toHaveCount(3);
     await page.screenshot({ path: `${folder}/create-new-to-${theme}.png` });
   }
+});
+
+test('New Session: To and Name sit 8 px apart, closer than the message box below them (build 9 feedback 5)', async ({ page }) => {
+  await openApp(page);
+  await page.getByTestId('new-orchestration-session').click();
+  // The To box, around its input.
+  const toBox = await to(page).locator('..').boundingBox();
+  const name = await dialog(page).getByLabel('Name', { exact: true }).boundingBox();
+  const message = await dialog(page).getByLabel('Message', { exact: true }).locator('..').boundingBox();
+  if (!toBox || !name || !message) throw new Error('The fields are not on screen.');
+  // 8 px between the two header fields (was 12), 12 px from Name down to the message box.
+  expect(Math.round(name.y - (toBox.y + toBox.height))).toBe(8);
+  expect(Math.round(message.y - (name.y + name.height))).toBe(12);
+});
+
+// PANE_PROFILES_SHOTS=<dir> saves the New Session dialog, light and dark (build 9 feedback 5).
+test('New Session dialog screenshots, light and dark', async ({ page }) => {
+  const folder = process.env.PANE_PROFILES_SHOTS;
+  test.skip(!folder, 'Set PANE_PROFILES_SHOTS to save the screenshots.');
+  for (const theme of ['light', 'dark']) {
+    await openApp(page, { initialConfig: { theme } });
+    await page.getByTestId('new-orchestration-session').click();
+    await page.waitForTimeout(400);
+    await dialog(page).screenshot({ path: `${folder}/r5-new-session-${theme}.png` });
+  }
+});
+
+// PANE_PROFILES_SHOTS=<dir> saves More options, light and dark, scrolled to its launch fields (build 8: no resume options).
+test('More options screenshots, light and dark', async ({ page }) => {
+  const folder = process.env.PANE_PROFILES_SHOTS;
+  test.skip(!folder, 'Set PANE_PROFILES_SHOTS to save the screenshots.');
+  for (const theme of ['light', 'dark']) {
+    await openApp(page, { initialConfig: { theme, defaultSessionCommand: 'my-agent --chat', defaultSessionResume: SETTINGS_RESUME } });
+    await page.getByTestId('new-orchestration-session').click();
+    await dialog(page).getByRole('button', { name: 'More options', exact: true }).click();
+    await dialog(page).getByLabel('Launch command', { exact: true }).scrollIntoViewIfNeeded();
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: `${folder}/new-more-options-${theme}.png` });
+  }
+});
+
+test('Create New has no resume options: Pane resumes chat Sessions itself, and a custom command\'s resume comes from Settings (build 8)', async ({ page }) => {
+  await openApp(page, { initialConfig: { defaultSessionCommand: 'my-agent --chat', defaultSessionResume: SETTINGS_RESUME, customCommands: [{ name: 'Saved agent', command: 'saved-agent', resume: SAVED_RESUME }] } });
+  await page.getByTestId('new-orchestration-session').click();
+  await dialog(page).getByRole('button', { name: 'More options', exact: true }).click();
+  await expect(dialog(page).getByLabel('Launch command', { exact: true })).toBeVisible();
+  await expect(dialog(page).getByText('Enable custom command resume')).toHaveCount(0);
+  await expect(dialog(page).getByLabel('Resume template')).toHaveCount(0);
+  await expect(dialog(page).getByTestId('create-new-resume-note')).toContainText('Settings');
+  // A saved command brings its own resume; the Settings default command brings the Settings template.
+  await dialog(page).getByLabel('Launch command', { exact: true }).selectOption({ label: 'Saved agent' });
+  await dialog(page).getByRole('button', { name: 'Back', exact: true }).click();
+  await dialog(page).getByTestId('create-new-submit').click();
+  await expect(dialog(page)).toHaveCount(0);
+  expect((await createInputs(page))[0]).toMatchObject({ launchCommand: 'saved-agent', customResume: SAVED_RESUME });
+  // A command typed here, which Settings doesn't know, gets no resume template.
+  await page.getByTestId('new-orchestration-session').click();
+  await dialog(page).getByRole('button', { name: 'More options', exact: true }).click();
+  await dialog(page).getByLabel('Custom command and arguments').fill('typed-agent --x');
+  await dialog(page).getByRole('button', { name: 'Back', exact: true }).click();
+  await dialog(page).getByTestId('create-new-submit').click();
+  await expect(dialog(page)).toHaveCount(0);
+  expect((await createInputs(page))[1]).toMatchObject({ launchCommand: 'typed-agent --x', customResume: null });
+  // A command is remembered with its own template (#1762 F-1): the Settings template is never written alone.
+  const configUpdates = await page.evaluate(() => {
+    // SAFETY: installElectronApiMock installs this controller before the app loads.
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { getConfigUpdates: () => JsonObject[] } };
+    return mockWindow.__paneTestElectronMock.getConfigUpdates();
+  });
+  expect(configUpdates.filter(update => 'defaultSessionResume' in update)).toEqual([
+    expect.objectContaining({ defaultSessionCommand: 'saved-agent', defaultSessionResume: SAVED_RESUME }),
+    expect.objectContaining({ defaultSessionCommand: 'typed-agent --x', defaultSessionResume: null }),
+  ]);
+});
+
+test('with Profiles off, the Create Session dialog keeps its resume options', async ({ page }) => {
+  await installSessionsFixture(page, [], [], { agentFarmProfiles: PROFILES });
+  await gotoApp(page);
+  await dismissStartupDialogs(page);
+  await page.getByTestId('new-orchestration-session').click();
+  const classic = page.getByRole('dialog', { name: 'Create Session', exact: true });
+  await classic.getByText('Launch command and behavior').click();
+  await expect(classic.getByText('Enable custom command resume')).toBeVisible();
 });

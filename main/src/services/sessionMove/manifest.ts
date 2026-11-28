@@ -14,6 +14,8 @@ export interface PackageFile {
   path: string;
   bytes: number;
   sha256: string;
+  /** Executable on the source (#1762 F-2): the target sets its execute bits. An older Pane ignores it. */
+  executable?: true;
 }
 
 /** Which agent store a conversation file belongs in on the target. */
@@ -99,6 +101,11 @@ export interface MoveManifest {
     agentVersions: Record<string, string | null>;
     /** Agent Farm profiles the tabs launch, with their versions. */
     profiles: Record<string, string | null>;
+    /**
+     * Those of `profiles` that every tab launching it can run from a snapshot travelling with the
+     * Session (T-110): the target needs no plugin installed for them. Absent from older Panes.
+     */
+    snapshotProfiles?: string[];
     /** Env var names the Session's Panes have set here. */
     envNames: string[];
   };
@@ -126,7 +133,7 @@ export const panelBuffersSchema = boundary.object({
   alternate: boundary.nullable(boundary.string),
 });
 
-const packageFileSchema = boundary.object({ path: boundary.nonEmptyString, bytes: boundary.number, sha256: boundary.string });
+const packageFileSchema = boundary.object({ path: boundary.nonEmptyString, bytes: boundary.number, sha256: boundary.string, executable: boundary.optional(boundary.literal(true)) });
 const tabSchema = boundary.object({
   id: boundary.nonEmptyString,
   type: boundary.nonEmptyString,
@@ -181,6 +188,7 @@ export const moveManifestSchema = boundary.object({
     paneVersion: boundary.string,
     agentVersions: nullableStringRecord,
     profiles: nullableStringRecord,
+    snapshotProfiles: boundary.optional(boundary.array(boundary.string)),
     envNames: boundary.array(boundary.string),
   }),
   session: boundary.jsonObject,

@@ -20,6 +20,7 @@ import { agentConfig, agentLabel } from '../../../../shared/agents';
 import { chatPausedViewSchema } from '../../../../shared/types/chatTabDecoders';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
 import { sessionMovingError } from '../../../../shared/types/sessionMove';
+import { promptForAgent } from '../../../../shared/types/paneChat';
 import { CHAT_STALL_MS, chatMidTurn, isRunpaneWait } from '../agentStatus/midTurn';
 import { transcriptMarkdown, transcriptPrompt, writeTranscriptFile } from './transcriptFile';
 import { profilesOn } from '../agentFarm/profilesFeature';
@@ -904,7 +905,7 @@ export class ChatTabManager {
       launch = await this.options.launcher.resolve(panel, this.required(panelId));
     } catch (error) {
       const failure = chatFailure(error, { code: 'CHAT_LAUNCH_FAILED', next: 'Press Restart.' });
-      this.stopWith(panelId, problemFrom(failure, this.required(panelId).agent, this.name));
+      this.stopWith(panelId, problemFrom(failure, this.required(panelId), this.name));
       throw failure;
     }
     // Closed or restarted while the launch resolved: start nothing.
@@ -1033,7 +1034,7 @@ export class ChatTabManager {
       await runtime.stop().catch(() => undefined);
       const failure = chatFailure(error, { code: 'CHAT_START_FAILED', next: 'Press Restart. If it fails again, check the agent is installed and signed in on this machine.' });
       this.discardFallback(panelId);
-      this.stopWith(panelId, problemFrom(failure, this.required(panelId).agent, this.name));
+      this.stopWith(panelId, problemFrom(failure, this.required(panelId), this.name));
       throw failure;
     }
   }
@@ -1082,7 +1083,7 @@ export class ChatTabManager {
     const operationId = `initial:${panelId}`;
     // Marked only once the prompt is accepted. A start that dies in between sends it
     // again with the same ID, which returns the first receipt instead of a second prompt.
-    try { this.send(panelId, { operationId, text: state.initialInput }); }
+    try { this.send(panelId, { operationId, text: promptForAgent(state.initialInput) }); }
     catch (error) {
       console.warn(`[ChatTabs] The first message for ${panelId} was not sent: ${reasonOf(error)}.`);
       this.tab(panelId).notice = `The opening message was not sent: ${error instanceof PaneError ? `${error.message} ${error.next ?? ''}`.trim() : reasonOf(error)} Press Restart to try it again.`;
@@ -1470,8 +1471,15 @@ function signedOut(agent: ChatPanelState['agent'], name: (agent: string) => stri
   return { code: 'signed-out', message: `${name(agent)} is not signed in on this machine.`, next: `Press Sign in to sign in${command} in a terminal tab, then press Retry.`, action: 'sign-in' };
 }
 
-function problemFrom(error: PaneError, agent: ChatPanelState['agent'], name: (agent: string) => string): ChatTabProblem {
+function problemFrom(error: PaneError, state: Pick<ChatPanelState, 'agent' | 'orchestrationSessionId'>, name: (agent: string) => string): ChatTabProblem {
+  const { agent } = state;
   if (isAuthRequired(error)) return signedOut(agent, name);
+  // T-110 (D-3): only a Session's own tab can reload its profile, which takes a new snapshot.
+  if (error.code === 'CHAT_PROFILE_SNAPSHOT_UNREADABLE') {
+    return state.orchestrationSessionId
+      ? { code: 'failed', message: error.message, next: 'Press Reload profile to take a new snapshot of the plugins installed now; the conversation is kept.', action: 'reload-profile' }
+      : { code: 'failed', message: error.message, next: 'Reload the Session\'s profile from its lead, then start this agent again from the lead\'s new link line.' };
+  }
   const install = agentConfig(agent)?.install.url;
   const action = (next: string): ChatTabProblem => install ? { code: 'not-installed', message: error.message, next, action: 'install', url: install } : { code: 'not-installed', message: error.message, next };
   if (error.code === 'CHAT_AGENT_NOT_INSTALLED') return action(error.next ?? 'Install it, then press Retry.');

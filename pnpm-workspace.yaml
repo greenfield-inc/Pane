@@ -50,8 +50,8 @@ minimumReleaseAgeExclude:
   - '@agentclientprotocol/claude-agent-acp@0.100.0'
   - '@agentclientprotocol/codex-acp@2.5.0'
   - '@anthropic-ai/claude-agent-sdk@0.3.316'
-  # Greenfield's own Agent Farm, bundled in Pane (bundledAgentFarm.ts), pinned exactly to the release T-83 ships.
-  - '@greenfieldco/agent-farm@0.3.0'
+  # Greenfield's own Agent Farm, bundled in Pane (bundledAgentFarm.ts), pinned exactly to the release T-110 ships (Session snapshots).
+  - '@greenfieldco/agent-farm@0.3.1'
   - '@assistant-ui/react@0.15.31'
   # Native distribution matching the web runtime's core/store/tap versions.
   - '@assistant-ui/react-native@0.1.50'

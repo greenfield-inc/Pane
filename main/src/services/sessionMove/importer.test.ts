@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
@@ -6,6 +7,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { AppServices } from '../../ipc/types';
 import { PaneCommandRegistry } from '../../daemon/commandRegistry';
+import { unreadableSnapshots } from '../agentFarm/sessionSnapshot';
+import { readProfilesSwitchFrom } from '../agentFarm/profilesFeature';
 import { sessionWorkspacePath } from '../sessionWorkspace';
 import { createBundle, createSnapshot } from './gitSnapshot';
 import { MoveImporter, type ImporterTabs, type TargetStatus } from './importer';
@@ -251,6 +254,90 @@ describe('MoveImporter', { timeout: BUILD_TIMEOUT_MS }, () => {
     const folder = sessionWorkspacePath('sess-1');
     expect(fs.readFileSync(path.join(folder, 'artifact')).equals(bytes)).toBe(true);
     expect(fs.readFileSync(path.join(folder, 'notes.md'), 'utf8')).toBe(`see ${folder}/x`);
+  });
+
+  // T-110 (D-3): a Session's Agent Farm snapshot travels byte for byte, and the target checks it as Agent Farm would.
+  const snapshotFiles = (content: string) => {
+    const files = { 'plugins/team/agents/lead.md': content, 'snapshot.json': '{"format":1,"digest":"d1","plugins":{"team":"1.0.0"}}\n' };
+    const checksums = Object.fromEntries(Object.entries(files).map(([relative, text]) => [relative, createHash('sha256').update(text).digest('hex')]));
+    return { ...files, 'checksums.json': JSON.stringify(checksums) };
+  };
+  const snapshotPackage = (files: Record<string, string>) => Object.fromEntries(Object.entries(files).map(([relative, content]) => [`session/.agent-farm/snapshots/d1/${relative}`, content]));
+
+  it('carries a Session\'s snapshot byte for byte, paths in it unchanged, and checks it on arrival', async () => {
+    const { services } = fakeServices(target);
+    const importer = new MoveImporter(services, registry, path.join(root, 'moves'), memoryTabs());
+    const moveId = newMoveId();
+    const files = snapshotFiles('Read /a/.pane/sessions/sess-1/plan.md first.\n');
+    await stage(importer, manifest(moveId, [], { sessionFolder: { root: '/a/.pane/sessions/sess-1', files: Object.keys(files).map(relative => `.agent-farm/snapshots/d1/${relative}`) } }), snapshotPackage(files));
+    importer.build(moveId);
+    expect((await waitStage(importer, moveId, ['built', 'failed'])).stage).toBe('built');
+    const folder = path.join(sessionWorkspacePath('sess-1'), '.agent-farm', 'snapshots', 'd1');
+    expect(fs.readFileSync(path.join(folder, 'plugins', 'team', 'agents', 'lead.md'), 'utf8')).toBe('Read /a/.pane/sessions/sess-1/plan.md first.\n');
+    expect(await unreadableSnapshots(sessionWorkspacePath('sess-1'))).toEqual([]);
+  });
+
+  it('fails the move when a snapshot arrives that its own checksums refuse, keeping the Session on its source', async () => {
+    const { services } = fakeServices(target);
+    const importer = new MoveImporter(services, registry, path.join(root, 'moves'), memoryTabs());
+    const moveId = newMoveId();
+    const files = { ...snapshotFiles('Lead.\n'), 'plugins/team/agents/lead.md': 'Edited.\n' };
+    await stage(importer, manifest(moveId, [], {
+      session: { id: 'sess-1', name: 'S', internalSessionId: '__owner__', associations: [], agentFarmSnapshot: '.agent-farm/snapshots/d1' },
+      sessionFolder: { root: '/a/.pane/sessions/sess-1', files: Object.keys(files).map(relative => `.agent-farm/snapshots/d1/${relative}`) },
+    }), snapshotPackage(files));
+    importer.build(moveId);
+    const status = await waitStage(importer, moveId, ['built', 'failed']);
+    expect(status.stage).toBe('failed');
+    expect(status).toMatchObject({ error: { message: expect.stringContaining('snapshot .agent-farm/snapshots/d1 didn\'t arrive intact'), next: expect.stringContaining('Nothing was changed on A') } });
+    expect(fs.existsSync(path.join(sessionWorkspacePath('sess-1'), '.agent-farm', 'snapshots', 'd1'))).toBe(false);
+  });
+
+  it('lets an old damaged snapshot nothing resolves from travel without blocking the move (#1762 F-7)', async () => {
+    const { services } = fakeServices(target);
+    const importer = new MoveImporter(services, registry, path.join(root, 'moves'), memoryTabs());
+    const moveId = newMoveId();
+    // d1 is the Session's and a profile chat's; d0, replaced by a Reload, is damaged and named by nothing.
+    const files = snapshotFiles('Lead.\n');
+    const old = { ...snapshotFiles('Old.\n'), 'plugins/team/agents/lead.md': 'Damaged.\n' };
+    const chat: MoveTab = { id: 'chat-1', type: 'chat', title: 'Chat', metadata: {}, working: false, interrupted: false, running: false,
+      state: { agent: 'claude', cwd: '/a/.pane/sessions/sess-1', status: 'idle', launch: { kind: 'profile', profile: 'team/lead', snapshot: '/a/.pane/sessions/sess-1/.agent-farm/snapshots/d1' } } };
+    const owner: MovePane = { ...member('__owner__'), role: 'owner', repo: null, bundle: null, snapshot: null, worktreePath: '/a/.pane/sessions/sess-1', tabs: [chat] };
+    const folderFiles = [...Object.keys(files).map(relative => `.agent-farm/snapshots/d1/${relative}`), ...Object.keys(old).map(relative => `.agent-farm/snapshots/d0/${relative}`)];
+    const oldPackage = Object.fromEntries(Object.entries(old).map(([relative, content]) => [`session/.agent-farm/snapshots/d0/${relative}`, content]));
+    await stage(importer, manifest(moveId, [owner], {
+      session: { id: 'sess-1', name: 'S', internalSessionId: '__owner__', associations: [], agentFarmSnapshot: '.agent-farm/snapshots/d1' },
+      sessionFolder: { root: '/a/.pane/sessions/sess-1', files: folderFiles },
+    }), { ...snapshotPackage(files), ...oldPackage });
+    importer.build(moveId);
+    expect((await waitStage(importer, moveId, ['built', 'failed'])).stage).toBe('built');
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps a snapshot\'s executable script runnable after the move (#1762 F-2)', async () => {
+    const { services } = fakeServices(target);
+    const importer = new MoveImporter(services, registry, path.join(root, 'moves'), memoryTabs());
+    const moveId = newMoveId();
+    const files = { ...snapshotFiles('Lead.\n') };
+    const script = '#!/bin/sh\necho moved\n';
+    const withScript = { 'plugins/team/bin/helper.sh': script, 'plugins/team/agents/lead.md': 'Lead.\n', 'snapshot.json': files['snapshot.json'] };
+    const checksums = Object.fromEntries(Object.entries(withScript).map(([relative, text]) => [relative, createHash('sha256').update(text).digest('hex')]));
+    const all = { ...withScript, 'checksums.json': JSON.stringify(checksums) };
+    const helper = 'session/.agent-farm/snapshots/d1/plugins/team/bin/helper.sh';
+    await stage(importer, manifest(moveId, [], {
+      session: { id: 'sess-1', name: 'S', internalSessionId: '__owner__', associations: [], agentFarmSnapshot: '.agent-farm/snapshots/d1' },
+      sessionFolder: { root: '/a/.pane/sessions/sess-1', files: Object.keys(all).map(relative => `.agent-farm/snapshots/d1/${relative}`) },
+      files: [{ path: helper, bytes: Buffer.byteLength(script), sha256: createHash('sha256').update(script).digest('hex'), executable: true }],
+    }), snapshotPackage(all));
+    readProfilesSwitchFrom(() => ({ sessionProfilesEnabled: true }));
+    try {
+      importer.build(moveId);
+      expect((await waitStage(importer, moveId, ['built', 'failed'])).stage).toBe('built');
+    } finally {
+      readProfilesSwitchFrom(() => undefined);
+    }
+    const moved = path.join(sessionWorkspacePath('sess-1'), '.agent-farm', 'snapshots', 'd1', 'plugins', 'team', 'bin', 'helper.sh');
+    expect(execFileSync(moved).toString()).toBe('moved\n');
+    expect(fs.statSync(path.join(path.dirname(moved), '..', 'agents', 'lead.md')).mode & 0o111).toBe(0);
   });
 
   it('an arriving Session keeps no to-do number: T-n there names a different to-do here (T-51, W11)', async () => {
@@ -585,6 +672,23 @@ describe('MoveImporter after a restart (F-10, J9)', () => {
     else process.env.PANE_DIR = previousPaneDir;
     fs.chmodSync(root, 0o755);
     fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  // T-110 review F-11: a restore replays the stored command with --resume, and its --snapshot wins over Agent Farm's record.
+  // A Session moves only between macOS and Linux (the target's preflight refuses Windows), so this test's POSIX paths aren't run there.
+  it.skipIf(process.platform === 'win32')('points a link-line tab\'s stored --snapshot at the moved Session folder, so its restore there reads the moved snapshot', async () => {
+    // A target whose Session folders sit under a path with a space: the moved folder must stay one word.
+    process.env.PANE_DIR = path.join(root, 'pane dir');
+    const machine = targetMachine(path.join(root, 'target'));
+    const owner = ownerWithAgent();
+    const command = 'agent-farm run greenfield/planner --parent greenfield/orchestrator@af-1 --snapshot /a/.pane/sessions/sess-1/.agent-farm/snapshots/d1';
+    owner.tabs[0].state = { agentType: 'claude', launchCommand: command, initialCommand: command };
+    await builtOn(machine, [owner]);
+    const arrived = decodeBoundary(machine.tabs.panels.get('t-agent')?.state.customState, boundary.object({ launchCommand: boundary.string, initialCommand: boundary.string }));
+    const moved = path.join(sessionWorkspacePath('sess-1'), '.agent-farm', 'snapshots', 'd1');
+    expect(moved).toContain(' ');
+    expect(arrived.launchCommand).toBe(`agent-farm run greenfield/planner --parent greenfield/orchestrator@af-1 --snapshot '${moved}'`);
+    expect(arrived.initialCommand).toBe(arrived.launchCommand);
   });
 
   it('restarted after the build, before the start arrived: it still says built, and a resent start launches the agent once', async () => {

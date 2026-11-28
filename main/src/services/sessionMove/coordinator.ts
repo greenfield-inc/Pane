@@ -22,7 +22,6 @@ import type { OrchestrationSessionRecord } from '../../../../shared/types/orches
 import type { TerminalPausedMark, ToolPanel } from '../../../../shared/types/panels';
 import { configuredAgent, isConfiguredAgent } from '../../../../shared/agents';
 import { isFileStoreAgent } from '../../../../packages/runpane/src/nativeSession';
-import { fileDigest } from '../../../../packages/runpane/src/checkedCopy';
 import type { PaneCommandRegistry } from '../../daemon/commandRegistry';
 import type { AppServices } from '../../ipc/types';
 import { getAppDirectory } from '../../utils/appDirectory';
@@ -38,7 +37,9 @@ import { databaseService } from '../database';
 import { locateConversation } from './conversations';
 import { createBundle, createSnapshot, ignoredPaths, putBackRef } from './gitSnapshot';
 import { agentFarmProfiles, cliVersion, type TargetPreflight, type TargetStatus } from './importer';
-import { agentFarmProfileOf, heldBackChecks, sessionApprovals, type SessionApprovals } from './rules';
+import { heldBackChecks, sessionApprovals, tabAgentFarmLaunch, type SessionApprovals } from './rules';
+import { profilesOn } from '../agentFarm/profilesFeature';
+import { snapshotHoldsProfile } from '../agentFarm/sessionSnapshot';
 import type { MovedApproval } from '../notify/notifyService';
 import { keepIgnoredFiles } from './ignoredFiles';
 import { runpaneWaits } from '../agentStatus/midTurn';
@@ -46,7 +47,7 @@ import { movedApprovals, readTabFields, sessionMoveCheckSchema, sessionMoveFixSc
 import { resolvePeer, type MovePeer } from './peer';
 import { settleAfterFreeze, type FreezeOutcome, type FreezeWait } from './afterFreeze';
 import { listSessionFolder } from './sessionFolder';
-import { sendFile, writeResultSchema, type ChunkSender, type WriteRequest } from './transfer';
+import { packageFile, sendFile, writeResultSchema, type ChunkSender, type WriteRequest } from './transfer';
 
 const run = promisify(execFile);
 const POLL_MS = 1_000;
@@ -201,6 +202,9 @@ export class MoveCoordinator {
     const panes: MovePane[] = [];
     const agentVersions: Record<string, string | null> = {};
     const profileNames = new Set<string>();
+    // T-110: the snapshot each Agent Farm tab resolves from, for the profiles a move needs nothing installed for.
+    const profileSnapshots = new Map<string, Array<string | undefined>>();
+    const sessionFolder = sessionWorkspacePath(record.id);
     const envNames = new Set<string>();
     const tabState = new Map((pack?.tabs ?? []).map(tab => [tab.panel.id, tab]));
     const paneIds = [record.internalSessionId, ...this.memberPaneIds(record)];
@@ -246,10 +250,14 @@ export class MoveCoordinator {
         const custom = toJsonObject(panel.state.customState ?? {});
         delete custom.scrollbackBuffer; delete custom.serializedBuffer; delete custom.alternateScreenBuffer;
         const moved = tabState.get(panel.id);
-        const { agentId: agent, conversationId, launch } = readTabFields(custom);
+        const { agentId: agent, conversationId } = readTabFields(custom);
         if (agent && isConfiguredAgent(agent) && !(agent in agentVersions)) agentVersions[agent] = await cliVersion(configuredAgent(agent).executables[0]);
-        const profile = agentFarmProfileOf(launch);
-        if (profile) profileNames.add(profile);
+        // A terminal's command, and with Profiles on a profile chat's structured launch (#1762 F-8).
+        const farm = tabAgentFarmLaunch(custom, sessionFolder, record.agentFarmSnapshot, { chats: profilesOn() });
+        if (farm) {
+          profileNames.add(farm.profile);
+          profileSnapshots.set(farm.profile, [...profileSnapshots.get(farm.profile) ?? [], farm.folder]);
+        }
         const tab: MoveTab = {
           id: panel.id, type: panel.type, title: panel.title,
           metadata: toJsonObject(panel.metadata ?? {}),
@@ -284,19 +292,32 @@ export class MoveCoordinator {
         tabs, ignored,
       });
     }
-    const folderRoot = sessionWorkspacePath(record.id);
+    const folderRoot = sessionFolder;
     const folderFiles = listSessionFolder(folderRoot);
     if (pack) for (const relative of folderFiles) sources.set(`session/${relative}`, path.join(folderRoot, ...relative.split('/')));
     const here = profileNames.size ? await agentFarmProfiles() : {};
     const profiles = Object.fromEntries([...profileNames].map(name => [name, here[name] ?? null]));
+    const snapshotProfiles: string[] = [];
+    // Tabs sharing one snapshot check it once (#1762 F-8).
+    const holds = new Map<string, Promise<boolean>>();
+    const holdsProfile = (folder: string, name: string) => {
+      const key = `${folder}\0${name}`;
+      if (!holds.has(key)) holds.set(key, snapshotHoldsProfile(folder, name));
+      return holds.get(key) ?? Promise.resolve(false);
+    };
+    for (const [name, folders] of profileSnapshots) {
+      let held = true;
+      for (const folder of folders) held = held && !!folder && await holdsProfile(folder, name);
+      if (held) snapshotProfiles.push(name);
+    }
     const approvals = (pack?.approvals ?? []).map(approval => toJsonObject(approval));
     const files: PackageFile[] = [];
-    if (pack) for (const [packagePath, source] of sources) files.push({ path: packagePath, ...(await fileDigest(source)) });
+    if (pack) for (const [packagePath, source] of sources) files.push(await packageFile(packagePath, source));
     const manifest: MoveManifest = {
       version: SESSION_MOVE_MANIFEST_VERSION, moveId,
       source: {
         machine: thisMachineName(), home: os.homedir(), paneDir: getAppDirectory(), platform: process.platform,
-        paneVersion: app?.getVersion?.() ?? '0.0.0', agentVersions, profiles, envNames: [...envNames].sort(),
+        paneVersion: app?.getVersion?.() ?? '0.0.0', agentVersions, profiles, snapshotProfiles, envNames: [...envNames].sort(),
       },
       session: toJsonObject(record),
       sessionFolder: { root: folderRoot, files: folderFiles },

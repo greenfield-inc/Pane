@@ -2,12 +2,11 @@ import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent as Rea
 import { ChevronDown, ChevronLeft, FileImage, Paperclip, X } from 'lucide-react';
 import { CONFIGURED_AGENT_IDS, isConfiguredAgent } from '../../../../shared/agents';
 import type { AgentFarmProfileList } from '../../../../shared/types/agentFarmProfiles';
-import type { CustomCommandResume } from '../../../../shared/types/customCommandResume';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { nextOrchestrationSessionName, type OrchestrationSessionCreateInput, type SessionRuntimes } from '../../../../shared/types/orchestrationSession';
 import type { ProjectEnvironment } from '../../../../shared/types/panels';
 import { DEFAULT_SESSION_PROFILE } from '../../../../shared/types/sessionProfile';
-import { DEFAULT_PANE_CHAT_AGENT } from '../../../../shared/types/paneChat';
+import { DEFAULT_PANE_CHAT_AGENT, newSessionFirstMessagePrompt } from '../../../../shared/types/paneChat';
 import { useMachineStates } from '../../hooks/useMachineStates';
 import { useConfigStore } from '../../stores/configStore';
 import { useNavigationStore } from '../../stores/navigationStore';
@@ -38,6 +37,7 @@ import { openAfterSwitch, openCreatedSession } from '../../utils/openAfterSwitch
 import { sessionChoiceInput, sessionChoices, type SessionChoice } from '../../utils/sessionChoices';
 import { profileDisplayName } from '../../utils/profileAvatar';
 import { defaultLaunch } from '../CreateOrchestrationSessionDialog';
+import { rememberedLaunchDefaults, settingsResume } from './sessionResume';
 import { CreatePaneForm, type CreatePaneFooterState } from '../CreateSessionDialog';
 import type { NewDialogProps } from '../NewDialog';
 import { SessionLaunchFields } from '../SessionLaunchFields';
@@ -49,7 +49,6 @@ import { Modal, ModalBody, ModalFooter } from '../ui/Modal';
 import { Toggle } from '../ui/Toggle';
 import {
   ATTACHABLE_IMAGE_TYPES,
-  firstMessagePrompt,
   formatSize,
   isAttachableImage,
   readImageAttachment,
@@ -138,7 +137,6 @@ interface SessionSettings {
   goal: string;
   startPinned: boolean;
   launchCommand: string;
-  customResume: CustomCommandResume | null;
   profile: string;
   /** Run agent in: a WSL distribution of the machine it was picked on; another machine runs natively. */
   wsl: { machineId: string; distribution: string } | null;
@@ -148,7 +146,7 @@ function initialSettings(config: AppConfig | null): SessionSettings {
   return {
     goal: '',
     startPinned: config?.defaultSessionPinned ?? false,
-    ...defaultLaunch(config, config?.defaultOrchestratorAgent ?? DEFAULT_PANE_CHAT_AGENT),
+    launchCommand: defaultLaunch(config, config?.defaultOrchestratorAgent ?? DEFAULT_PANE_CHAT_AGENT).launchCommand,
     profile: config?.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE,
     wsl: null,
   };
@@ -244,13 +242,13 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
 
   // The launch the create sends (F-5). A profile brings its own. Settings left alone are the chosen
   // agent's defaults, which main fills in; with a first message, a default custom resume is left
-  // out, since a resumed conversation can't take one.
+  // out, since a resumed conversation can't take one. An edited launch command takes its resume
+  // template from Settings, as Create New has no resume options (build 8).
   const agent = to?.agent || (config?.defaultOrchestratorAgent ?? DEFAULT_PANE_CHAT_AGENT);
-  const shownLaunch = launchEdited.current ? { launchCommand: settings.launchCommand, customResume: settings.customResume }
-    : defaultLaunch(config, isConfiguredAgent(agent) ? agent : DEFAULT_PANE_CHAT_AGENT);
+  const shownLaunch = { launchCommand: launchEdited.current ? settings.launchCommand : defaultLaunch(config, isConfiguredAgent(agent) ? agent : DEFAULT_PANE_CHAT_AGENT).launchCommand };
   const text = message.trim();
   const launch: Pick<OrchestrationSessionCreateInput, 'launchCommand' | 'customResume'> = to?.profileRef ? { launchCommand: '', customResume: null }
-    : launchEdited.current ? shownLaunch
+    : launchEdited.current ? { launchCommand: settings.launchCommand, customResume: settingsResume(config, settings.launchCommand) }
       : text || images.length > 0 ? { customResume: null } : {};
   const deliveryTarget: FirstMessageTarget = {
     here: !onOtherMachine, machineName: machine?.name ?? 'the machine', runtimes, chatTabsHere: config?.chatTabsEnabled === true, wsl, agent,
@@ -261,7 +259,7 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
   const createBlocked = machineUnavailable
     ?? (readingImages > 0 ? 'Reading the attached images…' : undefined)
     ?? (images.length > 0 ? attachBlocked : undefined)
-    ?? (text && launch.customResume && !to?.profileRef ? 'A Session that resumes with a custom command can\'t take a first message. Clear Resume in More options, or remove the message.' : undefined)
+    ?? (text && launch.customResume && !to?.profileRef ? 'A Session that resumes with a custom command can\'t take a first message. Its resume template comes from Settings › AI Agents: change the launch command in More options, or remove the message.' : undefined)
     ?? (text && images.length === 0 ? textBlocked(deliveryTarget) : undefined);
 
   // Pane: a project on the Run on machine, then CreatePaneForm's own fields.
@@ -354,7 +352,7 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
       input.wslDistribution = wslDistribution;
     }
     // A message with images goes through the chat once it's open; text alone rides with the create.
-    const opening = sendImages ? undefined : firstMessagePrompt(text);
+    const opening = sendImages ? undefined : newSessionFirstMessagePrompt(text);
     if (opening) input.openingPrompt = opening;
     try {
       if (onOtherMachine) {
@@ -377,8 +375,9 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
       // As the old dialog did: an agent picked on its own, and launch settings you changed, become the defaults.
       const defaults: Partial<AppConfig> = {};
       if (!to.profileRef && input.agent && config?.defaultOrchestratorAgent !== input.agent) defaults.defaultOrchestratorAgent = input.agent;
-      if (launchEdited.current && (config?.defaultSessionCommand ?? '') !== settings.launchCommand) defaults.defaultSessionCommand = settings.launchCommand;
-      if (launchEdited.current && JSON.stringify(config?.defaultSessionResume ?? null) !== JSON.stringify(settings.customResume)) defaults.defaultSessionResume = settings.customResume;
+      // The command and the template it started with are saved together (#1762 F-1).
+      const launch = launchEdited.current ? rememberedLaunchDefaults(config, settings.launchCommand, input.customResume ?? null) : null;
+      if (launch) Object.assign(defaults, launch);
       if (Object.keys(defaults).length > 0) void updateConfig(defaults).catch(() => undefined);
       if (sendImages) {
         const chat = window.electronAPI.chatTab;
@@ -502,6 +501,8 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
 
   const sessionMain = (
     <ModalBody className="space-y-3">
+      {/* To and Name are one header, a field-row gap apart (build 9 feedback 5); the message sits below them. */}
+      <div className="space-y-2" data-testid="create-new-header-fields">
       <div className="flex items-center gap-3">
         <span className="w-14 flex-none text-sm text-text-secondary" aria-hidden="true">To</span>
         <ToField ref={toRef} choices={choices} value={to} disabled={busy} profilesStatus={profilesStatus} onOpenChange={setToListOpen}
@@ -514,6 +515,7 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
           onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); messageRef.current?.focus(); } }}
           placeholder="Optional: named from your first message"
           className="h-9 min-w-0 flex-1 rounded-md border border-border-primary bg-bg-primary px-2.5 text-[13.5px] text-text-primary placeholder:text-text-muted focus:border-interactive focus:outline-none focus:ring-2 focus:ring-interactive" />
+      </div>
       </div>
       <div className={cn('rounded-lg border border-border-primary bg-bg-primary transition-colors focus-within:border-interactive focus-within:ring-2 focus-within:ring-interactive', dragging && 'border-interactive')}>
         <label htmlFor={messageId} className="sr-only">Message</label>
@@ -552,7 +554,7 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
   );
 
   // The first change to the launch starts from what the fields showed: the chosen agent's defaults.
-  const editLaunch = (patch: Partial<Pick<SessionSettings, 'launchCommand' | 'customResume'>>) => {
+  const editLaunch = (patch: Partial<Pick<SessionSettings, 'launchCommand'>>) => {
     const base = launchEdited.current ? {} : shownLaunch;
     launchEdited.current = true;
     setSettings(current => ({ ...current, ...base, ...patch }));
@@ -586,9 +588,8 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
       <div className="space-y-3">
         <div className="text-sm font-medium text-text-primary">Launch command and behavior</div>
         <p className="text-xs text-text-secondary">For a Session that starts an agent on its own; a profile brings its own launch.</p>
+        <p className="text-xs text-text-secondary" data-testid="create-new-resume-note">Pane resumes chat Sessions by itself. A custom command that needs a resume template takes it from Settings › AI Agents › Session defaults.</p>
         <SessionLaunchFields
-          resume={shownLaunch.customResume}
-          onResumeChange={value => editLaunch({ customResume: value })}
           command={shownLaunch.launchCommand}
           profile={settings.profile}
           customCommands={config?.customCommands}

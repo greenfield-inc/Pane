@@ -17,6 +17,26 @@ export const PANE_CHAT_SESSION_ID = '__pane_chat_session__';
  * launches drop any saved first prompt, except an unsent one that begins with this.
  */
 export const PANE_ONE_TIME_PROMPT_OPENING = 'Pane sent this once';
+/**
+ * How the opening prompt that carries the person's first message from New Session begins. The
+ * marker only keeps a relaunch from sending it twice: the agent gets the person's words alone
+ * (promptForAgent), so their first bubble shows what they typed.
+ */
+export const NEW_SESSION_FIRST_MESSAGE_OPENING = `${PANE_ONE_TIME_PROMPT_OPENING}, with the person's first message from New Session:\n\n`;
+
+/** The opening prompt for a new Session's first message, or undefined when nothing was typed. */
+export function newSessionFirstMessagePrompt(message: string): string | undefined {
+  const text = message.trim();
+  return text ? `${NEW_SESSION_FIRST_MESSAGE_OPENING}${text}` : undefined;
+}
+
+/**
+ * What an agent is sent for a saved first prompt: the person's own words for a New Session
+ * first message, any other prompt unchanged.
+ */
+export function promptForAgent(initialInput: string): string {
+  return initialInput.startsWith(NEW_SESSION_FIRST_MESSAGE_OPENING) ? initialInput.slice(NEW_SESSION_FIRST_MESSAGE_OPENING.length) : initialInput;
+}
 /** How the Onboarding Session's one-time first prompt begins. */
 export const PANE_CHAT_MIGRATE_OFFER_OPENING = `${PANE_ONE_TIME_PROMPT_OPENING}, the first time the Onboarding Session started with this Pane data folder:`;
 /** How the first prompt begins for a Session started by a Yes on the first-run screen reopened from Home. */

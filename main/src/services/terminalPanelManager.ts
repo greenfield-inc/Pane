@@ -4,6 +4,8 @@ import { escapeForBash, windowsPathToWSLMount } from '../utils/wslUtils';
 import { validateCustomCommandResume, customResumeAgentType, effectiveCustomResume, reportedSessionIdLinePattern, AGENT_FARM_HOST_ENV } from '../../../shared/types/customCommandResume';
 import { prepareSessionWorkspace, sessionGitCeiling } from './sessionWorkspace';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
+import { terminalSnapshot, withSnapshotEnv } from './agentFarm/sessionSnapshot';
+import { profilesOn } from './agentFarm/profilesFeature';
 import { getAppDirectory, PANE_INSTANCE_ENV, paneInstanceTag } from '../utils/appDirectory';
 import { updateHoldIsLive } from './updateRestoration';
 import { noteContextPath } from './noteFiles';
@@ -155,7 +157,7 @@ import {
   promptFileShellWord,
   stripTrailingNewlines,
 } from './agents/promptDelivery';
-import { getPaneChatPanelId, ONBOARDING_HANDOFF_PREFERENCE, PANE_ONE_TIME_PROMPT_OPENING } from '../../../shared/types/paneChat';
+import { getPaneChatPanelId, ONBOARDING_HANDOFF_PREFERENCE, PANE_ONE_TIME_PROMPT_OPENING, promptForAgent } from '../../../shared/types/paneChat';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -498,7 +500,7 @@ export class TerminalPanelManager extends EventEmitter {
   private initialPromptWord(customState: TerminalPanelState, shellType: string | undefined): string | undefined {
     const fileWord = customState.initialInputFile ? promptFileShellWord(customState.initialInputFile) : undefined;
     if (fileWord) return fileWord;
-    return isPosixShell(shellType) ? quoteShellWord(customState.initialInput ?? '', shellType) : undefined;
+    return isPosixShell(shellType) ? quoteShellWord(promptForAgent(customState.initialInput ?? ''), shellType) : undefined;
   }
 
   private hasUnsentArgumentPrompt(customState: TerminalPanelState): boolean {
@@ -862,7 +864,7 @@ export class TerminalPanelManager extends EventEmitter {
     if (!/--resume\b|--continue\b/.test(initialCommand)) {
       const promptArgument =
         customState.initialInputMode === 'argument' && customState.initialInput?.trim() && !customState.initialInputSentAt
-          ? customState.initialInput
+          ? promptForAgent(customState.initialInput)
           : undefined;
       if (promptArgument) {
         nextState.initialInputSentAt = new Date().toISOString();
@@ -894,7 +896,7 @@ export class TerminalPanelManager extends EventEmitter {
       return null;
     }
 
-    const input = customState.initialInput;
+    const input = promptForAgent(customState.initialInput);
     const submitStrategy = customState.initialInputSubmitStrategy ?? 'enter';
     customState.initialInputSentAt = new Date().toISOString();
     customState.initialInputError = undefined;
@@ -2087,9 +2089,11 @@ export class TerminalPanelManager extends EventEmitter {
       ...sessionDirectoryEnv,
       ...wslEnvVars,
     } satisfies Record<string, string>;
+    // T-110 (D-4): the Session's Agent Farm snapshot from when the tab opened; WSL and SSH shells can't read this machine's path.
+    const snapshotEnv = withSnapshotEnv(baseSpawnEnv, terminalSnapshot(panelCustomState, isWSL), profilesOn());
     const roleEnv: Record<string, string> = panelCustomState.orchestrationSessionId
-      ? { ...baseSpawnEnv, PANE_ORCHESTRATION_SESSION_ID: panelCustomState.orchestrationSessionId, GIT_CEILING_DIRECTORIES: sessionRuntimePath(sessionGitCeiling(), isWSL ? { runtime: 'wsl', wslDistribution: wslContext?.distribution } : undefined) }
-      : baseSpawnEnv;
+      ? { ...snapshotEnv, PANE_ORCHESTRATION_SESSION_ID: panelCustomState.orchestrationSessionId, GIT_CEILING_DIRECTORIES: sessionRuntimePath(sessionGitCeiling(), isWSL ? { runtime: 'wsl', wslDistribution: wslContext?.distribution } : undefined) }
+      : snapshotEnv;
     // Pane's own runpane goes first on PATH (see runpaneShim.ts). WSL shells
     // get it from the rcfile getWSLShellSpawn passes, as a Linux path.
     const launch = isWSL ? { args: shellArgs, env: roleEnv } : withRunpaneOnPath({ name: shellType, args: shellArgs }, roleEnv);

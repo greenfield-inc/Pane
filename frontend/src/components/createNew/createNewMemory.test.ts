@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PANE_ONE_TIME_PROMPT_OPENING } from '../../../../shared/types/paneChat';
-import { firstMessagePrompt, formatSize, isAttachableImage, readImageAttachment, rememberMode, rememberTo, rememberedMode, rememberedTo } from './createNewMemory';
+import { PANE_ONE_TIME_PROMPT_OPENING, newSessionFirstMessagePrompt, promptForAgent } from '../../../../shared/types/paneChat';
+import { formatSize, isAttachableImage, readImageAttachment, rememberMode, rememberTo, rememberedMode, rememberedTo } from './createNewMemory';
 
 beforeEach(() => {
   const storage = new Map<string, string>();
@@ -29,8 +29,16 @@ describe('Create New memory (T-63)', () => {
 
 describe('the first message', () => {
   it('rides as a one-time opening prompt, which a relaunch never sends again', () => {
-    expect(firstMessagePrompt('  Fix the build.  ')).toBe(`${PANE_ONE_TIME_PROMPT_OPENING}, with the person's first message from New Session:\n\nFix the build.`);
-    expect(firstMessagePrompt('   ')).toBeUndefined();
+    expect(newSessionFirstMessagePrompt('  Fix the build.  ')).toBe(`${PANE_ONE_TIME_PROMPT_OPENING}, with the person's first message from New Session:\n\nFix the build.`);
+    expect(newSessionFirstMessagePrompt('   ')).toBeUndefined();
+  });
+
+  it('reaches the agent, and the first chat bubble, as only what the person typed (T-118)', () => {
+    const opening = newSessionFirstMessagePrompt('Can you tell me how you\'re doing?\nBriefly.');
+    expect(promptForAgent(opening ?? '')).toBe('Can you tell me how you\'re doing?\nBriefly.');
+    // Pane's other one-time prompts are written for the agent and reach it whole.
+    const todoStart = `${PANE_ONE_TIME_PROMPT_OPENING}, to start a to-do. Plan T-12.`;
+    expect(promptForAgent(todoStart)).toBe(todoStart);
   });
 
   it('takes the images a chat takes, read as base64', async () => {

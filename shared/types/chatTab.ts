@@ -27,8 +27,10 @@ export type ChatTabLaunch =
    * command, so the agent starts on its own again once Profiles is off.
    * `parent`: the Agent Farm parent token (PLUGIN/NAME[:VARIANT]@LAUNCH-ID) of the agent that started
    * this one from its launch links, passed as `--parent` at every start (T-83 P3; Profiles on only).
+   * `snapshot`: the Agent Farm snapshot folder it resolves from, passed as `--snapshot` at every start, so
+   * a restart runs the files it started with (T-110; Profiles on only). A Session's lead gets its Session's.
    */
-  | { kind: 'profile'; profile: string; args?: Record<string, string>; parent?: string; fullAccess?: true; fromSession?: true };
+  | { kind: 'profile'; profile: string; args?: Record<string, string>; parent?: string; snapshot?: string; fullAccess?: true; fromSession?: true };
 
 /** Last known runtime state. `stopped` always carries a `problem` or an explicit stop. */
 export type ChatTabStatus = 'starting' | 'idle' | 'working' | 'blocked' | 'stopped';
@@ -41,7 +43,7 @@ export interface ChatTabProblem {
   message: string;
   next: string;
   /** `sign-in` opens a terminal tab running the agent's own login; `install` opens its install page. */
-  action?: 'sign-in' | 'install' | 'restart';
+  action?: 'sign-in' | 'install' | 'restart' | 'reload-profile';
   url?: string;
 }
 
@@ -69,6 +71,8 @@ export interface ChatPanelState {
   /** Orchestration identity, as on terminal agent tabs. */
   orchestrationSessionId?: string;
   sessionFolder?: string;
+  /** The Session's Agent Farm snapshot when the tab opened, exported as AGENT_FARM_SNAPSHOT (T-110, as on terminal tabs). */
+  agentFarmSnapshot?: string;
   /** Set on Autopilot's own chat tab (its run id): the control plane refuses its answers (D-66). */
   autopilotRunId?: string;
   agentReport?: TerminalAgentReport;

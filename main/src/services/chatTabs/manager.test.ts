@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import { applyChatTabEvent, CHAT_FULL_ACCESS_CONTROL, type ChatPanelState, type ChatTabEvent, type ChatTabView } from '../../../../shared/types/chatTab';
 import { PaneError } from '../../../../shared/paneError';
+import { newSessionFirstMessagePrompt } from '../../../../shared/types/paneChat';
 import type { PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
 import { ChatTabManager, type ChatTabLauncher, type ChatTabManagerOptions, type ChatTabStore } from './manager';
 import { ChatTabNotifyBridge } from './notifyBridge';
@@ -403,6 +404,24 @@ describe('chat tab manager', () => {
     expect(manager.view('p1').problem).toMatchObject({ ...problem, message, next: 'The next step.' });
   });
 
+  // T-110 (D-3): a Session's lead offers Reload profile when Agent Farm refuses its snapshot; another tab can't reload.
+  it('offers Reload profile on a Session\'s own tab when its snapshot is refused, and Restart elsewhere', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'pane-chat-manager-'));
+    cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
+    const refused = new PaneError('CHAT_PROFILE_SNAPSHOT_UNREADABLE', 'Agent Farm can\'t start greenfield/orchestrator from its snapshot: Snapshot /s/.agent-farm/snapshots/d1 is missing.', 'Press Reload profile to take a new snapshot.');
+    const run = async (state: Partial<ChatPanelState>) => {
+      const store = new MemoryStore();
+      const manager = new ChatTabManager({ store, send: () => undefined, spoolDirectory: directory, launcher: { resolve: async () => { throw refused; } } });
+      store.add('p1', { ...newTab(directory), ...state });
+      await expect(manager.ensure('p1')).rejects.toBeDefined();
+      return manager.view('p1').problem;
+    };
+    expect(await run({ orchestrationSessionId: 's1' })).toMatchObject({ code: 'failed', action: 'reload-profile', message: refused.message, next: expect.stringContaining('Press Reload profile') });
+    const worker = await run({});
+    expect(worker).toMatchObject({ code: 'failed', message: refused.message, next: expect.stringContaining('from its lead') });
+    expect(worker?.action).toBeUndefined();
+  });
+
   it('saves no environment or secret in the tab\'s state', async () => {
     const { manager, store, directory } = harness();
     store.add('p1', { ...newTab(directory), initialInput: 'env PANE_TEST_TOKEN' });
@@ -436,6 +455,17 @@ describe('chat tab manager', () => {
     expect(store.state('p1')?.initialInputSentAt).toBeDefined();
     // Delivered from the saved copy: the agent got the whole message, not the queue's preview.
     await expect.poll(() => manager.view('p1').transcript?.messages.find(message => message.role === 'user')?.parts[0]).toEqual({ type: 'text', text: opening });
+    await manager.cancel('p1').catch(() => undefined);
+  });
+
+  it('sends a New Session first message as only what the person typed, so their bubble shows just that (T-118)', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', { ...newTab(directory), initialInput: newSessionFirstMessagePrompt('How are you doing?') });
+    await manager.ensure('p1');
+    await expect.poll(() => manager.view('p1').transcript?.messages.find(message => message.role === 'user')?.parts[0]).toEqual({ type: 'text', text: 'How are you doing?' });
+    // The saved prompt keeps Pane's marker, so a relaunch still never sends it twice.
+    expect(store.state('p1')?.initialInput).toBe(newSessionFirstMessagePrompt('How are you doing?'));
+    expect(store.state('p1')?.initialInputSentAt).toBeDefined();
     await manager.cancel('p1').catch(() => undefined);
   });
 

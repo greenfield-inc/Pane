@@ -23,6 +23,7 @@ import type { DatabaseService } from '../database/database';
 import * as processTree from '../utils/processTree';
 import { ArchiveProcessTracker, type ArchiveProcessIdentity, type ArchiveProcessObservation } from './archiveProcessTracker';
 import { spawnDetachedWorkerPty, type DetachedWorkerPty } from '../test/detachedWorkerPty';
+import { newSessionFirstMessagePrompt } from '../../../shared/types/paneChat';
 
 vi.spyOn(panelManager, 'emitPanelEvent');
 vi.spyOn(panelManager, 'getPanel');
@@ -1253,6 +1254,19 @@ describe('TerminalPanelManager hidden output delivery', () => {
         initialInputError: undefined,
       },
     });
+  });
+
+  it('passes a New Session first message as only what the person typed (T-118)', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    const result = manager.resolveCliLaunchCommand('panel-1', 'codex --yolo', {
+      agentType: 'codex',
+      initialInputMode: 'argument',
+      initialInput: newSessionFirstMessagePrompt('How are you doing?'),
+    });
+
+    // The shell's own quoting: single quotes on POSIX, double on Windows.
+    expect(result.commandToRun).toMatch(/^codex --yolo (['"])How are you doing\?\1$/);
   });
 
   it('opens a fresh Pi tab on a Pane-chosen --session-id and records it', () => {
