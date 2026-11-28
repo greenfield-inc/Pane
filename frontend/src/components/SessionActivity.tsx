@@ -47,7 +47,7 @@ export function SessionActivityDot({ session }: SessionActivityProps) {
  * The desktop Session row's working spinner (T-63): shown only while the host says the Session works, in
  * the row's trailing slot, where the machine mark sits in All machines. Idle shows nothing.
  */
-export function SessionWorkingSpinner({ session }: { session: OrchestrationSessionRecord }) {
+export function SessionWorkingSpinner({ session }: { session: OrchestrationSessionSummary }) {
   const { state } = useSessionActivity(session.id);
   return state === 'working' ? <SessionActivityIcon state={state} neutral /> : null;
 }
