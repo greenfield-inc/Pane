@@ -142,8 +142,9 @@ const variantSchema = boundary.object({ agent: boundary.string, harness: boundar
 const listedProfileSchema = boundary.object({
   ref: boundary.nonEmptyString,
   name: boundary.nonEmptyString,
-  plugin: boundary.nonEmptyString,
-  version: boundary.string,
+  // A local profile (the config root's own `profiles/`) has no plugin or version.
+  plugin: boundary.nullable(boundary.nonEmptyString),
+  version: boundary.nullable(boundary.string),
   title: optionalText,
   description: optionalText,
   photo: optionalText,
@@ -157,13 +158,17 @@ const listedProfileSchema = boundary.object({
   error: optionalText,
 });
 
-/** One entry of `agent-farm profiles list --json`; one that failed to resolve has `error` and its identity only. */
-export type AgentFarmListedProfile = ReturnType<typeof listedProfileSchema.decode>;
+/**
+ * One installed entry of `agent-farm profiles list --json`; one that failed to resolve has `error`
+ * and its identity only.
+ */
+export type AgentFarmListedProfile = Omit<ReturnType<typeof listedProfileSchema.decode>, 'plugin' | 'version'> & { plugin: string; version: string };
 
 /**
- * `agent-farm profiles list --json` (Agent Farm 0.3, T-83): every profile, with its title,
- * description, SVG photo, variants and the tree of agents it links to. Throws a PaneError when the
- * output is not that listing (an older Agent Farm, or a newer schema).
+ * `agent-farm profiles list --json` (Agent Farm 0.3, T-83): every installed profile, with its title,
+ * description, SVG photo, variants and the tree of agents it links to. Local profiles (no plugin)
+ * are left out: Pane's Profiles, New Session and Session Move work with installed plugins only.
+ * Throws a PaneError when the output is not that listing (an older Agent Farm, or a newer schema).
  */
 export function parseProfileListJson(stdout: string): AgentFarmListedProfile[] {
   let data: JsonValue;
@@ -174,8 +179,14 @@ export function parseProfileListJson(stdout: string): AgentFarmListedProfile[] {
     throw new PaneError('AGENT_FARM_LIST_UNREADABLE', `Agent Farm's profiles list --json printed schema ${schema ?? 'none'}, and this Pane reads schema ${PROFILE_LIST_SCHEMA}.`, 'Update Pane, then try again.');
   }
   // A profile with no title of its own is listed under its name (`sources.title: default`); Pane makes a better one from the ref.
-  try { return decodeBoundary(data, boundary.object({ profiles: boundary.array(listedProfileSchema) })).profiles.map(entry => (entry.sources?.title === 'default' ? { ...entry, title: undefined } : entry)); }
+  let profiles: ReturnType<typeof listedProfileSchema.decode>[];
+  try { profiles = decodeBoundary(data, boundary.object({ profiles: boundary.array(listedProfileSchema) })).profiles; }
   catch (error) { throw new PaneError('AGENT_FARM_LIST_UNREADABLE', `Agent Farm's profiles list --json wasn't readable: ${reasonOf(error)}.`, 'Restart Pane, which reinstalls its bundled Agent Farm, then try again.'); }
+  return profiles.flatMap((entry): AgentFarmListedProfile[] => {
+    if (entry.plugin === null || entry.version === null) return [];
+    const installed = { ...entry, plugin: entry.plugin, version: entry.version };
+    return [installed.sources?.title === 'default' ? { ...installed, title: undefined } : installed];
+  });
 }
 
 /** The default variant's agent, harness and model of a listed profile (a single-agent profile's own). */
