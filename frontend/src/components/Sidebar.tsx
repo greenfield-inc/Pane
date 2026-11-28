@@ -131,7 +131,6 @@ interface SidebarProps {
   /** Opens Remote Access with this Tailscale machine's password field. */
   onMachinePasswordRequest: (machineName: string) => void;
   width: number;
-  onResize: (e: React.MouseEvent) => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   /** Title-bar slot the toggle and menu render into; null keeps them in the sidebar header. */
@@ -160,7 +159,7 @@ const HelpCircleIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRemoteSettingsClick, onMachinePasswordRequest, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onShortcutsClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
+export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRemoteSettingsClick, onMachinePasswordRequest, width, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onShortcutsClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
   const useCompactFooterActions = width < 260;
   // Maximize spreads the sidebar over the main area; minimize collapses it to its rail (P4).
   const shellRef = useRef<HTMLDivElement>(null);
@@ -994,16 +993,6 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
         className="pane-sidebar-shell bg-surface-secondary text-text-primary h-full flex flex-col relative flex-shrink-0"
         style={{ width: maximized ? '100%' : `${width}px` }}
       >
-        {/* Resize handle */}
-        <div
-          className="absolute top-0 right-0 w-1 h-full cursor-col-resize group z-10"
-          onMouseDown={onResize}
-        >
-          {/* Visual indicator: the theme's border-hover tone, not the accent */}
-          <div className="absolute inset-0 group-hover:bg-border-hover group-active:bg-border-hover" />
-          {/* Larger grab area */}
-          <div className="absolute -left-2 -right-2 top-0 bottom-0" />
-        </div>
         {maximized && (
           <div className="absolute right-2 top-1 z-20">
             <RestoreRegionButton onRestore={() => setMaximizedRegion(null)} />
