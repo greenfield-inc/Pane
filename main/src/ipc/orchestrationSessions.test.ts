@@ -2,6 +2,7 @@ import type { IpcMain } from 'electron';
 import { describe, expect, it, vi, type Mock } from 'vitest';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
+import { SessionSnapshotService } from '../services/sessionSnapshots';
 import { PaneError } from '../../../shared/paneError';
 import type { AppServices } from './types';
 
@@ -121,5 +122,74 @@ describe('the Session list channels (T-127)', () => {
     await registry.invokeRemote('orchestration-sessions:list', ['summary']);
 
     expect(list.mock.calls).toEqual([[{ summary: false }], [{ summary: false }]]);
+  });
+});
+
+describe('orchestration-sessions:snapshots', () => {
+  /** A host with one chat Session; `snapshots` is a spy on the real service's read. */
+  function host() {
+    const service = new SessionSnapshotService({
+      sessions: async () => [],
+      tabs: () => [],
+      panel: () => undefined,
+      layout: () => null,
+      chat: () => undefined,
+      announce: () => undefined,
+    });
+    const snapshots = vi.spyOn(service, 'snapshots');
+    const registry = new PaneCommandRegistry();
+    registerOrchestrationSessionHandlers(
+      // SAFETY: The handlers only call ipcMain.handle, and this test invokes the registry directly.
+      { handle: () => undefined } as IpcMain,
+      // SAFETY: The snapshots channel reads only sessionSnapshots.
+      { sessionSnapshots: service } as AppServices,
+      registry,
+    );
+    return { registry, snapshots };
+  }
+
+  it('answers the machine\'s owner with the snapshots newer than since', async () => {
+    const { registry, snapshots } = host();
+    snapshots.mockResolvedValue({ revision: 7, epoch: 'run-1', sessionIds: ['a'], snapshots: [] });
+
+    const result = await registry.invokeRemote('orchestration-sessions:snapshots', [{ since: 5, epoch: 'run-1', held: { a: { generation: 2, count: 40, revision: 41 } } }]);
+
+    expect(snapshots).toHaveBeenCalledWith({ since: 5, epoch: 'run-1', held: { a: { generation: 2, count: 40, revision: 41 } } });
+    expect(result).toEqual({ success: true, data: { revision: 7, epoch: 'run-1', sessionIds: ['a'], snapshots: [] } });
+  });
+
+  it('reads everything when asked with no arguments', async () => {
+    const { registry, snapshots } = host();
+
+    await registry.invokeRemote('orchestration-sessions:snapshots', []);
+
+    expect(snapshots).toHaveBeenCalledWith({});
+  });
+
+  it('refuses a teammate on a shared tailnet and reads nothing', async () => {
+    const { registry, snapshots } = host();
+
+    const result = await registry.invokeRemote('orchestration-sessions:snapshots', [{}], { teammate: 'sam@example.com' });
+
+    expect(snapshots).not.toHaveBeenCalled();
+    expect(result).toEqual({ success: false, error: expect.stringContaining('Only this computer\'s owner') });
+  });
+
+  it('refuses a device paired Read only and reads nothing', async () => {
+    const { registry, snapshots } = host();
+
+    const result = await registry.invokeRemote('orchestration-sessions:snapshots', [{}], { readOnly: true });
+
+    expect(snapshots).not.toHaveBeenCalled();
+    expect(result).toEqual({ success: false, error: expect.stringContaining('Only this computer\'s owner') });
+  });
+
+  it('names a malformed request and reads nothing', async () => {
+    const { registry, snapshots } = host();
+
+    const result = await registry.invokeRemote('orchestration-sessions:snapshots', [{ since: 'yesterday' }]);
+
+    expect(snapshots).not.toHaveBeenCalled();
+    expect(result).toEqual({ success: false, error: expect.stringContaining('since') });
   });
 });

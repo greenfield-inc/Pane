@@ -1,7 +1,7 @@
 import { customCommandResumeSchema } from '../../../shared/types/customCommandResume';
 import { listWSLDistributions } from '../utils/wslUtils';
 import type { IpcMain } from 'electron';
-import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
+import { readOnlyPaneCaller, teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
 import type {
   OrchestrationAssociationInput,
@@ -11,6 +11,7 @@ import type {
 } from '../../../shared/types/orchestrationSession';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
+import { SESSION_SNAPSHOTS_CHANNEL, type SessionSnapshotsRequest } from '../../../shared/types/sessionSnapshot';
 import { previewOrchestrationSessionArchive, updateOrchestrationSession } from './runpane';
 import { clientShowsChatTab } from './panels';
 import {
@@ -218,6 +219,44 @@ export function registerOrchestrationSessionHandlers(
     return invokeSafely(() => requireManager().overview(decodeSelector(value)));
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:overview');
+
+  // Host snapshots (T-116 PR 4) for the owner's other machines: reads only, no tab, no agent start.
+  commandRegistry.register(SESSION_SNAPSHOTS_CHANNEL, async (request?: PaneCommandValue) => {
+    return invokeSafely(async () => {
+      refuseAllButOwner();
+      const snapshots = services.sessionSnapshots;
+      if (!snapshots) throw new Error('Session snapshots are not initialized');
+      return snapshots.snapshots(decodeSnapshotsRequest(request));
+    });
+  });
+  commandRegistry.bindChannel(ipcMain, SESSION_SNAPSHOTS_CHANNEL);
+}
+
+const snapshotsRequestSchema = boundary.object({
+  since: boundary.optional(boundary.number),
+  epoch: boundary.optional(boundary.string),
+  held: boundary.optional(boundary.record(boundary.object({ generation: boundary.number, count: boundary.number, revision: boundary.number }))),
+});
+
+function decodeSnapshotsRequest(value: PaneCommandValue | undefined): SessionSnapshotsRequest {
+  if (value === undefined) return {};
+  const decoded = decodeBoundary(value, snapshotsRequestSchema);
+  const request: SessionSnapshotsRequest = {};
+  if (decoded.since !== undefined) request.since = decoded.since;
+  if (decoded.epoch !== undefined) request.epoch = decoded.epoch;
+  if (decoded.held !== undefined) request.held = decoded.held;
+  return request;
+}
+
+/** Snapshots copy the newest messages of every chat Session ahead of opening, so only the owner's own machines read them. */
+function refuseAllButOwner(): void {
+  const teammate = teammatePaneCaller();
+  if (!teammate && !readOnlyPaneCaller()) return;
+  throw new PaneError(
+    'SESSION_SNAPSHOTS_OWNER_ONLY',
+    `Only this computer's owner can read its Session snapshots, so ${teammate ?? 'a device paired Read only'} cannot. Nothing was read.`,
+    'Open the Session itself instead; the owner can give this device full access in Settings › Remote Access.',
+  );
 }
 
 function selectorSchemaFields() {

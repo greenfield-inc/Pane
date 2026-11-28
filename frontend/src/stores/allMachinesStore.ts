@@ -73,6 +73,8 @@ const READS_FOR_EVENT = {
   // Machine health is read by the Resources page itself; the sidebar lists need nothing.
   'resource-monitor:machine-health-changed': [],
   'resource-monitor:machine-inventory-changed': [],
+  // A host snapshot changed; the mirror in the main process reads it, and the sidebar lists need nothing.
+  'session-snapshot:changed': [],
 } satisfies Record<MachineEventChannel, ReadKey[]>;
 
 /** A machine as the pill menu knows it, plus whether the app is on it. */

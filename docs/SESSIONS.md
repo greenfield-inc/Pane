@@ -1016,8 +1016,8 @@ The daemon and Electron IPC channels are:
 `orchestration-sessions:list`, `orchestration-sessions:select`,
 `orchestration-sessions:create`, `orchestration-sessions:get`,
 `orchestration-sessions:update`, `orchestration-sessions:archive-preview`, `orchestration-sessions:archive`, `orchestration-sessions:reorder`, `orchestration-sessions:set-agent`,
-`orchestration-sessions:associate`, `orchestration-sessions:detach`, and
-`orchestration-sessions:overview`.
+`orchestration-sessions:associate`, `orchestration-sessions:detach`, `orchestration-sessions:overview`, and
+`orchestration-sessions:snapshots`.
 
 Selectors accept a stable Session ID or an exact Session name. Phone apps
 released before chat tabs crash on a tab kind they don't know, so clients that
@@ -1035,7 +1035,51 @@ Sessions the list fell from 4.5 MB to 262 KB. The sidebar, the All machines feed
 a host switch and the phone ask for it; `get` and `overview` still carry the
 full record. A host older than this ignores the argument and sends full records.
 Desktop requests to another machine also ask for gzip, and the host compresses
-answers of 1 KB or more. The existing
+answers of 1 KB or more.
+
+`orchestration-sessions:snapshots` serves host snapshots, which let the owner's
+other machines show a chat Session ahead of opening it. There is one snapshot
+per unarchived chat Session. It holds:
+
+- the summary record, without its launch settings (`launchCommand`,
+  `customResume`, `openingPrompt`, `profile`);
+- its chat and terminal tabs, as names and kinds only, with the few state
+  fields a Read only device sees. No terminal screen, launch input, selection
+  or file content leaves the machine, and other kinds of tab are left out;
+- the stored layout;
+- the chat view with its newest 30 messages.
+
+Any string over 4 KB outside a message's own text is replaced in place by
+`{ omitted: { field, length } }`. That covers an image's `data`, a `data:` URI,
+a resource's `blob` or `text`, and a tool's input or output.
+
+Each snapshot has a `revision` that rises on any change to the record (except
+order and selection), the tabs, the layout or the chat.
+
+The request is `{ since?, epoch?, held? }`. The answer lists every snapshotted
+Session id, the snapshots newer than `since`, and the `revision` and `epoch` to
+send next time. `held` maps a Session id to the `{ generation, count, revision }`
+of the messages the caller already has. Only messages added or changed since
+that transcript revision are sent, including an earlier tool call that
+finished later. The host sends the whole window when it can't tell what
+changed.
+
+`epoch` names the host's run. An answer from another run, such as after a
+restart or with the clock set back, has `since` and `held` ignored, so every
+Session is sent whole.
+
+After a restart, a chat whose agent hasn't run yet has no transcript on the
+host: Pane reads a conversation only by starting its agent, and a snapshot
+never does. Its snapshot then has no `chat.transcript`, `messageCount` 0 and
+`transcriptUnknown: true`, which means "not known yet", not "empty". Once the
+chat is opened there, its snapshot's revision rises and carries its messages.
+
+A change also sends `session-snapshot:changed` `{ sessionId, revision }` on the
+event stream, at most once a second per Session. Reading creates no tab and
+starts no agent. Only the owner's own devices get an answer; teammates and Read
+only devices are refused with `SESSION_SNAPSHOTS_OWNER_ONLY`.
+
+The existing
 `pane-chat:*` channels remain compatibility endpoints for the imported legacy
 conversation.
 

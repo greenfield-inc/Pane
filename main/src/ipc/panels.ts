@@ -14,7 +14,8 @@ import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { databaseService } from '../services/database';
-import { BrowserPanelState, CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel, decodeSessionPanelLayout, pausedMarkOf } from '../../../shared/types/panels';
+import { parseStoredPanelLayout } from '../services/sessionSnapshotSources';
+import { BrowserPanelState, CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel, pausedMarkOf } from '../../../shared/types/panels';
 import type { AppServices } from './types';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
@@ -700,17 +701,7 @@ export function registerPanelHandlers(
   // Layout get/set for split tab groups
   commandRegistry.register('panels:get-layout', async (sessionId: string) => {
     try {
-      const raw = databaseService.getSessionPanelLayout(sessionId);
-      if (!raw) return { success: true, data: null };
-      try {
-        // The same decoder reads each desktop's own layout memory.
-        const parsed = decodeSessionPanelLayout(JSON.parse(raw));
-        if (parsed) return { success: true, data: parsed };
-      } catch {
-        // Malformed JSON should never brick a session
-      }
-      console.warn('[IPC] Corrupt panel_layout JSON for session', sessionId);
-      return { success: true, data: null };
+      return { success: true, data: parseStoredPanelLayout(sessionId, databaseService.getSessionPanelLayout(sessionId)) };
     } catch (error) {
       console.error('[IPC] Failed to get panel layout:', error);
       return { success: false, error: error instanceof Error ? error.message : String(error) };

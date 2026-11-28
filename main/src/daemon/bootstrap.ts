@@ -36,6 +36,8 @@ import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
 import type { AppConfig } from '../types/config';
 import { PaneChatManager } from '../services/paneChatManager';
 import { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
+import { SessionSnapshotService } from '../services/sessionSnapshots';
+import { hostSnapshotSources } from '../services/sessionSnapshotSources';
 import { TaskQueue } from '../services/taskQueue';
 import { registerIpcHandlers } from '../ipc';
 import { isLockOwnerLive } from '../ipc/runpane';
@@ -386,6 +388,14 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     logger.error('[Sessions] Failed to initialize durable Session metadata', error instanceof Error ? error : new Error(String(error)));
   });
   getMobilePushSender(configManager, { resolveSubject: paneId => orchestrationSessionManager.alertSubject(paneId) });
+  // Watches the events below (it is one of their sinks) and answers `orchestration-sessions:snapshots`.
+  const sessionSnapshots = new SessionSnapshotService(hostSnapshotSources({
+    sessions: orchestrationSessionManager,
+    panels: panelManager,
+    chats: getChatTabManager,
+    storedLayout: paneId => databaseService.getSessionPanelLayout(paneId),
+    events: getPaneEventSink,
+  }));
   const taskQueue = new TaskQueue({
     sessionManager,
     worktreeManager,
@@ -574,6 +584,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     skillCacheManager,
     paneChatManager,
     orchestrationSessionManager,
+    sessionSnapshots,
     taskQueue,
     getMainWindow: options.getMainWindow,
     logger,
@@ -826,7 +837,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     void remoteHostTailnetMonitor.start();
   }
 
-  const daemonSinks: PaneEventSink[] = [workspaceJournal, namedLockService];
+  const daemonSinks: PaneEventSink[] = [workspaceJournal, namedLockService, sessionSnapshots];
   if (paneDaemonServer) {
     daemonSinks.push(paneDaemonServer.getEventSink());
   }
@@ -1110,6 +1121,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       await archiveCleanupManager.stop();
       // Before terminals stop: their exits during shutdown must not release locks.
       namedLockService.dispose();
+      sessionSnapshots.dispose();
       await getChatTabManager().stopAll();
       setPaneMcpEndpoint(undefined);
       paneMcpEndpoint.detachAll();
