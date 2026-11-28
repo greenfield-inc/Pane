@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chatTabProfileLaunch, chatTabProfileOptions } from '../../../../shared/chatTabProfileLaunch';
+import { chatTabProfileExample, chatTabProfileLaunch, chatTabProfileOptions } from '../../../../shared/chatTabProfileLaunch';
 import type { AgentFarmProfileEntry } from '../../../../shared/types/agentFarmProfiles';
 
 const entry = (ref: string, extra: Partial<AgentFarmProfileEntry> = {}): AgentFarmProfileEntry => ({
@@ -35,6 +35,14 @@ describe('chatTabProfileLaunch', () => {
   it('asks for a profile name', () => {
     expect(chatTabProfileLaunch('   ', '')).toMatchObject({ ok: false, field: 'profile' });
     expect(chatTabProfileLaunch('greenfield implementer', '')).toMatchObject({ ok: false, field: 'profile' });
+  });
+
+  it('keeps the example on main with Profiles off, and greenfield 0.1.0\'s entry profile with it on (review F-2)', () => {
+    expect(chatTabProfileExample(false)).toBe('greenfield/implementer');
+    expect(chatTabProfileLaunch('', '')).toEqual({ ok: false, field: 'profile', error: 'Enter a profile name, such as greenfield/implementer.' });
+    expect(chatTabProfileLaunch('', '', { profilesOn: false })).toEqual({ ok: false, field: 'profile', error: 'Enter a profile name, such as greenfield/implementer.' });
+    expect(chatTabProfileExample(true)).toBe('greenfield/orchestrator');
+    expect(chatTabProfileLaunch('', '', { profilesOn: true })).toEqual({ ok: false, field: 'profile', error: 'Enter a profile name, such as greenfield/orchestrator.' });
   });
 
   it('names the line that is not key=value', () => {

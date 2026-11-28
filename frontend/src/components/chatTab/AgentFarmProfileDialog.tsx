@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../ui/Modal';
 import { Input, Textarea } from '../ui/Input';
 import { Button } from '../ui/Button';
-import { chatTabProfileLaunch, chatTabProfileOptions, type ChatTabProfileLaunch, type ChatTabProfileOption } from '../../../../shared/chatTabProfileLaunch';
+import { chatTabProfileExample, chatTabProfileLaunch, chatTabProfileOptions, type ChatTabProfileLaunch, type ChatTabProfileOption } from '../../../../shared/chatTabProfileLaunch';
 import type { AgentFarmProfileList } from '../../../../shared/types/agentFarmProfiles';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import { isProfilesEnabled, useConfigStore } from '../../stores/configStore';
@@ -61,7 +61,7 @@ export function AgentFarmProfileDialog({ onClose, onCreate }: AgentFarmProfileDi
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (read.state === 'reading') return;
-    const parsed = chatTabProfileLaunch(profile, args);
+    const parsed = chatTabProfileLaunch(profile, args, { profilesOn });
     if (!parsed.ok) { setProblem({ field: parsed.field, error: parsed.error }); return; }
     setBusy(true);
     setProblem(null);
@@ -105,7 +105,7 @@ export function AgentFarmProfileDialog({ onClose, onCreate }: AgentFarmProfileDi
             </div>
           )}
           {read.state === 'typed' && (
-            <Input ref={typedRef} label="Profile" fullWidth value={typed} placeholder="greenfield/orchestrator" autoComplete="off" spellCheck={false}
+            <Input ref={typedRef} label="Profile" fullWidth value={typed} placeholder={chatTabProfileExample(profilesOn)} autoComplete="off" spellCheck={false}
               onChange={event => setTyped(event.target.value)} error={profileError}
               helperText={read.reason ?? 'A name from agent-farm profiles list.'} />
           )}

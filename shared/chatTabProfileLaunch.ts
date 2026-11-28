@@ -24,6 +24,14 @@ export function chatTabProfileOptions(profiles: readonly AgentFarmProfileEntry[]
   });
 }
 
+/**
+ * The profile name the typed field shows as its example. With Profiles off it stays main's
+ * (greenfield/implementer); with it on, greenfield 0.1.0's entry profile.
+ */
+export function chatTabProfileExample(profilesOn: boolean): string {
+  return profilesOn ? 'greenfield/orchestrator' : 'greenfield/implementer';
+}
+
 export type ChatTabProfileLaunch = Extract<ChatTabLaunch, { kind: 'profile' }>;
 
 export type ChatTabProfileLaunchResult =
@@ -35,9 +43,9 @@ export type ChatTabProfileLaunchResult =
  * --agent-farm <profile> --arg key=value` sends: a profile name and one
  * `key=value` per line (blank lines skipped; the value keeps any `=` after the first).
  */
-export function chatTabProfileLaunch(profileText: string, argsText: string): ChatTabProfileLaunchResult {
+export function chatTabProfileLaunch(profileText: string, argsText: string, options: { profilesOn?: boolean } = {}): ChatTabProfileLaunchResult {
   const profile = profileText.trim();
-  if (!profile) return { ok: false, field: 'profile', error: 'Enter a profile name, such as greenfield/orchestrator.' };
+  if (!profile) return { ok: false, field: 'profile', error: `Enter a profile name, such as ${chatTabProfileExample(options.profilesOn === true)}.` };
   if (/\s/.test(profile)) return { ok: false, field: 'profile', error: `"${profile}" is not a profile name: profile names have no spaces.` };
   const args: Record<string, string> = {};
   for (const raw of argsText.split(/\r?\n/)) {
